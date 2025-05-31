@@ -89,7 +89,7 @@ El script está organizado en secciones utilizando etiquetas (`:`):
 
 ## Licencia
 
-(Opcional) Considera añadir un archivo `LICENSE` (por ejemplo, MIT, GPL) si deseas que tu proyecto sea de código abierto y definir cómo otros pueden usar, modificar y distribuir tu script. Si no se especifica, se aplican las leyes de copyright estándar.
+`LICENSE` https://github.com/SOFTMAXTER/AdminImagenOffline?tab=GPL-3.0-1-ov-file
 
 ---
 ### Cómo Contribuir (Opcional)
