@@ -1,6 +1,6 @@
 @echo off
-title Administrador de Imagen offline by SOFTMAXTER
-color 0A
+title Administrador de Imagen offline by SOFTMAXTER V1.1
+Color 0A
 setlocal enabledelayedexpansion
 
 :: Verifica si se ejecuta como administrador
@@ -14,25 +14,96 @@ if %errorLevel% neq 0 (
     exit /b
 )
 
-:menu
+:: Variables Globales
+set "WIM_FILE_PATH="
+set "MOUNT_DIR=C:\TEMP"
+set "IMAGE_MOUNTED=0"
+
+
+
+:: =============================================
+::  SOLUCION v6 (Metodo a prueba de fallos y silencioso)
+:: =============================================
+set "IMAGE_MOUNTED=0"
+set "WIM_FILE_PATH="
+set "TEMP_DISM_OUT=%TEMP%\dism_check_%RANDOM%.tmp"
+
+dism /get-mountedimageinfo > "%TEMP_DISM_OUT%" 2>nul
+findstr /I /L /C:"Mount Dir : %MOUNT_DIR%" "%TEMP_DISM_OUT%" >nul
+if %errorlevel% equ 0 (
+    set "IMAGE_MOUNTED=1"
+    for /f "tokens=1,* delims=:" %%A in ('findstr /I /L /C:"Image File" "%TEMP_DISM_OUT%"') do (
+        set "WIM_FILE_PATH=%%B"
+        call :trim_leading_spaces WIM_FILE_PATH
+    )
+)
+
+if exist "%TEMP_DISM_OUT%" del "%TEMP_DISM_OUT%"
+:: Fin de la rutina de verificación
+:: =============================================
+Ubicación en el Script (Recordatorio)
+Este bloque debe ir justo después de la verificación de administrador y la declaración de variables globales. El inicio de tu script debe quedar exactamente así:
+
+Fragmento de código
+
+@echo off
+title Administrador de Imagen offline by SOFTMAXTER
+setlocal enabledelayedexpansion
+
+:: =============================================
+:: PRIMERO: Verificar permisos de administrador
+:: =============================================
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "& {Start-Process '%~f0' -Verb RunAs}"
+    exit /b
+)
+
+:: Variables Globales
+set "WIM_FILE_PATH="
+set "MOUNT_DIR=C:\TEMP"
+set "IMAGE_MOUNTED=0"
+
+:: =============================================
+::  SOLUCION v6 (Metodo a prueba de fallos y silencioso)
+:: =============================================
+set "IMAGE_MOUNTED=0"
+set "WIM_FILE_PATH="
+set "TEMP_DISM_OUT=%TEMP%\dism_check_%RANDOM%.tmp"
+
+dism /get-mountedimageinfo > "%TEMP_DISM_OUT%" 2>nul
+findstr /I /L /C:"Mount Dir : %MOUNT_DIR%" "%TEMP_DISM_OUT%" >nul
+if %errorlevel% equ 0 (
+    set "IMAGE_MOUNTED=1"
+    for /f "tokens=1,* delims=:" %%A in ('findstr /I /L /C:"Image File" "%TEMP_DISM_OUT%"') do (
+        set "WIM_FILE_PATH=%%B"
+        call :trim_leading_spaces WIM_FILE_PATH
+    )
+)
+
+if exist "%TEMP_DISM_OUT%" del "%TEMP_DISM_OUT%"
+
+:main_menu
 cls
 echo.
 echo =========================================================================
 echo.
-echo  Administrador de Imagen offline by SOFTMAXTER
+echo  Administrador de Imagen offline by SOFTMAXTER V1.1
 echo.
 echo =========================================================================
 echo.
-echo  Este script permite cambiar la edicion de una imagen offline de Windows
-echo  y ejecutar tareas de limpieza para mantenerla en optimas condiciones.
+echo  Ruta del WIM: !WIM_FILE_PATH!
+echo  Estado: %IMAGE_MOUNTED% (0=Desmontado, 1=Montado)
 echo.
 echo =========================================================================
 echo.
-echo  1. Cambiar Edicion de Windows
-echo    (Muestra las ediciones disponibles para la imagen actual y permite cambiarla)
+echo  1. Gestionar Imagen (Montar/Desmontar/Guardar)
 echo.
-echo  2. Herramientas de Limpieza
-echo    (Ejecuta tareas de mantenimiento, verificacion y reparacion de la imagen)
+echo  2. Cambiar Edicion de Windows
+echo     (Muestra las ediciones disponibles y permite el cambio)
+echo.
+echo  3. Herramientas de Limpieza
+echo     (Ejecuta tareas de mantenimiento, verificacion y reparacion)
 echo.
 echo ----------------------------------------------------------------
 echo.
@@ -40,8 +111,9 @@ echo  0. Salir
 echo.
 set /p opcionM="Ingrese el numero de la opcion: "
 
-if "%opcionM%"=="1" goto cambio_edicion
-if "%opcionM%"=="2" goto limpieza
+if "%opcionM%"=="1" goto image_management_menu
+if "%opcionM%"=="2" goto cambio_edicion
+if "%opcionM%"=="3" goto limpieza
 if "%opcionM%"=="0" (
     echo Saliendo...
     exit /b
@@ -49,13 +121,287 @@ if "%opcionM%"=="0" (
 echo Opcion no valida.
 Intente nuevamente.
 pause
-goto menu
+goto main_menu
 
 :: =============================================
-::  Seccion para cambiar la edicion de Windows (Dinámico)
+::  Menu de Gestion de Imagen
+:: =============================================
+:image_management_menu
+cls
+echo.
+echo =========================================================================
+echo.
+echo  Gestion de Imagen
+echo.
+echo =========================================================================
+echo.
+echo  1. Montar/Desmontar Imagen
+echo.
+echo  2. Guardar Cambios
+echo.
+echo  3. Editar Índices
+echo.
+echo ----------------------------------------------------------------
+echo.
+echo  0. Volver al Menu Principal
+echo.
+set /p opcionIM="Ingrese el numero de la opcion: "
+
+if "%opcionIM%"=="1" goto mount_unmount_menu
+if "%opcionIM%"=="2" goto save_changes_menu
+if "%opcionIM%"=="3" goto edit_indexes_menu
+if "%opcionIM%"=="0" goto main_menu
+echo Opcion no valida.
+Intente nuevamente.
+pause
+goto image_management_menu
+
+:: =============================================
+::  Submenu Montar/Desmontar
+:: =============================================
+:mount_unmount_menu
+cls
+echo.
+echo =========================================================================
+echo.
+echo  Montar/Desmontar Imagen
+echo.
+echo =========================================================================
+echo.
+echo  1. Montar Imagen
+echo.
+echo  2. Desmontar Imagen
+echo.
+echo ----------------------------------------------------------------
+echo.
+echo  0. Volver al menu anterior
+echo.
+set /p opcionMU="Ingrese el numero de la opcion: "
+
+if "%opcionMU%"=="1" goto mount_image
+if "%opcionMU%"=="2" goto unmount_image
+if "%opcionMU%"=="0" goto image_management_menu
+echo Opcion no valida.
+Intente nuevamente.
+pause
+goto mount_unmount_menu
+
+:mount_image
+cls
+if "%IMAGE_MOUNTED%"=="1" (
+    echo La imagen ya se encuentra montada.
+    pause
+    goto mount_unmount_menu
+)
+set /p "WIM_FILE_PATH=Ingrese la ruta completa del archivo WIM: "
+if not exist "!WIM_FILE_PATH!" (
+    echo El archivo no existe.
+    pause
+    goto mount_image
+)
+
+dism /get-wiminfo /wimfile:"!WIM_FILE_PATH!"
+set /p "INDEX=Ingrese el numero de indice a montar: "
+
+if not exist "%MOUNT_DIR%" mkdir "%MOUNT_DIR%"
+
+dism /mount-wim /wimfile:"!WIM_FILE_PATH!" /index:!INDEX! /mountdir:"%MOUNT_DIR%"
+if !errorlevel! equ 0 (
+    set "IMAGE_MOUNTED=1"
+    echo Imagen montada exitosamente.
+) else (
+    echo Error al montar la imagen.
+)
+pause
+goto mount_unmount_menu
+
+:unmount_image
+cls
+if "%IMAGE_MOUNTED%"=="0" (
+    echo No hay ninguna imagen montada.
+    pause
+    goto mount_menu
+)
+echo.
+echo Desmontando imagen y descartando cambios...
+dism /unmount-wim /mountdir:"%MOUNT_DIR%" /discard
+set "IMAGE_MOUNTED=0"
+set "WIM_FILE_PATH="
+echo.
+echo Imagen desmontada. Los cambios han sido descartados.
+pause
+goto main_menu
+
+:: =============================================
+::  Submenu Guardar Cambios
+:: =============================================
+:save_changes_menu
+cls
+if "%IMAGE_MOUNTED%"=="0" (
+    echo No hay ninguna imagen montada para guardar.
+    pause
+    goto image_management_menu
+)
+echo.
+echo =========================================================================
+echo.
+echo  Guardar Cambios (Sin desmontar)
+echo.
+echo =========================================================================
+echo.
+echo  1. Guardar cambios en el indice actual
+echo.
+echo  2. Guardar cambios en un nuevo indice (Append)
+echo.
+echo ----------------------------------------------------------------
+echo.
+echo  0. Volver al menu anterior
+echo.
+set /p opcionSC="Ingrese el numero de la opcion: "
+
+if "%opcionSC%"=="1" (
+    dism /commit-image /mountdir:"%MOUNT_DIR%"
+    echo Cambios guardados en el indice actual.
+    pause
+    goto save_changes_menu
+)
+if "%opcionSC%"=="2" (
+    dism /commit-image /mountdir:"%MOUNT_DIR%" /append
+    echo Cambios guardados en un nuevo indice.
+    pause
+    goto save_changes_menu
+)
+if "%opcionSC%"=="0" goto image_management_menu
+echo Opcion no valida.
+Intente nuevamente.
+pause
+goto save_changes_menu
+
+:: =============================================
+::  NUEVO Submenu Editar Índices
+:: =============================================
+:edit_indexes_menu
+cls
+echo.
+echo =========================================================================
+echo.
+echo  Editar Índices del WIM
+echo.
+echo =========================================================================
+echo.
+echo  1. Exportar un Índice
+echo.
+echo  2. Eliminar un Índice
+echo.
+echo ----------------------------------------------------------------
+echo.
+echo  0. Volver al menu anterior
+echo.
+set /p opcionEI="Ingrese el numero de la opcion: "
+
+if "%opcionEI%"=="1" goto export_index
+if "%opcionEI%"=="2" goto delete_index
+if "%opcionEI%"=="0" goto image_management_menu
+echo Opcion no valida.
+Intente nuevamente.
+pause
+goto edit_indexes_menu
+
+:export_index
+cls
+if "!WIM_FILE_PATH!"=="" (
+    set /p "WIM_FILE_PATH=Ingrese la ruta completa del archivo WIM de origen: "
+    if not exist "!WIM_FILE_PATH!" (
+        echo El archivo no existe.
+        set "WIM_FILE_PATH="
+        pause
+        goto edit_indexes_menu
+    )
+)
+echo.
+echo Archivo WIM actual: !WIM_FILE_PATH!
+echo.
+dism /get-wiminfo /wimfile:"!WIM_FILE_PATH!"
+echo.
+set /p "INDEX_TO_EXPORT=Ingrese el numero de indice que desea exportar: "
+
+REM --- INICIO DE LA MODIFICACION ---
+
+REM Obtener las partes del archivo original para crear un nombre por defecto
+for %%F in ("!WIM_FILE_PATH!") do (
+    set "WIM_DIR=%%~dpF"
+    set "WIM_NAME=%%~nF"
+)
+set "DEFAULT_DEST_PATH=!WIM_DIR!!WIM_NAME!_indice_!INDEX_TO_EXPORT!.wim"
+
+echo.
+echo Ruta de destino sugerida:
+echo !DEFAULT_DEST_PATH!
+echo.
+set /p "DEST_WIM_PATH=Ingrese la ruta completa (o presione Enter para usar la sugerida): "
+
+REM Si el usuario no ingresa nada, usar la ruta por defecto
+if "!DEST_WIM_PATH!"=="" set "DEST_WIM_PATH=!DEFAULT_DEST_PATH!"
+
+REM --- FIN DE LA MODIFICACION ---
+
+dism /export-image /sourceimagefile:"!WIM_FILE_PATH!" /sourceindex:!INDEX_TO_EXPORT! /destinationimagefile:"!DEST_WIM_PATH!"
+if !errorlevel! equ 0 (
+    echo.
+    echo Indice !INDEX_TO_EXPORT! exportado exitosamente a "!DEST_WIM_PATH!".
+) else (
+    echo.
+    echo Error al exportar el indice. Verifique la ruta y los permisos.
+)
+pause
+goto edit_indexes_menu
+
+:delete_index
+cls
+if "!WIM_FILE_PATH!"=="" (
+    set /p "WIM_FILE_PATH=Ingrese la ruta completa del archivo WIM: "
+    if not exist "!WIM_FILE_PATH!" (
+        echo El archivo no existe.
+        set "WIM_FILE_PATH="
+        pause
+        goto edit_indexes_menu
+    )
+)
+echo.
+echo Archivo WIM actual: !WIM_FILE_PATH!
+echo.
+dism /get-wiminfo /wimfile:"!WIM_FILE_PATH!"
+echo.
+set /p "INDEX_TO_DELETE=Ingrese el número de índice que desea eliminar: "
+echo.
+set /p "CONFIRM=Está seguro que desea eliminar el índice !INDEX_TO_DELETE! de forma permanente? (S/N): "
+
+if /i "%CONFIRM%"=="S" (
+    dism /delete-image /imagefile:"!WIM_FILE_PATH!" /index:!INDEX_TO_DELETE!
+    if !errorlevel! equ 0 (
+        echo.
+        echo Índice !INDEX_TO_DELETE! eliminado exitosamente.
+    ) else (
+        echo.
+        echo Error al eliminar el índice. Puede que esté montado o que el archivo esté en uso.
+    )
+) else (
+    echo.
+    echo Operación cancelada.
+)
+pause
+goto edit_indexes_menu
+
+:: =============================================
+::  Seccion para cambiar la edicion de Windows
 :: =============================================
 :cambio_edicion
 cls
+if "%IMAGE_MOUNTED%"=="0" (
+    echo Necesita montar una imagen primero desde el menu 'Gestionar Imagen'.
+    pause
+    goto main_menu
+)
 echo.
 echo Obteniendo informacion de la version y edicion de Windows de la imagen...
 set "WIN_PRODUCT_NAME="
@@ -65,7 +411,7 @@ set "CURRENT_EDITION_DETECTED=Desconocida"
 set "REG_LOAD_ERROR="
 
 REM Intentar cargar el hive del registro de la imagen offline para obtener detalles
-reg load HKLM\OfflineImage C:\TEMP\Windows\System32\config\SOFTWARE >nul 2>&1
+reg load HKLM\OfflineImage %MOUNT_DIR%\Windows\System32\config\SOFTWARE >nul 2>&1
 if errorlevel 1 (
     echo ADVERTENCIA: No se pudo cargar el hive del registro de la imagen offline. Se intentara obtener informacion basica.
     set "REG_LOAD_ERROR=true"
@@ -85,24 +431,22 @@ REM Determinar si es Windows 10 o Windows 11 basado en CurrentBuildNumber
 if defined WIN_CURRENT_BUILD (
     if !WIN_CURRENT_BUILD! GEQ 22000 (
         set "WIN_VERSION_FRIENDLY=Windows 11"
-    ) else if !WIN_CURRENT_BUILD! LSS 22000 (  REM Es anterior a Windows 11
-        if !WIN_CURRENT_BUILD! GEQ 17763 (     REM Builds de Windows 10 (ej. 1809 en adelante hasta antes de Win11)
+    ) else if !WIN_CURRENT_BUILD! LSS 22000 (
+        if !WIN_CURRENT_BUILD! GEQ 17763 (
             set "WIN_VERSION_FRIENDLY=Windows 10"
-        ) else if !WIN_CURRENT_BUILD! GEQ 10240 ( REM Builds anteriores de Windows 10 (ej. 1507 hasta antes de 1809)
+        ) else if !WIN_CURRENT_BUILD! GEQ 10240 (
             set "WIN_VERSION_FRIENDLY=Windows 10"
-        ) else if !WIN_CURRENT_BUILD! EQU 9255 (  REM Build de Windows 8.1 (9600)
+        ) else if !WIN_CURRENT_BUILD! EQU 9255 (
             set "WIN_VERSION_FRIENDLY=Windows 8.1"
-        ) else if !WIN_CURRENT_BUILD! EQU 7601 (  REM Build de Windows 7 SP1 (7601)
+        ) else if !WIN_CURRENT_BUILD! EQU 7601 (
             set "WIN_VERSION_FRIENDLY=Windows 7"
-        ) else if !WIN_CURRENT_BUILD! EQU 7600 (  REM Build de Windows 7 RTM (7600)
+        ) else if !WIN_CURRENT_BUILD! EQU 7600 (
             set "WIN_VERSION_FRIENDLY=Windows 7"
         )
-        REM Si WIN_VERSION_FRIENDLY sigue siendo "Desconocida" aquí, el build no coincide
-        REM o es de un sistema operativo aún más antiguo no contemplado (Vista, XP).
     )
 )
 
-REM Si no se pudo determinar por el build, intentar con ProductName (menos preciso para la distincion 10/11 sin el build, pero útil como fallback)
+REM Si no se pudo determinar por el build, intentar con ProductName
 if "!WIN_VERSION_FRIENDLY!"=="Desconocida" (
     if defined WIN_PRODUCT_NAME (
         echo !WIN_PRODUCT_NAME! | findstr /I /C:"Windows 11" >nul
@@ -118,7 +462,7 @@ if "!WIN_VERSION_FRIENDLY!"=="Desconocida" (
         )
         if "!WIN_VERSION_FRIENDLY!"=="Desconocida" (
             echo !WIN_PRODUCT_NAME! | findstr /I /C:"Windows Server 2012 R2" >nul
-            if not errorlevel 1 set "WIN_VERSION_FRIENDLY=Windows 8.1" REM Windows Server 2012 R2 comparte kernel con 8.1
+            if not errorlevel 1 set "WIN_VERSION_FRIENDLY=Windows 8.1"
         )
         if "!WIN_VERSION_FRIENDLY!"=="Desconocida" (
             echo !WIN_PRODUCT_NAME! | findstr /I /C:"Windows 7" >nul
@@ -126,94 +470,59 @@ if "!WIN_VERSION_FRIENDLY!"=="Desconocida" (
         )
         if "!WIN_VERSION_FRIENDLY!"=="Desconocida" (
             echo !WIN_PRODUCT_NAME! | findstr /I /C:"Windows Server 2008 R2" >nul
-            if not errorlevel 1 set "WIN_VERSION_FRIENDLY=Windows 7" REM Windows Server 2008 R2 comparte kernel con Win7
+            if not errorlevel 1 set "WIN_VERSION_FRIENDLY=Windows 7"
         )
     )
 )
 
 REM Obtener la edicion actual usando DISM
-for /f "tokens=*" %%i in ('dism /Image:C:\TEMP /Get-CurrentEdition 2^>nul ^| findstr /R /C:"Current Edition :"') do (
+for /f "tokens=*" %%i in ('dism /Image:%MOUNT_DIR% /Get-CurrentEdition 2^>nul ^| findstr /R /C:"Current Edition :"') do (
     set "line=%%i"
     set "line=!line:*Current Edition :=!"
     call :trim_leading_spaces line
     if defined line set "CURRENT_EDITION_DETECTED=!line!"
 )
 
-REM Traducir "Core" a "Home" para la visualizacion
+REM Traducir nombres de ediciones para visualizacion
 set "DISPLAY_EDITION=!CURRENT_EDITION_DETECTED!"
-if /I "!CURRENT_EDITION_DETECTED!"=="Core" (
-    set "DISPLAY_EDITION=Home"
-)
-
-if /I "!CURRENT_EDITION_DETECTED!"=="CoreSingleLanguage" (
-    set "DISPLAY_EDITION=Home Single Language"
-)
-
-if /I "!CURRENT_EDITION_DETECTED!"=="ProfessionalCountrySpecific" (
-    set "DISPLAY_EDITION=Professional Country Specific"
-)
-
-if /I "!CURRENT_EDITION_DETECTED!"=="ProfessionalEducation" (
-    set "DISPLAY_EDITION=Professional Education"
-)
-
-if /I "!CURRENT_EDITION_DETECTED!"=="ProfessionalSingleLanguage" (
-    set "DISPLAY_EDITION=Professional ingle Language"
-)
-if /I "!CURRENT_EDITION_DETECTED!"=="ProfessionalWorkstation" (
-    set "DISPLAY_EDITION=Professional Workstation"
-)
-
-if /I "!CURRENT_EDITION_DETECTED!"=="IoTEnterprise" (
-    set "DISPLAY_EDITION=IoT Enterprise"
-)
-
-if /I "!CURRENT_EDITION_DETECTED!"=="IoTEnterpriseK" (
-    set "DISPLAY_EDITION=IoT Enterprise K"
-)
-
-if /I "!CURRENT_EDITION_DETECTED!"=="IoTEnterpriseS" (
-    set "DISPLAY_EDITION=IoT Enterprise LTSC"
-)
-
-if /I "!CURRENT_EDITION_DETECTED!"=="EnterpriseS" (
-    set "DISPLAY_EDITION=Enterprise LTSC"
-)
-
-if /I "!CURRENT_EDITION_DETECTED!"=="ServerRdsh" (
-    set "DISPLAY_EDITION=Server Rdsh"
-)
+if /I "!CURRENT_EDITION_DETECTED!"=="Core" set "DISPLAY_EDITION=Home"
+if /I "!CURRENT_EDITION_DETECTED!"=="CoreSingleLanguage" set "DISPLAY_EDITION=Home Single Language"
+if /I "!CURRENT_EDITION_DETECTED!"=="ProfessionalCountrySpecific" set "DISPLAY_EDITION=Professional Country Specific"
+if /I "!CURRENT_EDITION_DETECTED!"=="ProfessionalEducation" set "DISPLAY_EDITION=Professional Education"
+if /I "!CURRENT_EDITION_DETECTED!"=="ProfessionalSingleLanguage" set "DISPLAY_EDITION=Professional Single Language"
+if /I "!CURRENT_EDITION_DETECTED!"=="ProfessionalWorkstation" set "DISPLAY_EDITION=Professional Workstation"
+if /I "!CURRENT_EDITION_DETECTED!"=="IoTEnterprise" set "DISPLAY_EDITION=IoT Enterprise"
+if /I "!CURRENT_EDITION_DETECTED!"=="IoTEnterpriseK" set "DISPLAY_EDITION=IoT Enterprise K"
+if /I "!CURRENT_EDITION_DETECTED!"=="IoTEnterpriseS" set "DISPLAY_EDITION=IoT Enterprise LTSC"
+if /I "!CURRENT_EDITION_DETECTED!"=="EnterpriseS" set "DISPLAY_EDITION=Enterprise LTSC"
+if /I "!CURRENT_EDITION_DETECTED!"=="ServerRdsh" set "DISPLAY_EDITION=Server Rdsh"
 
 cls
 echo.
 echo ================================================================
 echo.
-echo  Informacion de la Imagen en C:\TEMP:
+echo  Informacion de la Imagen en %MOUNT_DIR%:
 echo    Sistema Operativo: !WIN_VERSION_FRIENDLY!
 echo    Edicion Actual: !DISPLAY_EDITION!
 echo.
 echo ================================================================
 echo.
-
 set "edition_count=0"
-REM Limpiar variables de ediciones anteriores por si se vuelve a ejecutar
 for /L %%i in (1,1,30) do set "targetEdition_%%i="
 
 set "column_output_buffer="
 set "items_in_buffer=0"
-set "column_width=40" REM Ajuste este ancho según sea necesario para su pantalla
+set "column_width=40"
 
 REM Comando para obtener las ediciones y procesarlas
-for /f "tokens=1,* delims=:" %%a in ('dism /Image:C:\TEMP /Get-TargetEditions 2^>nul ^| findstr /R /C:"Target Edition :"') do (
+for /f "tokens=1,* delims=:" %%a in ('dism /Image:%MOUNT_DIR% /Get-TargetEditions 2^>nul ^| findstr /R /C:"Target Edition :"') do (
     set "line=%%b"
     call :trim_leading_spaces line
     
     if defined line (
         set /a edition_count+=1
-        REM Almacenar el nombre de la edición original de DISM para el comando Set-Edition
-        set "targetEdition_!edition_count!=!line!" 
+        set "targetEdition_!edition_count!=!line!"
         
-        REM Traducir los nombres de las ediciones para fines de visualización
         set "display_line=!line!"
         if /I "!line!"=="CoreSingleLanguage" set "display_line=Home Single Language"
         if /I "!line!"=="Core" set "display_line=Home"
@@ -230,12 +539,10 @@ for /f "tokens=1,* delims=:" %%a in ('dism /Image:C:\TEMP /Get-TargetEditions 2^
         set "item_display_text=  !edition_count!. !display_line!"
         
         if !items_in_buffer! == 0 (
-            REM First item in a pair, store it
             set "column_output_buffer=!item_display_text!"
             set /a items_in_buffer=1
         ) else (
-            REM Segundo artículo del par. Rellene el primero y luego imprima ambos.
-            set "temp_padding_buffer=!column_output_buffer!                                                                      " REM Ensure enough spaces for padding
+            set "temp_padding_buffer=!column_output_buffer!                                                                      "
             set "padded_first_item=!temp_padding_buffer:~0,%column_width%!"
             echo !padded_first_item!!item_display_text!
             set "column_output_buffer="
@@ -244,26 +551,22 @@ for /f "tokens=1,* delims=:" %%a in ('dism /Image:C:\TEMP /Get-TargetEditions 2^
     )
 )
 
-REM If Hubo un número impar de ediciones; la última aún está en el buffer. Imprímela.
 if !items_in_buffer! == 1 (
     echo !column_output_buffer!
 )
 
 echo.
 
-REM Nueva estructura para el chequeo de edition_count usando goto
 if !edition_count! LSS 1 goto no_editions_found
 
-REM Si llegamos aqui, edition_count es 1 o mas.
 echo ---------------------------------------------------------------------
 echo.
 echo  0. Volver al Menu Principal
 echo.
 set /p opcionEdicion="Seleccione la edicion a la que desea cambiar (0-!edition_count!): "
 
-if "%opcionEdicion%"=="0" goto menu
+if "%opcionEdicion%"=="0" goto main_menu
 
-REM Validar que la opcionEdicion sea un número válido dentro del rango de ediciones encontradas
 set "isValidChoice="
 if "%opcionEdicion%" NEQ "" (
     for /L %%N in (1,1,!edition_count!) do (
@@ -275,67 +578,51 @@ if "%opcionEdicion%" NEQ "" (
 
 if not defined isValidChoice (
     echo.
-    echo  Opcion no valida: "%opcionEdicion%".
-    echo  Por favor, ingrese un numero entre 1 y !edition_count!, o 0 para volver.
+    echo Opcion no valida: "%opcionEdicion%".
+    echo Por favor, ingrese un numero entre 1 y !edition_count!, o 0 para volver.
     echo.
     pause
     goto cambio_edicion
 )
 
-REM Si llegamos aquí, opcionEdicion es un número válido entre 1 y edition_count
 set "selectedEdition=!targetEdition_%opcionEdicion%!"
 if not defined selectedEdition (
     echo.
-    echo  ERROR CRITICO: No se pudo determinar la edicion seleccionada para el numero "%opcionEdicion%".
-    echo  Verifique las variables targetEdition_N.
-    echo.
-    pause
-    goto cambio_edicion
-)
-if "%selectedEdition%"=="" (
-    echo.
-    echo  ERROR CRITICO: La edicion seleccionada esta vacia para el numero "%opcionEdicion%".
+    echo ERROR CRITICO: No se pudo determinar la edicion seleccionada.
     echo.
     pause
     goto cambio_edicion
 )
 
 echo.
-echo  Cambiando la edicion de la imagen de !WIN_VERSION_FRIENDLY! !DISPLAY_EDITION! a: !selectedEdition!
+echo Cambiando la edicion de la imagen de !WIN_VERSION_FRIENDLY! !DISPLAY_EDITION! a: !selectedEdition!
 echo. 
-echo  Esta operacion puede tardar varios minutos. Por favor, espere...
+echo Esta operacion puede tardar varios minutos. Por favor, espere...
 echo.
-dism /Image:C:\TEMP /Set-Edition:!selectedEdition!
+dism /Image:%MOUNT_DIR% /Set-Edition:!selectedEdition!
 echo.
 pause
-goto cambio_edicion
+goto main_menu
 
 :no_editions_found
 echo.
-echo  No se encontraron ediciones de destino validas para la imagen en C:\TEMP.
-echo  Asegurese de que la imagen en C:\TEMP sea valida, este montada (si es un .WIM)
-echo  y que pueda ser actualizada a otras ediciones.
+echo  No se encontraron ediciones de destino validas para la imagen.
+echo  Asegurese de que la imagen sea valida y pueda ser actualizada.
 echo  Tambien verifique que DISM este funcionando correctamente.
 echo.
 pause
 goto cambio_edicion
-
-:: Subrutina para eliminar espacios al inicio de una variable
-:trim_leading_spaces
-set "temp_var=!%1!"
-:loop_trim
-if defined temp_var if "%temp_var:~0,1%"==" " (
-    set "temp_var=!temp_var:~1!"
-    goto loop_trim
-)
-set "%1=%temp_var%"
-goto :eof
 
 :: =============================================
 ::  Seccion de Herramientas de Limpieza
 :: =============================================
 :limpieza
 cls
+if "%IMAGE_MOUNTED%"=="0" (
+    echo Necesita montar una imagen primero desde el menu 'Gestionar Imagen'.
+    pause
+    goto main_menu
+)
 echo.
 echo ================================================================
 echo.
@@ -349,27 +636,18 @@ echo.
 echo ================================================================
 echo.
 echo  1. Verificar Salud de Imagen
-echo     (Revisa el estado de la imagen sin modificarla)
 echo.
 echo  2. Escaneo Avanzado de Salud de Imagen
-echo     (Realiza un escaneo más exhaustivo de la imagen para detectar corrupcion en
-echo      el almacen de componentes. No realiza reparaciones.)
 echo.
 echo  3. Reparar Imagen
-echo     (Restaura la imagen a un estado saludable)
 echo.
 echo  4. Escaneo y Reparacion SFC
-echo     (Ejecuta la verificacion y reparacion de archivos del sistema)
 echo.
 echo  5. Analizar Almacen de Componentes de la Imagen
-echo     (Genera un informe sobre el tamano del almacen de componentes y
-echo     si se recomienda una limpieza. No modifica la imagen.)
 echo.
 echo  6. Limpieza de Componentes
-echo     (Elimina componentes innecesarios para liberar espacio)
 echo.
 echo  7. Ejecutar Todas las Opciones
-echo     (Realiza todas las tareas de mantenimiento en secuencia)
 echo.
 echo ----------------------------------------------------------------
 echo.
@@ -378,69 +656,62 @@ echo.
 set /p opcionL="Ingrese el numero de la opcion: "
 
 if "%opcionL%"=="1" (
-    echo.
-    echo  Verificando salud de la imagen...
-    DISM /Image:C:\TEMP /Cleanup-Image /CheckHealth
+    DISM /Image:%MOUNT_DIR% /Cleanup-Image /CheckHealth
     pause
     goto limpieza
 )
-
 if "%opcionL%"=="2" (
-    echo.
-    echo  Escaneando imagen en busca de corrupcion...
-    DISM /Image:C:\TEMP /Cleanup-Image /ScanHealth
+    DISM /Image:%MOUNT_DIR% /Cleanup-Image /ScanHealth
     pause
     goto limpieza
 )
-
 if "%opcionL%"=="3" (
-    echo.
-    echo  Reparando imagen...
-    DISM /Image:C:\TEMP /Cleanup-Image /RestoreHealth
+    DISM /Image:%MOUNT_DIR% /Cleanup-Image /RestoreHealth
     pause
     goto limpieza
 )
-
 if "%opcionL%"=="4" (
-    echo.
-    echo  Ejecutando escaneo y reparacion del sistema...
-    SFC /scannow /offbootdir=C:\TEMP /offwindir=C:\TEMP\Windows
+    SFC /scannow /offbootdir=%MOUNT_DIR% /offwindir=%MOUNT_DIR%\Windows
     pause
     goto limpieza
 )
-
 if "%opcionL%"=="5" (
-    echo.
-    echo  Analizando el almacen de componentes...
-    DISM /Image:C:\TEMP /Cleanup-Image /AnalyzeComponentStore
+    DISM /Image:%MOUNT_DIR% /Cleanup-Image /AnalyzeComponentStore
     pause
     goto limpieza
 )
-
 if "%opcionL%"=="6" (
-    echo.
-    echo  Limpiando componentes...
-    DISM /Cleanup-Image /Image:C:\TEMP /StartComponentCleanup /ResetBase /ScratchDir:C:\TEMP1
+    DISM /Cleanup-Image /Image:%MOUNT_DIR% /StartComponentCleanup /ResetBase /ScratchDir:%MOUNT_DIR%1
     pause
     goto limpieza
 )
-
 if "%opcionL%"=="7" (
-    echo.
-    echo  Ejecutando todas las opciones de limpieza...
-    DISM /Image:C:\TEMP /Cleanup-Image /CheckHealth
-    DISM /Image:C:\TEMP /Cleanup-Image /ScanHealth
-    DISM /Image:C:\TEMP /Cleanup-Image /RestoreHealth
-    SFC /scannow /offbootdir=C:\TEMP /offwindir=C:\TEMP\Windows
-    DISM /Cleanup-Image /Image:C:\TEMP /StartComponentCleanup /ResetBase /ScratchDir:C:\TEMP1
+    echo [PASO 1 de 5] Verificando la salud de la imagen...
+    DISM /Image:%MOUNT_DIR% /Cleanup-Image /CheckHealth
+    echo [PASO 2 de 5] Escaneando la imagen en busca de corrupcion...
+    DISM /Image:%MOUNT_DIR% /Cleanup-Image /ScanHealth
+    echo [PASO 3 de 5] Reparando la imagen si es necesario...
+    DISM /Image:%MOUNT_DIR% /Cleanup-Image /RestoreHealth
+    echo [PASO 4 de 5] Verificando y reparando archivos del sistema...
+    SFC /scannow /offbootdir=%MOUNT_DIR% /offwindir=%MOUNT_DIR%\Windows
+    echo [PASO 5 de 5] Analizando y ejecutando limpieza de componentes...
+    set "cleanupRecommended=No"
+    for /f "tokens=2 delims=:" %%a in ('DISM /Image:%MOUNT_DIR% /Cleanup-Image /AnalyzeComponentStore ^| findstr /I /C:"Component Store Cleanup Recommended"') do (
+        set "result=%%a"
+        call :trim_leading_spaces result
+        if /I "!result!"=="Yes" set "cleanupRecommended=Yes"
+    )
+    if "!cleanupRecommended!"=="Yes" (
+        echo  Se recomienda la limpieza del almacen de componentes. Procediendo...
+        DISM /Cleanup-Image /Image:%MOUNT_DIR% /StartComponentCleanup /ResetBase /ScratchDir:%MOUNT_DIR%1
+    ) else (
+        echo  La limpieza del almacen de componentes no es necesaria en este momento.
+    )
     pause
     goto limpieza
 )
-
-if "%opcionL%"=="0" goto menu
-
-echo  Opcion no valida.
-Intente nuevamente.
+if "%opcionL%"=="0" goto main_menu
+echo Opcion no valida. Intente nuevamente.
 pause
 goto limpieza
 
