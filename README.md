@@ -1,105 +1,71 @@
-# Administrador de Imagen Offline by SOFTMAXTER
+# AdminImagenOffline by SOFTMAXTER V1.1
 
-Este script de batch (`.bat`) para Windows facilita la administración de imágenes de Windows sin conexión (offline), permitiendo cambiar la edición del sistema operativo y ejecutar diversas tareas de limpieza y mantenimiento directamente sobre una imagen montada o aplicada en `C:\TEMP`.
+[cite_start]`AdminImagenOffline` es un script de batch para la línea de comandos de Windows que facilita la administración y el mantenimiento de imágenes de Windows (archivos `.wim`). [cite_start]La herramienta permite a los usuarios montar, desmontar, editar, limpiar y realizar otras operaciones avanzadas en imágenes de Windows de forma offline, todo desde un menú interactivo y fácil de usar.
 
 ## Características Principales
 
-* **Cambio de Edición de Windows Offline:** [cite: 4]
-    * Detecta automáticamente la versión de Windows (7, 8.1, 10, 11) y la edición actual de la imagen ubicada en `C:\TEMP`. [cite: 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20]
-    * Muestra las ediciones de destino a las que se puede actualizar la imagen actual. [cite: 21, 22]
-    * Permite seleccionar y cambiar a una nueva edición de Windows usando DISM. [cite: 31, 32]
-    * Traduce nombres de edición técnicos (ej. "Core") a nombres más amigables (ej. "Home") para facilitar su comprensión. [cite: 18, 19, 22, 23, 24]
-* **Herramientas de Limpieza y Mantenimiento de Imagen Offline:** [cite: 5, 38, 39]
-    * **Verificar Salud de Imagen (`DISM /CheckHealth`):** [cite: 40] Revisa el estado de la imagen sin modificarla.
-    * **Escaneo Avanzado de Salud (`DISM /ScanHealth`):** [cite: 41] Realiza un escaneo exhaustivo para detectar corrupción en el almacén de componentes.
-    * **Reparar Imagen (`DISM /RestoreHealth`):** [cite: 42, 48] Restaura la imagen a un estado saludable.
-    * **Escaneo y Reparación SFC (`SFC /scannow /offbootdir /offwindir`):** [cite: 43] Verifica y repara archivos del sistema protegidos.
-    * **Analizar Almacén de Componentes (`DISM /AnalyzeComponentStore`):** [cite: 44] Informa sobre el tamaño del almacén y si se recomienda limpieza.
-    * **Limpieza de Componentes (`DISM /StartComponentCleanup /ResetBase`):** [cite: 45] Elimina componentes innecesarios para liberar espacio, utilizando `C:\TEMP1` como directorio temporal (`ScratchDir`). [cite: 49]
-    * **Ejecutar Todas las Opciones:** [cite: 46] Realiza secuencialmente las tareas de CheckHealth, ScanHealth, RestoreHealth, SFC y StartComponentCleanup. [cite: 50]
-* **Interfaz de Menú en Consola:** [cite: 2, 3] Navegación sencilla mediante opciones numéricas.
-* **Verificación de Privilegios:** [cite: 1] Comprueba si el script se ejecuta como administrador y, de no ser así, intenta reiniciarse con permisos elevados usando PowerShell.
+* [cite_start]**Gestión de Imágenes WIM:** Monta y desmonta imágenes de Windows (`install.wim`, `winre.wim`, etc.) en un directorio temporal (`C:\TEMP`).
+* [cite_start]**Edición de Índices:** Exporta y elimina índices específicos de un archivo WIM, permitiendo reducir su tamaño o aislar versiones.
+* [cite_start]**Cambio de Edición de Windows:** Muestra las ediciones de Windows a las que se puede actualizar la imagen montada y permite realizar el cambio (por ejemplo, de Home a Pro).
+* [cite_start]**Herramientas de Limpieza y Reparación:** Integra `DISM` y `SFC` para realizar tareas de mantenimiento:
+    * [cite_start]Verificar la salud de la imagen.
+    * [cite_start]Escanear en busca de componentes corruptos.
+    * [cite_start]Reparar la imagen.
+    * [cite_start]Analizar y limpiar el almacén de componentes (`WinSxS`).
+* [cite_start]**Detección Automática:** Verifica si una imagen ya está montada en el directorio de trabajo para evitar conflictos.
+* [cite_start]**Ejecución como Administrador:** El script solicita automáticamente la elevación de privilegios si no se ejecuta como administrador.
 
-## Requisitos Previos
+## Prerrequisitos
 
-1.  **Sistema Operativo:** Windows (el script utiliza herramientas nativas como DISM, SFC, REG).
-2.  **Ejecutar como Administrador:** El script intentará solicitarlo, pero es fundamental para su correcto funcionamiento. [cite: 1]
-3.  **Imagen de Windows en `C:\TEMP`:**
-    * Debes tener una imagen de Windows (por ejemplo, de un archivo WIM o ESD montado, o una instalación de Windows previamente aplicada) disponible en la ruta `C:\TEMP`.
-    * El script **NO monta** la imagen por ti. El directorio `C:\TEMP` debe ser la raíz de la imagen de Windows offline (ej. `C:\TEMP\Windows`, `C:\TEMP\Users`, etc.).
-4.  **Directorio Temporal `C:\TEMP1`:** La opción de limpieza de componentes (`StartComponentCleanup`) utiliza `C:\TEMP1` como `ScratchDir`. [cite: 49] Asegúrate de que este directorio exista o pueda ser creado por DISM, y que haya suficiente espacio libre en la unidad que lo contiene.
+* [cite_start]**Sistema Operativo:** Windows 7, 8.1, 10, 11 o sus correspondientes versiones de Windows Server.
+* [cite_start]**Permisos:** Se requieren privilegios de administrador para ejecutar el script, ya que utiliza `dism`, `sfc` y comandos de montaje.
 
-## Uso
+## ¿Cómo Usar?
 
-1.  Descarga el archivo `AdminImagenOffline.bat` (o el nombre que le hayas dado al script proporcionado).
-2.  Asegúrate de cumplir con todos los **Requisitos Previos**, especialmente tener la imagen de Windows correctamente configurada en `C:\TEMP`.
-3.  Haz clic derecho sobre el archivo `.bat` y selecciona "**Ejecutar como administrador**".
-4.  Sigue las instrucciones presentadas en el menú de la consola:
-    * **Opción 1:** Para cambiar la edición de Windows. [cite: 4]
-    * **Opción 2:** Para acceder a las herramientas de limpieza. [cite: 5]
-    * **Opción 0:** Para salir del script. [cite: 6]
+1.  Descarga el archivo `AdminImagenOffline.bat`.
+2.  [cite_start]Haz clic derecho sobre el archivo y selecciona **"Ejecutar como administrador"**.
+3.  [cite_start]Se abrirá una ventana de Símbolo del sistema (CMD) con el menú principal.
+4.  [cite_start]Navega por las opciones usando los números correspondientes.
 
-## Opciones del Menú Detalladas
+## Opciones del Menú
 
 ### Menú Principal
 
-* **`1. Cambiar Edicion de Windows`**: [cite: 4]
-    * Muestra la información detectada de la imagen (Sistema Operativo y Edición Actual). [cite: 20]
-    * Lista las ediciones a las que se puede cambiar. [cite: 21, 22, 23, 24, 25, 26, 27]
-    * Permite seleccionar una nueva edición o volver al menú principal. [cite: 28]
-* **`2. Herramientas de Limpieza`**: [cite: 5]
-    * Accede a un submenú con varias herramientas para el mantenimiento de la imagen. [cite: 39]
-* **`0. Salir`**: [cite: 6]
-    * Cierra la aplicación.
+* **1. [cite_start]Gestionar Imagen (Montar/Desmontar/Guardar):** Accede a las funciones básicas de manejo de la imagen.
+* **2. [cite_start]Cambiar Edición de Windows:** Permite cambiar la edición de la imagen montada.
+* **3. [cite_start]Herramientas de Limpieza:** Accede a las utilidades de mantenimiento y reparación.
+* **0. [cite_start]Salir:** Cierra la aplicación.
 
-### Submenú: Herramientas de Limpieza [cite: 38]
+### [cite_start]1. Gestión de Imagen 
 
-1.  **`Verificar Salud de Imagen`**: [cite: 40] `DISM /Image:C:\TEMP /Cleanup-Image /CheckHealth`
-2.  **`Escaneo Avanzado de Salud de Imagen`**: [cite: 41] `DISM /Image:C:\TEMP /Cleanup-Image /ScanHealth`
-3.  **`Reparar Imagen`**: [cite: 42, 48] `DISM /Image:C:\TEMP /Cleanup-Image /RestoreHealth`
-4.  **`Escaneo y Reparacion SFC`**: [cite: 43] `SFC /scannow /offbootdir=C:\TEMP /offwindir=C:\TEMP\Windows`
-5.  **`Analizar Almacen de Componentes de la Imagen`**: [cite: 44] `DISM /Image:C:\TEMP /Cleanup-Image /AnalyzeComponentStore`
-6.  **`Limpieza de Componentes`**: [cite: 45] `DISM /Cleanup-Image /Image:C:\TEMP /StartComponentCleanup /ResetBase /ScratchDir:C:\TEMP1` [cite: 49]
-7.  **`Ejecutar Todas las Opciones`**: [cite: 46] Ejecuta las opciones 1, 2, 3, 4 y 6 en secuencia. [cite: 50]
-8.  **`Volver al Menu Principal`**: [cite: 47] Regresa al menú anterior.
+* [cite_start]**Montar/Desmontar Imagen**:
+    * **Montar Imagen:** Pide la ruta del archivo `.wim` y el número de índice a montar.
+    * [cite_start]**Desmontar Imagen:** Desmonta la imagen actual, descartando los cambios.
+* [cite_start]**Guardar Cambios**:
+    * Permite guardar los cambios realizados en la imagen montada, ya sea en el mismo índice o creando uno nuevo (`/append`).
+* [cite_start]**Editar Índices**:
+    * [cite_start]**Exportar un Índice:** Crea un nuevo archivo WIM a partir de un índice seleccionado.
+    * **Eliminar un Índice:** Borra permanentemente un índice del archivo WIM.
 
-## Estructura del Script
+### 2. Cambiar Edición de Windows 
 
-El script está organizado en secciones utilizando etiquetas (`:`):
+* [cite_start]Muestra la edición actual de Windows de la imagen montada.
+* [cite_start]Lista todas las ediciones a las que se puede actualizar.
+* Permite seleccionar una nueva edición y aplica el cambio con `dism /Set-Edition`.
 
-* **`:menu`**: Pantalla principal del script. [cite: 1]
-* **`:cambio_edicion`**: Lógica para detectar y cambiar la edición de Windows. [cite: 7]
-    * Intenta cargar el hive del registro para obtener detalles de la versión. [cite: 8]
-    * Usa `DISM /Get-CurrentEdition` y `DISM /Get-TargetEditions`.
-* **`:limpieza`**: Submenú y lógica para las herramientas de limpieza y reparación. [cite: 37]
-* **`:trim_leading_spaces`**: Subrutina para eliminar espacios al inicio de variables. [cite: 36, 51]
-* Manejo de errores básicos y validación de entradas del usuario. [cite: 6, 29, 30, 33, 50]
+### 3. Herramientas de Limpieza 
 
-## Notas Importantes
+* Ofrece una serie de comandos para el mantenimiento de la imagen montada:
+    * `CheckHealth`: Verifica si hay corrupción.
+    * [cite_start]`ScanHealth`: Realiza un escaneo más profundo.
+    * [cite_start]`RestoreHealth`: Intenta reparar la imagen.
+    * `SFC /scannow /offbootdir`: Repara archivos del sistema.
+    * [cite_start]`AnalyzeComponentStore`: Analiza el almacén de componentes.
+    * [cite_start]`StartComponentCleanup`: Limpia componentes obsoletos.
+* La opción **"Ejecutar Todas las Opciones"** realiza una secuencia de limpieza y reparación automática.
 
-* **RESPONSABILIDAD:** Utiliza este script bajo tu propio riesgo. El autor (SOFTMAXTER) y cualquier contribuyente no se hacen responsables por posibles daños o pérdida de datos.
-* **RUTA FIJA `C:\TEMP`:** El script está codificado para trabajar exclusivamente con una imagen de Windows ubicada en `C:\TEMP`. Si tu imagen está en otra ruta, deberás modificar el script manualmente en todas las ocurrencias de `C:\TEMP` (y `C:\TEMP1` para el ScratchDir).
-* **COPIA DE SEGURIDAD:** Es **altamente recomendable** realizar una copia de seguridad de tu imagen de Windows antes de utilizar las funciones de cambio de edición o reparación.
-* **CONOCIMIENTOS TÉCNICOS:** Se recomienda tener conocimientos básicos sobre DISM, SFC y la administración de imágenes de Windows.
-* **IDIOMA:** El script y sus mensajes en consola están en español. [cite: 2, 3]
+## Descargo de Responsabilidad
 
-## Autor
+Este script realiza operaciones avanzadas que modifican archivos de imagen de Windows. El autor, **SOFTMAXTER**, no se hace responsable de la pérdida de datos o daños que puedan ocurrir en tus archivos WIM.
 
-* **SOFTMAXTER** [cite: 1, 2]
-
-## Licencia
-
-`LICENSE` https://github.com/SOFTMAXTER/AdminImagenOffline?tab=GPL-3.0-1-ov-file
-
----
-### Cómo Contribuir (Opcional)
-
-Si deseas contribuir al desarrollo de este script:
-
-1.  Haz un Fork del repositorio.
-2.  Crea una nueva rama (`git checkout -b feature/nueva-funcionalidad`).
-3.  Realiza tus cambios y haz commit (`git commit -am 'Añade nueva funcionalidad'`).
-4.  Haz Push a la rama (`git push origin feature/nueva-funcionalidad`).
-5.  Abre un Pull Request.
-
----
+**Se recomienda encarecidamente crear una copia de seguridad de tus archivos `.wim` antes de utilizar esta herramienta.**
