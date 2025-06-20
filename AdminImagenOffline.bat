@@ -1,5 +1,5 @@
 @echo off
-title Administrador de Imagen offline by SOFTMAXTER V1.1
+title Administrador de Imagen offline by SOFTMAXTER V1.2
 Color 0A
 setlocal enabledelayedexpansion
 
@@ -17,70 +17,63 @@ if %errorLevel% neq 0 (
 :: Variables Globales
 set "WIM_FILE_PATH="
 set "MOUNT_DIR=C:\TEMP"
+set "Scratch_DIR=C:\TEMP1"
 set "IMAGE_MOUNTED=0"
+set "MOUNTED_INDEX="
 
-
-
-:: =============================================
-::  SOLUCION v6 (Metodo a prueba de fallos y silencioso)
-:: =============================================
+:: =================================================================
+::  CORREGIDO: Rutina de verificación de montaje existente (dinámica)
+:: =================================================================
 set "IMAGE_MOUNTED=0"
 set "WIM_FILE_PATH="
+set "MOUNTED_INDEX="
 set "TEMP_DISM_OUT=%TEMP%\dism_check_%RANDOM%.tmp"
 
+REM Guarda la información de imágenes montadas en un archivo temporal
 dism /get-mountedimageinfo > "%TEMP_DISM_OUT%" 2>nul
-findstr /I /L /C:"Mount Dir : %MOUNT_DIR%" "%TEMP_DISM_OUT%" >nul
-if %errorlevel% equ 0 (
-    set "IMAGE_MOUNTED=1"
-    for /f "tokens=1,* delims=:" %%A in ('findstr /I /L /C:"Image File" "%TEMP_DISM_OUT%"') do (
-        set "WIM_FILE_PATH=%%B"
-        call :trim_leading_spaces WIM_FILE_PATH
+
+REM Busca si existe CUALQUIER directorio de montaje en el resultado
+findstr /I /L /C:"Mount Dir :" "%TEMP_DISM_OUT%" >nul
+if %errorlevel% neq 0 goto :no_mount_found
+
+REM --- Este código solo se ejecuta si se encuentra una imagen montada ---
+set "IMAGE_MOUNTED=1"
+
+REM Extrae dinámicamente el directorio de montaje
+for /f "tokens=1,* delims=:" %%A in ('findstr /I /L /C:"Mount Dir :" "%TEMP_DISM_OUT%"') do (
+    set "MOUNT_DIR=%%B"
+    call :trim_leading_spaces MOUNT_DIR
+    goto :got_mount_dir
+)
+:got_mount_dir
+
+REM Extrae dinámicamente la ruta del WIM
+for /f "tokens=1,* delims=:" %%A in ('findstr /I /L /C:"Image File :" "%TEMP_DISM_OUT%"') do (
+    set "WIM_FILE_PATH=%%B"
+    call :trim_leading_spaces WIM_FILE_PATH
+    if /I "!WIM_FILE_PATH:~0,4!"=="\\?\" (
+        set "WIM_FILE_PATH=!WIM_FILE_PATH:~4!"
     )
+    goto :got_wim_path
 )
+:got_wim_path
 
-if exist "%TEMP_DISM_OUT%" del "%TEMP_DISM_OUT%"
-:: Fin de la rutina de verificación
-:: =============================================
-Ubicación en el Script (Recordatorio)
-Este bloque debe ir justo después de la verificación de administrador y la declaración de variables globales. El inicio de tu script debe quedar exactamente así:
-
-Fragmento de código
-
-@echo off
-title Administrador de Imagen offline by SOFTMAXTER
-setlocal enabledelayedexpansion
-
-:: =============================================
-:: PRIMERO: Verificar permisos de administrador
-:: =============================================
-net session >nul 2>&1
-if %errorLevel% neq 0 (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "& {Start-Process '%~f0' -Verb RunAs}"
-    exit /b
+REM Extrae dinámicamente el índice de la imagen
+for /f "tokens=1,* delims=:" %%A in ('findstr /I /L /C:"Image Index" "%TEMP_DISM_OUT%"') do (
+    set "MOUNTED_INDEX=%%B"
+    call :trim_leading_spaces MOUNTED_INDEX
+    goto :got_index
 )
+:got_index
 
-:: Variables Globales
-set "WIM_FILE_PATH="
-set "MOUNT_DIR=C:\TEMP"
-set "IMAGE_MOUNTED=0"
+REM Salta al final de la rutina de limpieza
+goto :cleanup_temp_file
 
-:: =============================================
-::  SOLUCION v6 (Metodo a prueba de fallos y silencioso)
-:: =============================================
-set "IMAGE_MOUNTED=0"
-set "WIM_FILE_PATH="
-set "TEMP_DISM_OUT=%TEMP%\dism_check_%RANDOM%.tmp"
+:no_mount_found
+REM Etiqueta a la que salta si no se encuentra ninguna imagen montada
 
-dism /get-mountedimageinfo > "%TEMP_DISM_OUT%" 2>nul
-findstr /I /L /C:"Mount Dir : %MOUNT_DIR%" "%TEMP_DISM_OUT%" >nul
-if %errorlevel% equ 0 (
-    set "IMAGE_MOUNTED=1"
-    for /f "tokens=1,* delims=:" %%A in ('findstr /I /L /C:"Image File" "%TEMP_DISM_OUT%"') do (
-        set "WIM_FILE_PATH=%%B"
-        call :trim_leading_spaces WIM_FILE_PATH
-    )
-)
-
+:cleanup_temp_file
+REM Limpia el archivo temporal al final
 if exist "%TEMP_DISM_OUT%" del "%TEMP_DISM_OUT%"
 
 :main_menu
@@ -88,7 +81,7 @@ cls
 echo.
 echo =========================================================================
 echo.
-echo  Administrador de Imagen offline by SOFTMAXTER V1.1
+echo  Administrador de Imagen offline by SOFTMAXTER V1.2
 echo.
 echo =========================================================================
 echo.
@@ -135,24 +128,27 @@ echo  Gestion de Imagen
 echo.
 echo =========================================================================
 echo.
-echo  1. Montar/Desmontar Imagen
+echo  1. Montar/Desmontar Imagen 
 echo.
-echo  2. Guardar Cambios
+echo  2. Guardar Cambios 
 echo.
-echo  3. Editar Índices
+echo  3. Editar Indices 
+echo.
+echo  4. Convertir Imagen a WIM
 echo.
 echo ----------------------------------------------------------------
 echo.
-echo  0. Volver al Menu Principal
+echo  0. Volver al Menu Principal 
 echo.
 set /p opcionIM="Ingrese el numero de la opcion: "
 
 if "%opcionIM%"=="1" goto mount_unmount_menu
 if "%opcionIM%"=="2" goto save_changes_menu
 if "%opcionIM%"=="3" goto edit_indexes_menu
+if "%opcionIM%"=="4" goto convert_image_menu
 if "%opcionIM%"=="0" goto main_menu
-echo Opcion no valida.
-Intente nuevamente.
+echo Opcion no valida. 
+Intente nuevamente. 
 pause
 goto image_management_menu
 
@@ -172,6 +168,8 @@ echo  1. Montar Imagen
 echo.
 echo  2. Desmontar Imagen
 echo.
+echo  3. Recargar Imagen (Descartar cambios)
+echo.
 echo ----------------------------------------------------------------
 echo.
 echo  0. Volver al menu anterior
@@ -180,9 +178,70 @@ set /p opcionMU="Ingrese el numero de la opcion: "
 
 if "%opcionMU%"=="1" goto mount_image
 if "%opcionMU%"=="2" goto unmount_image
+if "%opcionMU%"=="3" goto reload_image
 if "%opcionMU%"=="0" goto image_management_menu
 echo Opcion no valida.
 Intente nuevamente.
+pause
+goto mount_unmount_menu
+
+:reload_image
+cls
+if "%IMAGE_MOUNTED%"=="0" (
+    echo No hay ninguna imagen montada para recargar.
+    pause
+    goto mount_unmount_menu
+)
+if not defined WIM_FILE_PATH (
+    echo ERROR: No se puede encontrar la ruta del archivo WIM original.
+    pause
+    goto mount_unmount_menu
+)
+if not defined MOUNTED_INDEX (
+    echo ERROR: No se pudo determinar el Indice de la imagen montada.
+    pause
+    goto mount_unmount_menu
+)
+
+echo.
+echo Va a recargar la imagen descartando todos los cambios no guardados.
+echo.
+echo   Ruta del WIM: !WIM_FILE_PATH!
+echo   Indice Montado: !MOUNTED_INDEX!
+echo.
+set /p "CONFIRM=Desea continuar? (S/N): "
+if /i not "%CONFIRM%"=="S" (
+    echo Operacion cancelada.
+    pause
+    goto mount_unmount_menu
+)
+
+echo.
+echo Desmontando imagen...
+dism /unmount-wim /mountdir:"%MOUNT_DIR%" /discard >nul
+if !errorlevel! neq 0 (
+    echo.
+    echo Error al intentar desmontar la imagen. Se intentara una limpieza automatica.
+    echo Ejecutando 'dism /cleanup-wim'...
+    dism /cleanup-wim
+    echo.
+    echo Limpieza completada. Se reintentara la operacion de recarga en 5 segundos...
+    timeout /t 5 >nul
+    goto :reload_image
+)
+
+echo.
+echo Remontando imagen (Indice: !MOUNTED_INDEX!)... 
+dism /mount-wim /wimfile:"!WIM_FILE_PATH!" /index:!MOUNTED_INDEX! /mountdir:"%MOUNT_DIR%" 
+if !errorlevel! equ 0 (
+    echo Imagen recargada exitosamente.
+    set "IMAGE_MOUNTED=1" 
+) else (
+    echo Error al remontar la imagen.
+    set "IMAGE_MOUNTED=0"
+    set "WIM_FILE_PATH="
+    set "MOUNTED_INDEX="
+)
 pause
 goto mount_unmount_menu
 
@@ -208,6 +267,7 @@ if not exist "%MOUNT_DIR%" mkdir "%MOUNT_DIR%"
 dism /mount-wim /wimfile:"!WIM_FILE_PATH!" /index:!INDEX! /mountdir:"%MOUNT_DIR%"
 if !errorlevel! equ 0 (
     set "IMAGE_MOUNTED=1"
+    set "MOUNTED_INDEX=!INDEX!"
     echo Imagen montada exitosamente.
 ) else (
     echo Error al montar la imagen.
@@ -220,17 +280,18 @@ cls
 if "%IMAGE_MOUNTED%"=="0" (
     echo No hay ninguna imagen montada.
     pause
-    goto mount_menu
+    goto mount_unmount_menu
 )
 echo.
-echo Desmontando imagen y descartando cambios...
+echo Desmontando imagen...
 dism /unmount-wim /mountdir:"%MOUNT_DIR%" /discard
 set "IMAGE_MOUNTED=0"
 set "WIM_FILE_PATH="
+set "MOUNTED_INDEX="
 echo.
-echo Imagen desmontada. Los cambios han sido descartados.
+echo Imagen desmontada.
 pause
-goto main_menu
+goto mount_unmount_menu
 
 :: =============================================
 ::  Submenu Guardar Cambios
@@ -249,9 +310,9 @@ echo  Guardar Cambios (Sin desmontar)
 echo.
 echo =========================================================================
 echo.
-echo  1. Guardar cambios en el indice actual
+echo  1. Guardar cambios en el Indice actual
 echo.
-echo  2. Guardar cambios en un nuevo indice (Append)
+echo  2. Guardar cambios en un nuevo Indice (Append)
 echo.
 echo ----------------------------------------------------------------
 echo.
@@ -285,13 +346,13 @@ cls
 echo.
 echo =========================================================================
 echo.
-echo  Editar Índices del WIM
+echo  Editar Indices del WIM
 echo.
 echo =========================================================================
 echo.
-echo  1. Exportar un Índice
+echo  1. Exportar un Indice
 echo.
-echo  2. Eliminar un Índice
+echo  2. Eliminar un Indice
 echo.
 echo ----------------------------------------------------------------
 echo.
@@ -323,9 +384,7 @@ echo Archivo WIM actual: !WIM_FILE_PATH!
 echo.
 dism /get-wiminfo /wimfile:"!WIM_FILE_PATH!"
 echo.
-set /p "INDEX_TO_EXPORT=Ingrese el numero de indice que desea exportar: "
-
-REM --- INICIO DE LA MODIFICACION ---
+set /p "INDEX_TO_EXPORT=Ingrese el numero de Indice que desea exportar: "
 
 REM Obtener las partes del archivo original para crear un nombre por defecto
 for %%F in ("!WIM_FILE_PATH!") do (
@@ -343,15 +402,13 @@ set /p "DEST_WIM_PATH=Ingrese la ruta completa (o presione Enter para usar la su
 REM Si el usuario no ingresa nada, usar la ruta por defecto
 if "!DEST_WIM_PATH!"=="" set "DEST_WIM_PATH=!DEFAULT_DEST_PATH!"
 
-REM --- FIN DE LA MODIFICACION ---
-
 dism /export-image /sourceimagefile:"!WIM_FILE_PATH!" /sourceindex:!INDEX_TO_EXPORT! /destinationimagefile:"!DEST_WIM_PATH!"
 if !errorlevel! equ 0 (
     echo.
     echo Indice !INDEX_TO_EXPORT! exportado exitosamente a "!DEST_WIM_PATH!".
 ) else (
     echo.
-    echo Error al exportar el indice. Verifique la ruta y los permisos.
+    echo Error al exportar el Indice. Verifique la ruta y los permisos.
 )
 pause
 goto edit_indexes_menu
@@ -372,18 +429,18 @@ echo Archivo WIM actual: !WIM_FILE_PATH!
 echo.
 dism /get-wiminfo /wimfile:"!WIM_FILE_PATH!"
 echo.
-set /p "INDEX_TO_DELETE=Ingrese el número de índice que desea eliminar: "
+set /p "INDEX_TO_DELETE=Ingrese el número de Indice que desea eliminar: "
 echo.
-set /p "CONFIRM=Está seguro que desea eliminar el índice !INDEX_TO_DELETE! de forma permanente? (S/N): "
+set /p "CONFIRM=Está seguro que desea eliminar el Indice !INDEX_TO_DELETE! de forma permanente? (S/N): "
 
 if /i "%CONFIRM%"=="S" (
     dism /delete-image /imagefile:"!WIM_FILE_PATH!" /index:!INDEX_TO_DELETE!
     if !errorlevel! equ 0 (
         echo.
-        echo Índice !INDEX_TO_DELETE! eliminado exitosamente.
+        echo Indice !INDEX_TO_DELETE! eliminado exitosamente.
     ) else (
         echo.
-        echo Error al eliminar el índice. Puede que esté montado o que el archivo esté en uso.
+        echo Error al eliminar el Indice. Puede que esté montado o que el archivo esté en uso.
     )
 ) else (
     echo.
@@ -391,6 +448,149 @@ if /i "%CONFIRM%"=="S" (
 )
 pause
 goto edit_indexes_menu
+
+:: =============================================
+::  NUEVO Submenu Convertir Imagen
+:: =============================================
+:convert_image_menu
+cls
+echo.
+echo =========================================================================
+echo.
+echo  Convertir otro formato de imagen a WIM
+echo.
+echo =========================================================================
+echo.
+echo  1. Convertir ESD a WIM
+echo.
+echo  2. Convertir VHD/VHDX a WIM
+echo.
+echo ----------------------------------------------------------------
+echo.
+echo  0. Volver al menu anterior
+echo.
+set /p opcionCI="Ingrese el numero de la opcion: "
+
+if "%opcionCI%"=="1" goto convert_esd
+if "%opcionCI%"=="2" goto convert_vhd
+if "%opcionCI%"=="0" goto image_management_menu
+echo Opcion no valida.
+Intente nuevamente.
+pause
+goto convert_image_menu
+
+:convert_esd
+cls
+echo.
+echo --- Convertir ESD a WIM ---
+echo.
+set /p "ESD_FILE_PATH=Ingrese la ruta completa del archivo ESD: "
+if not exist "!ESD_FILE_PATH!" (
+    echo El archivo no existe.
+    pause
+    goto convert_image_menu
+)
+
+echo.
+echo Obteniendo informacion de los indices del archivo ESD...
+dism /get-wiminfo /wimfile:"!ESD_FILE_PATH!"
+echo.
+set /p "INDEX_TO_CONVERT=Ingrese el numero de indice que desea convertir: "
+
+for %%F in ("!ESD_FILE_PATH!") do (
+    set "ESD_DIR=%%~dpF"
+    set "ESD_NAME=%%~nF"
+)
+set "DEFAULT_DEST_PATH=!ESD_DIR!!ESD_NAME!_indice_!INDEX_TO_CONVERT!.wim"
+
+echo.
+echo Ruta de destino sugerida para el nuevo WIM:
+echo !DEFAULT_DEST_PATH!
+echo.
+set /p "DEST_WIM_PATH=Ingrese la ruta completa (o presione Enter para usar la sugerida): "
+if "!DEST_WIM_PATH!"=="" set "DEST_WIM_PATH=!DEFAULT_DEST_PATH!"
+
+echo.
+echo Convirtiendo... Esto puede tardar varios minutos.
+dism /export-image /SourceImageFile:"!ESD_FILE_PATH!" /SourceIndex:!INDEX_TO_CONVERT! /DestinationImageFile:"!DEST_WIM_PATH!" /Compress:max /CheckIntegrity
+
+if !errorlevel! equ 0 (
+    echo.
+    echo Conversion completada exitosamente.
+    echo Nuevo archivo WIM creado en: "!DEST_WIM_PATH!"
+    set "WIM_FILE_PATH=!DEST_WIM_PATH!"
+    echo.
+    echo La ruta del nuevo archivo WIM ha sido cargada en el script.
+) else (
+    echo.
+    echo Error durante la conversion.
+)
+pause
+goto convert_image_menu
+
+:convert_vhd
+cls
+echo.
+echo --- Convertir VHD/VHDX a WIM ---
+echo.
+set /p "VHD_FILE_PATH=Ingrese la ruta completa del archivo VHD o VHDX: "
+if not exist "!VHD_FILE_PATH!" (
+    echo El archivo no existe.
+    pause
+    goto convert_image_menu
+)
+
+for %%F in ("!VHD_FILE_PATH!") do (
+    set "VHD_DIR=%%~dpF"
+    set "VHD_NAME=%%~nF"
+)
+set "DEFAULT_DEST_PATH=!VHD_DIR!!VHD_NAME!.wim"
+
+echo.
+echo Ruta de destino sugerida para el nuevo WIM:
+echo !DEFAULT_DEST_PATH!
+echo.
+set /p "DEST_WIM_PATH=Ingrese la ruta completa (o presione Enter para usar la sugerida): "
+if "!DEST_WIM_PATH!"=="" set "DEST_WIM_PATH=!DEFAULT_DEST_PATH!"
+
+echo.
+echo Montando el VHD...
+set "DRIVE_LETTER="
+for /f "delims=" %%L in ('powershell -NoProfile -Command "(Mount-Vhd -Path '!VHD_FILE_PATH!' -PassThru | Get-Disk | Get-Partition | Get-Volume).DriveLetter"') do (
+    if not defined DRIVE_LETTER set "DRIVE_LETTER=%%L"
+)
+
+if not defined DRIVE_LETTER (
+    echo.
+    echo Error: No se pudo montar el VHD o no se encontro una letra de unidad.
+    pause
+    goto convert_image_menu
+)
+
+echo VHD montado en la unidad: !DRIVE_LETTER!:
+echo.
+echo Capturando la imagen a WIM... Esto puede tardar mucho tiempo.
+dism /capture-image /imagefile:"!DEST_WIM_PATH!" /capturedir:!DRIVE_LETTER!:\ /name:"Captured VHD" /compress:max /checkintegrity
+
+if !errorlevel! equ 0 (
+    echo.
+    echo Captura completada exitosamente.
+    echo Nuevo archivo WIM creado en: "!DEST_WIM_PATH!"
+    set "WIM_FILE_PATH=!DEST_WIM_PATH!"
+    echo.
+    echo La ruta del nuevo archivo WIM ha sido cargada en el script.
+) else (
+    echo.
+    echo Error durante la captura de la imagen.
+)
+
+echo.
+echo Desmontando el VHD...
+powershell -NoProfile -Command "Dismount-Vhd -Path '!VHD_FILE_PATH!'" >nul 2>&1
+echo VHD desmontado.
+
+pause
+goto convert_image_menu
 
 :: =============================================
 ::  Seccion para cambiar la edicion de Windows
@@ -681,19 +881,24 @@ if "%opcionL%"=="5" (
     goto limpieza
 )
 if "%opcionL%"=="6" (
-    DISM /Cleanup-Image /Image:%MOUNT_DIR% /StartComponentCleanup /ResetBase /ScratchDir:%MOUNT_DIR%1
+    DISM /Cleanup-Image /Image:%MOUNT_DIR% /StartComponentCleanup /ResetBase /ScratchDir:%Scratch_DIR%
     pause
     goto limpieza
 )
 if "%opcionL%"=="7" (
+    echo.
     echo [PASO 1 de 5] Verificando la salud de la imagen...
     DISM /Image:%MOUNT_DIR% /Cleanup-Image /CheckHealth
+    echo.
     echo [PASO 2 de 5] Escaneando la imagen en busca de corrupcion...
     DISM /Image:%MOUNT_DIR% /Cleanup-Image /ScanHealth
+    echo.
     echo [PASO 3 de 5] Reparando la imagen si es necesario...
     DISM /Image:%MOUNT_DIR% /Cleanup-Image /RestoreHealth
+    echo.
     echo [PASO 4 de 5] Verificando y reparando archivos del sistema...
     SFC /scannow /offbootdir=%MOUNT_DIR% /offwindir=%MOUNT_DIR%\Windows
+    echo.
     echo [PASO 5 de 5] Analizando y ejecutando limpieza de componentes...
     set "cleanupRecommended=No"
     for /f "tokens=2 delims=:" %%a in ('DISM /Image:%MOUNT_DIR% /Cleanup-Image /AnalyzeComponentStore ^| findstr /I /C:"Component Store Cleanup Recommended"') do (
@@ -702,10 +907,10 @@ if "%opcionL%"=="7" (
         if /I "!result!"=="Yes" set "cleanupRecommended=Yes"
     )
     if "!cleanupRecommended!"=="Yes" (
-        echo  Se recomienda la limpieza del almacen de componentes. Procediendo...
-        DISM /Cleanup-Image /Image:%MOUNT_DIR% /StartComponentCleanup /ResetBase /ScratchDir:%MOUNT_DIR%1
+        echo Se recomienda la limpieza del almacen de componentes. Procediendo...
+        DISM /Cleanup-Image /Image:%MOUNT_DIR% /StartComponentCleanup /ResetBase /ScratchDir:%Scratch_DIR%
     ) else (
-        echo  La limpieza del almacen de componentes no es necesaria en este momento.
+        echo La limpieza del almacen de componentes no es necesaria en este momento.
     )
     pause
     goto limpieza
