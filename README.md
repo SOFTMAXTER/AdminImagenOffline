@@ -1,4 +1,4 @@
-# AdminImagenOffline by SOFTMAXTER V1.1
+# AdminImagenOffline by SOFTMAXTER V1.2
 
 AdminImagenOffline` es un script de batch para la línea de comandos de Windows que facilita la administración y el mantenimiento de imágenes de Windows (archivos `.wim`). La herramienta permite a los usuarios montar, desmontar, editar, limpiar y realizar otras operaciones avanzadas en imágenes de Windows de forma offline, todo desde un menú interactivo y fácil de usar.
 
