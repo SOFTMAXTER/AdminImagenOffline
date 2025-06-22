@@ -103,7 +103,6 @@ Requiere una imagen montada para funcionar. Ofrece un menú con las siguientes h
 * **CONOCIMIENTOS TÉCNICOS:** Se recomienda tener conocimientos básicos sobre DISM, SFC y la administración de imágenes de Windows.
 * **IDIOMA:** El script y sus mensajes en consola están en español.
 
-
 ## Descargo de Responsabilidad
 
 Este script realiza operaciones avanzadas que modifican archivos de imagen de Windows. El autor, **SOFTMAXTER**, no se hace responsable de la pérdida de datos o daños que puedan ocurrir en tus archivos WIM.
@@ -124,5 +123,3 @@ Si deseas contribuir al desarrollo de este script:
 3.  Realiza tus cambios y haz commit (`git commit -am 'Añade nueva funcionalidad'`).
 4.  Haz Push a la rama (`git push origin feature/nueva-funcionalidad`).
 5.  Abre un Pull Request.
-
----
