@@ -1,6 +1,6 @@
 # AdminImagenOffline by SOFTMAXTER V1.2
 
-**AdminImagenOffline** es un completo y potente script para la línea de comandos de Windows (Batch) diseñado para simplificar la administración y el mantenimiento de imágenes de instalación de Windows (`.wim`, `.esd`, `.vhd/vhdx`). El script encapsula complejas operaciones de `DISM` y otras herramientas del sistema en una interfaz de menús interactiva y fácil de usar.
+**AdminImagenOffline** es un completo script para la línea de comandos de Windows (Batch) diseñado para simplificar la administración y el mantenimiento de imágenes de instalación de Windows (`.wim`, `.esd`, `.vhd/vhdx`). El script encapsula complejas operaciones de `DISM` y otras herramientas del sistema en una interfaz de menús interactiva y fácil de usar.
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar o convertir imágenes del sistema operativo de manera eficiente y sin conexión.
 
