@@ -188,16 +188,19 @@ goto mount_unmount_menu
 :reload_image
 cls
 if "%IMAGE_MOUNTED%"=="0" (
+    echo.
     echo No hay ninguna imagen montada para recargar.
     pause
     goto mount_unmount_menu
 )
 if not defined WIM_FILE_PATH (
+    echo.
     echo ERROR: No se puede encontrar la ruta del archivo WIM original.
     pause
     goto mount_unmount_menu
 )
 if not defined MOUNTED_INDEX (
+    echo.
     echo ERROR: No se pudo determinar el Indice de la imagen montada.
     pause
     goto mount_unmount_menu
@@ -211,6 +214,7 @@ echo   Indice Montado: !MOUNTED_INDEX!
 echo.
 set /p "CONFIRM=Desea continuar? (S/N): "
 if /i not "%CONFIRM%"=="S" (
+    echo.
     echo Operacion cancelada.
     pause
     goto mount_unmount_menu
@@ -248,12 +252,14 @@ goto mount_unmount_menu
 :mount_image
 cls
 if "%IMAGE_MOUNTED%"=="1" (
+    echo.
     echo La imagen ya se encuentra montada.
     pause
     goto mount_unmount_menu
 )
 set /p "WIM_FILE_PATH=Ingrese la ruta completa del archivo WIM: "
 if not exist "!WIM_FILE_PATH!" (
+    echo.
     echo El archivo no existe.
     pause
     goto mount_image
@@ -268,6 +274,7 @@ dism /mount-wim /wimfile:"!WIM_FILE_PATH!" /index:!INDEX! /mountdir:"%MOUNT_DIR%
 if !errorlevel! equ 0 (
     set "IMAGE_MOUNTED=1"
     set "MOUNTED_INDEX=!INDEX!"
+    echo.
     echo Imagen montada exitosamente.
 ) else (
     echo Error al montar la imagen.
@@ -278,6 +285,7 @@ goto mount_unmount_menu
 :unmount_image
 cls
 if "%IMAGE_MOUNTED%"=="0" (
+    echo.
     echo No hay ninguna imagen montada.
     pause
     goto mount_unmount_menu
@@ -531,11 +539,11 @@ goto convert_image_menu
 :convert_vhd
 cls
 echo.
-echo --- Convertir VHD/VHDX a WIM ---
+echo --- Convertir VHD/VHDX a WIM --- 
 echo.
 set /p "VHD_FILE_PATH=Ingrese la ruta completa del archivo VHD o VHDX: "
-if not exist "!VHD_FILE_PATH!" (
-    echo El archivo no existe.
+if not exist "!VHD_FILE_PATH!" ( 
+    echo El archivo no existe. 
     pause
     goto convert_image_menu
 )
@@ -547,14 +555,21 @@ for %%F in ("!VHD_FILE_PATH!") do (
 set "DEFAULT_DEST_PATH=!VHD_DIR!!VHD_NAME!.wim"
 
 echo.
-echo Ruta de destino sugerida para el nuevo WIM:
-echo !DEFAULT_DEST_PATH!
+echo Ruta de destino sugerida para el nuevo WIM: 
+echo !DEFAULT_DEST_PATH! 
 echo.
-set /p "DEST_WIM_PATH=Ingrese la ruta completa (o presione Enter para usar la sugerida): "
-if "!DEST_WIM_PATH!"=="" set "DEST_WIM_PATH=!DEFAULT_DEST_PATH!"
+set /p "DEST_WIM_PATH=Ingrese la ruta completa (o presione Enter para usar la sugerida): " 
+if "!DEST_WIM_PATH!"=="" set "DEST_WIM_PATH=!DEFAULT_DEST_PATH!" 
 
 echo.
-echo Montando el VHD...
+echo --- Ingrese los metadatos para la nueva imagen WIM ---
+echo.
+set /p "IMAGE_NAME=Ingrese el NOMBRE de la imagen (ej: Captured VHD): "
+set /p "IMAGE_DESC=Ingrese la DESCRIPCION de la imagen: "
+if "!IMAGE_NAME!"=="" set "IMAGE_NAME=Captured VHD"
+
+echo.
+echo Montando el VHD... 
 set "DRIVE_LETTER="
 for /f "delims=" %%L in ('powershell -NoProfile -Command "(Mount-Vhd -Path '!VHD_FILE_PATH!' -PassThru | Get-Disk | Get-Partition | Get-Volume).DriveLetter"') do (
     if not defined DRIVE_LETTER set "DRIVE_LETTER=%%L"
@@ -569,27 +584,26 @@ if not defined DRIVE_LETTER (
 
 echo VHD montado en la unidad: !DRIVE_LETTER!:
 echo.
-echo Capturando la imagen a WIM... Esto puede tardar mucho tiempo.
-dism /capture-image /imagefile:"!DEST_WIM_PATH!" /capturedir:!DRIVE_LETTER!:\ /name:"Captured VHD" /compress:max /checkintegrity
+echo Capturando la imagen a WIM... Esto puede tardar mucho tiempo. 
+dism /capture-image /imagefile:"!DEST_WIM_PATH!" /capturedir:!DRIVE_LETTER!:\ /name:"!IMAGE_NAME!" /description:"!IMAGE_DESC!" /compress:max /checkintegrity
 
-if !errorlevel! equ 0 (
+if !errorlevel! equ 0 ( 
     echo.
-    echo Captura completada exitosamente.
-    echo Nuevo archivo WIM creado en: "!DEST_WIM_PATH!"
-    set "WIM_FILE_PATH=!DEST_WIM_PATH!"
+    echo Captura completada exitosamente. 
+    echo Nuevo archivo WIM creado en: "!DEST_WIM_PATH!" 
+    set "WIM_FILE_PATH=!DEST_WIM_PATH!" 
     echo.
-    echo La ruta del nuevo archivo WIM ha sido cargada en el script.
+    echo La ruta del nuevo archivo WIM ha sido cargada en el script. 
 ) else (
     echo.
     echo Error durante la captura de la imagen.
 )
 
 echo.
-echo Desmontando el VHD...
+echo Desmontando el VHD... 
 powershell -NoProfile -Command "Dismount-Vhd -Path '!VHD_FILE_PATH!'" >nul 2>&1
 echo VHD desmontado.
-
-pause
+pause 
 goto convert_image_menu
 
 :: =============================================
@@ -856,31 +870,43 @@ echo.
 set /p opcionL="Ingrese el numero de la opcion: "
 
 if "%opcionL%"=="1" (
+    echo.
+    echo Verificando la salud de la imagen...
     DISM /Image:%MOUNT_DIR% /Cleanup-Image /CheckHealth
     pause
     goto limpieza
 )
 if "%opcionL%"=="2" (
+    echo.
+    echo Escaneando la imagen en busca de corrupcion...
     DISM /Image:%MOUNT_DIR% /Cleanup-Image /ScanHealth
     pause
     goto limpieza
 )
 if "%opcionL%"=="3" (
+    echo.
+    echo Reparando la imagen si es necesario... 
     DISM /Image:%MOUNT_DIR% /Cleanup-Image /RestoreHealth
     pause
     goto limpieza
 )
 if "%opcionL%"=="4" (
+    echo.
+    echo Verificando y reparando archivos del sistema...
     SFC /scannow /offbootdir=%MOUNT_DIR% /offwindir=%MOUNT_DIR%\Windows
     pause
     goto limpieza
 )
 if "%opcionL%"=="5" (
+    echo.
+    echo Analizando Almacen de componentes...
     DISM /Image:%MOUNT_DIR% /Cleanup-Image /AnalyzeComponentStore
     pause
     goto limpieza
 )
 if "%opcionL%"=="6" (
+    echo.
+    echo Limpiando Almacen de componentes...
     DISM /Cleanup-Image /Image:%MOUNT_DIR% /StartComponentCleanup /ResetBase /ScratchDir:%Scratch_DIR%
     pause
     goto limpieza
