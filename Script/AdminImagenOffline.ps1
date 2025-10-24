@@ -1044,7 +1044,8 @@ function Limpieza-Menu {
             "4" {
                 Write-Host "`n[+] Verificando archivos (SFC)..." -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: SFC /Scannow Offline..."
-                SFC /scannow /offwindir:($Script:MOUNT_DIR + '\Windows')
+                SFC /scannow /offbootdir=C:\TEMP /offwindir=C:\TEMP\Windows
+
                 if ($LASTEXITCODE -ne 0) { Write-Warning "SFC encontro errores o no pudo completar."}
                 Pause
             }
@@ -1076,7 +1077,7 @@ function Limpieza-Menu {
                 Invoke-RestoreHealthWithFallback -MountDir $Script:MOUNT_DIR -IsSequence
 
                 Write-Host "`n[4/5] Verificando archivos (SFC)..." -FG Yellow; Write-Log -LogLevel ACTION -Message "LIMPIEZA: (4/5) SFC Offline..."
-                SFC /scannow /offwindir:($Script:MOUNT_DIR + '\Windows')
+                SFC /scannow /offbootdir=C:\TEMP /offwindir=C:\TEMP\Windows
                 if ($LASTEXITCODE -ne 0) { Write-Warning "SFC encontro errores o no pudo completar."}
 
                 Write-Host "`n[5/5] Analizando/Limpiando componentes..." -FG Yellow; Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Analyze/Cleanup..."
@@ -1192,7 +1193,6 @@ try {
 } finally {
     if (Test-Path $TEMP_DISM_OUT) { Remove-Item -Path $TEMP_DISM_OUT -Force -ErrorAction SilentlyContinue }
 }
-
 
 # =============================================
 #  Punto de Entrada: Iniciar el Menú Principal
