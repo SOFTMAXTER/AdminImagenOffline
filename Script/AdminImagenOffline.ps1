@@ -24,10 +24,10 @@ function Invoke-FullRepoUpdater {
     $repoUser = "SOFTMAXTER"; $repoName = "AdminImagenOffline"; $repoBranch = "main"
     $versionUrl = "https://raw.githubusercontent.com/$repoUser/$repoName/$repoBranch/version.txt"
     $zipUrl = "https://github.com/$repoUser/$repoName/archive/refs/heads/$repoBranch.zip"
-
+    
     try {
-        # Se intenta la operacion de red con un timeout corto
-        $remoteVersionStr = (Invoke-WebRequest -Uri $versionUrl -UseBasicParsing -Headers @{"Cache-Control"="no-cache"} -TimeoutSec 5).Content.Trim()
+        # Se intenta la operacion de red con un timeout corto para no retrasar el script si no hay conexion.
+        $remoteVersionStr = (Invoke-WebRequest -Uri $versionUrl -UseBasicParsing -Headers @{"Cache-Control"="no-cache"}).Content.Trim()
 
         if ([System.Version]$remoteVersionStr -gt [System.Version]$script:Version) {
             # Solo si se encuentra una actualizacion, se le notifica al usuario.
@@ -35,20 +35,19 @@ function Invoke-FullRepoUpdater {
             $confirmation = Read-Host "¿Deseas descargar e instalar la actualizacion ahora? (S/N)"
             if ($confirmation.ToUpper() -eq 'S') {
                 Write-Warning "El actualizador se ejecutara en una nueva ventana. NO LA CIERRES."
-                $tempDir = Join-Path $env:TEMP "AdminUpdater_ImgOffline" # Usar un nombre temporal distinto
+                $tempDir = Join-Path $env:TEMP "AdminUpdater"
                 if (Test-Path $tempDir) { Remove-Item -Path $tempDir -Recurse -Force }
                 New-Item -Path $tempDir -ItemType Directory | Out-Null
-                $updaterScriptPath = Join-Path $tempDir "updater_img.ps1"
-                # Asumimos que este script puede estar en /bin y Run.bat en el padre
-                $installPath = $PSScriptRoot # Si está en /bin, necesitaría Split-Path -Parent
-                $batchPath = Join-Path (Split-Path -Parent $installPath) "Run.bat" # Asumiendo Run.bat en el padre
+                $updaterScriptPath = Join-Path $tempDir "updater.ps1"
+                $installPath = (Split-Path -Path $PSScriptRoot -Parent)
+                $batchPath = Join-Path $installPath "Run.bat"
 
-                # --- El script interno ahora acepta un parámetro y tiene 6 pasos ---
+                # --- MODIFICADO: El script interno ahora acepta un parámetro y tiene 6 pasos ---
                 $updaterScriptContent = @"
-param(`$parentPID) # Recibe el ID del proceso principal
+param(`$parentPID) # <--- AÑADIDO: Recibe el ID del proceso principal
 
 `$ErrorActionPreference = 'Stop'
-`$Host.UI.RawUI.WindowTitle = 'PROCESO DE ACTUALIZACION (AdminImagenOffline) - NO CERRAR'
+`$Host.UI.RawUI.WindowTitle = 'PROCESO DE ACTUALIZACION DE AdminImagenOffline - NO CERRAR'
 try {
     `$tempDir_updater = "$tempDir"
     `$tempZip_updater = Join-Path "`$tempDir_updater" "update.zip"
@@ -61,29 +60,30 @@ try {
     Expand-Archive -Path "`$tempZip_updater" -DestinationPath "`$tempExtract_updater" -Force
     `$updateSourcePath = (Get-ChildItem -Path "`$tempExtract_updater" -Directory).FullName
 
-    Write-Host "[PASO 3/6] Esperando a que el proceso principal finalice..." -ForegroundColor Yellow
+    # --- AÑADIDO: Paso de espera explícito ---
+    Write-Host "[PASO 3/6] Esperando a que el proceso principal de AdminImagenOffline finalice..." -ForegroundColor Yellow
     try {
         # Espera a que el PID que le pasamos termine antes de continuar
         Get-Process -Id `$parentPID -ErrorAction Stop | Wait-Process -ErrorAction Stop
     } catch {
         # Si el proceso ya cerro (fue muy rapido), no es un error.
-        Write-Host "    - El proceso principal ya ha finalizado." -ForegroundColor Gray
+        Write-Host "   - El proceso principal ya ha finalizado." -ForegroundColor Gray
     }
+    # --- FIN DE LA MODIFICACIÓN ---
 
-    Write-Host "[PASO 4/6] Eliminando archivos antiguos..." -ForegroundColor Yellow
-    `$itemsToRemove = Get-ChildItem -Path "$installPath" -Exclude "Logs" # Ejemplo
+    Write-Host "[PASO 4/6] Eliminando archivos antiguos (excluyendo datos de usuario)..." -ForegroundColor Yellow # <--- MODIFICADO: Paso 4/6
+    `$itemsToRemove = Get-ChildItem -Path "$installPath" -Exclude "Logs"
     if (`$null -ne `$itemsToRemove) { Remove-Item -Path `$itemsToRemove.FullName -Recurse -Force }
 
-    Write-Host "[PASO 5/6] Instalando nuevos archivos..." -ForegroundColor Yellow
-    Move-Item -Path "`$updateSourcePath\bin\*" -Destination "$installPath" -Force # Asumiendo que el script está en /bin
+    Write-Host "[PASO 5/6] Instalando nuevos archivos..." -ForegroundColor Yellow # <--- MODIFICADO: Paso 5/6
+    Move-Item -Path "`$updateSourcePath\*" -Destination "$installPath" -Force
     Get-ChildItem -Path "$installPath" -Recurse | Unblock-File
 
-    Write-Host "[PASO 6/6] ¡Actualizacion completada! Reiniciando en 5 segundos..." -ForegroundColor Green
+    Write-Host "[PASO 6/6] ¡Actualizacion completada! Reiniciando la suite en 5 segundos..." -ForegroundColor Green # <--- MODIFICADO: Paso 6/6
     Start-Sleep -Seconds 5
-
+    
     Remove-Item -Path "`$tempDir_updater" -Recurse -Force
-    # Podría necesitar ajustar cómo se relanza si no usa Run.bat
-    if (Test-Path "$batchPath") { Start-Process -FilePath "$batchPath" } else { Write-Warning "No se encontro Run.bat para reiniciar." }
+    Start-Process -FilePath "$batchPath"
 }
 catch {
     Write-Error "¡LA ACTUALIZACION HA FALLADO!"
@@ -92,21 +92,18 @@ catch {
 }
 "@
                 Set-Content -Path $updaterScriptPath -Value $updaterScriptContent -Encoding utf8
-
-                # --- Se pasa el $PID actual como argumento al nuevo proceso ---
-                $launchArgs = "/c start `"PROCESO DE ACTUALIZACION`" powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$updaterScriptPath`" -parentPID $PID"
-
+                
+                # --- MODIFICADO: Se pasa el $PID actual como argumento al nuevo proceso ---
+                $launchArgs = "/c start `"PROCESO DE ACTUALIZACION DE AdminImagenOffline`" powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$updaterScriptPath`" -parentPID $PID"
+                
                 Start-Process cmd.exe -ArgumentList $launchArgs -WindowStyle Hidden
                 exit # El script principal se cierra inmediatamente
             } else {
-                Write-Host "Actualizacion omitida por el usuario." -ForegroundColor Yellow; Start-Sleep -Seconds 1
-            }
-        }
+				Write-Host "Actualizacion omitida por el usuario." -ForegroundColor Yellow; Start-Sleep -Seconds 1
+        	}
+        } 
     }
     catch {
-        # Silencioso si no hay conexion (Timeout) o da error, no es un error crítico.
-        Write-Host "No se pudo verificar la version remota. Continuando offline." -ForegroundColor Gray
-        Start-Sleep -Seconds 1
         return
     }
 }
@@ -114,7 +111,6 @@ catch {
 # =================================================================
 #  EJECUCION del Auto-Actualizador
 # =================================================================
-# Se ejecuta temprano para actualizar antes de cargar el resto.
 Invoke-FullRepoUpdater
 
 # =================================================================
