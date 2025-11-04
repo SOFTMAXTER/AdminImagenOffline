@@ -30,7 +30,7 @@ echo Privilegios de Administrador obtenidos. Ejecutando Admin Imagen Offline..
 echo.
 
 :: Establecer el titulo de la ventana
-title Admin Imagen Offline v1.3.0 by SOFTMAXTER
+title Admin Imagen Offline v1.3.2 by SOFTMAXTER
 
 :: Ruta al script de PowerShell (asume que esta en una carpeta llamada SCRIPT)
 set "scriptPath=%~dp0Script\AdminImagenOffline.ps1"
