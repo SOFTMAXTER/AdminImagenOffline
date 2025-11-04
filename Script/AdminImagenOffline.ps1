@@ -1,20 +1,20 @@
 <#
 .SYNOPSIS
-    Administra imágenes de Windows (.wim, .esd) sin conexión.
+    Administra imagenes de Windows (.wim, .esd) sin conexion.
 .DESCRIPTION
     Permite montar, desmontar, guardar cambios, editar índices, convertir formatos (ESD/VHD a WIM),
-    cambiar ediciones de Windows y realizar tareas de limpieza y reparación en imágenes offline.
-    Utiliza DISM y otras herramientas del sistema. Requiere ejecución como Administrador.
+    cambiar ediciones de Windows y realizar tareas de limpieza y reparacion en imagenes offline.
+    Utiliza DISM y otras herramientas del sistema. Requiere ejecucion como Administrador.
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.3.0
+    1.3.2
 #>
 
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.3.0"
+$script:Version = "1.3.2"
 
 # =================================================================
 #  Modulo de Auto-Actualizacion (Definicion)
@@ -42,7 +42,7 @@ function Invoke-FullRepoUpdater {
                 $installPath = (Split-Path -Path $PSScriptRoot -Parent)
                 $batchPath = Join-Path $installPath "Run.bat"
 
-                # --- MODIFICADO: El script interno ahora acepta un parámetro y tiene 6 pasos ---
+                # --- MODIFICADO: El script interno ahora acepta un parametro y tiene 6 pasos ---
                 $updaterScriptContent = @"
 param(`$parentPID) # <--- AÑADIDO: Recibe el ID del proceso principal
 
@@ -69,7 +69,7 @@ try {
         # Si el proceso ya cerro (fue muy rapido), no es un error.
         Write-Host "   - El proceso principal ya ha finalizado." -ForegroundColor Gray
     }
-    # --- FIN DE LA MODIFICACIÓN ---
+    # --- FIN DE LA MODIFICACION ---
 
     Write-Host "[PASO 4/6] Eliminando archivos antiguos (excluyendo datos de usuario)..." -ForegroundColor Yellow # <--- MODIFICADO: Paso 4/6
     `$itemsToRemove = Get-ChildItem -Path "$installPath" -Exclude "Logs"
@@ -187,6 +187,145 @@ function Format-WrappedText {
     return $lines | ForEach-Object { "$indentation$_" }
 }
 
+# --- Carga la configuracion desde el archivo JSON ---
+function Load-Config {
+    if (Test-Path $script:configFile) {
+        Write-Host "Cargando configuracion desde $script:configFile..." -ForegroundColor Gray
+        Write-Log -LogLevel INFO -Message "Cargando configuracion desde $script:configFile"
+        try {
+            $config = Get-Content -Path $script:configFile | ConvertFrom-Json
+            
+            if ($config.MountDir) {
+                $Script:MOUNT_DIR = $config.MountDir
+                Write-Log -LogLevel INFO -Message "Config: MOUNT_DIR cargado como '$($Script:MOUNT_DIR)'"
+            }
+            if ($config.ScratchDir) {
+                $Script:Scratch_DIR = $config.ScratchDir
+                Write-Log -LogLevel INFO -Message "Config: Scratch_DIR cargado como '$($Script:Scratch_DIR)'"
+            }
+        } catch {
+            Write-Warning "No se pudo leer el archivo de configuracion (JSON invalido o corrupto). Usando valores por defecto."
+            Write-Log -LogLevel WARN -Message "Fallo al leer/parsear config.json. Error: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Log -LogLevel INFO -Message "No se encontro archivo de configuracion. Usando valores por defecto."
+        # Si el archivo no existe, no hacemos nada, se usan los defaults.
+    }
+}
+
+# --- NUEVO: Guarda la configuracion actual en el archivo JSON ---
+function Save-Config {
+    Write-Log -LogLevel INFO -Message "Guardando configuracion..."
+    try {
+        $configToSave = @{
+            MountDir   = $Script:MOUNT_DIR
+            ScratchDir = $Script:Scratch_DIR
+        }
+        $configToSave | ConvertTo-Json | Set-Content -Path $script:configFile -Encoding utf8
+        Write-Host "[OK] Configuracion guardada." -ForegroundColor Green
+        Write-Log -LogLevel INFO -Message "Configuracion guardada en $script:configFile"
+    } catch {
+        Write-Error "[ERROR] No se pudo guardar el archivo de configuracion en '$($script:configFile)'."
+        Write-Log -LogLevel ERROR -Message "Fallo al guardar config.json. Error: $($_.Exception.Message)"
+        Pause
+    }
+}
+
+# --- NUEVO: Verifica que los directorios de trabajo existan antes de iniciar ---
+function Ensure-WorkingDirectories {
+    Write-Log -LogLevel INFO -Message "Verificando directorios de trabajo..."
+    Clear-Host
+    
+    # --- 1. Verificar MOUNT_DIR ---
+    if (-not (Test-Path $Script:MOUNT_DIR)) {
+        Write-Warning "El directorio de Montaje (MOUNT_DIR) no existe:"
+        Write-Host $Script:MOUNT_DIR -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "   [C] Crearlo automaticamente"
+        Write-Host "   [S] Seleccionar un directorio diferente"
+        Write-Host "   [N] Salir del script"
+        $choice = Read-Host "`nSelecciona una opcion"
+        
+        switch ($choice.ToUpper()) {
+            'C' {
+                Write-Host "[+] Creando directorio '$($Script:MOUNT_DIR)'..." -ForegroundColor Yellow
+                try {
+                    New-Item -Path $Script:MOUNT_DIR -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                    Write-Host "[OK] Directorio creado." -ForegroundColor Green
+                    Write-Log -LogLevel ACTION -Message "Directorio MOUNT_DIR '$($Script:MOUNT_DIR)' creado automaticamente."
+                } catch {
+                    Write-Error "[ERROR] No se pudo crear el directorio. Error: $($_.Exception.Message)"
+                    Write-Log -LogLevel ERROR -Message "Fallo al auto-crear MOUNT_DIR. Error: $($_.Exception.Message)"
+                    Read-Host "Presiona Enter para salir."; exit
+                }
+            }
+            'S' {
+                Write-Host "[+] Selecciona el NUEVO Directorio de Montaje..." -ForegroundColor Yellow
+                $newPath = Select-PathDialog -DialogType Folder -Title "Selecciona el Directorio de Montaje (ej. D:\TEMP)"
+                if (-not [string]::IsNullOrWhiteSpace($newPath)) {
+                    $Script:MOUNT_DIR = $newPath
+                    Write-Log -LogLevel ACTION -Message "CONFIG: MOUNT_DIR cambiado a '$newPath' (en el inicio)."
+                    Save-Config # Guardar la nueva seleccion
+                } else {
+                    Write-Warning "No se selecciono ruta. Saliendo."
+                    Read-Host "Presiona Enter para salir."; exit
+                }
+            }
+            default {
+                Write-Host "Operacion cancelada por el usuario. Saliendo."
+                Write-Log -LogLevel INFO -Message "Usuario cancelo en la verificacion de directorios."
+                exit
+            }
+        }
+    }
+
+    # --- 2. Verificar Scratch_DIR ---
+    if (-not (Test-Path $Script:Scratch_DIR)) {
+        Write-Warning "El directorio Temporal (Scratch_DIR) no existe:"
+        Write-Host $Script:Scratch_DIR -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "   [C] Crearlo automaticamente"
+        Write-Host "   [S] Seleccionar un directorio diferente (se guardara permanentemente)"
+        Write-Host "   [N] Salir del script"
+        $choice = Read-Host "`nSelecciona una opcion"
+        
+        switch ($choice.ToUpper()) {
+            'C' {
+                Write-Host "[+] Creando directorio '$($Script:Scratch_DIR)'..." -ForegroundColor Yellow
+                try {
+                    New-Item -Path $Script:Scratch_DIR -ItemType Directory -Force -ErrorAction Stop | Out-Null
+                    Write-Host "[OK] Directorio creado." -ForegroundColor Green
+                    Write-Log -LogLevel ACTION -Message "Directorio Scratch_DIR '$($Script:Scratch_DIR)' creado automaticamente."
+                } catch {
+                    Write-Error "[ERROR] No se pudo crear el directorio. Error: $($_.Exception.Message)"
+                    Write-Log -LogLevel ERROR -Message "Fallo al auto-crear Scratch_DIR. Error: $($_.Exception.Message)"
+                    Read-Host "Presiona Enter para salir."; exit
+                }
+            }
+            'S' {
+                Write-Host "[+] Selecciona el NUEVO Directorio Temporal (Scratch)..." -ForegroundColor Yellow
+                $newPath = Select-PathDialog -DialogType Folder -Title "Selecciona el Directorio Temporal (ej. D:\Scratch)"
+                if (-not [string]::IsNullOrWhiteSpace($newPath)) {
+                    $Script:Scratch_DIR = $newPath
+                    Write-Log -LogLevel ACTION -Message "CONFIG: Scratch_DIR cambiado a '$newPath' (en el inicio)."
+                    Save-Config # Guardar la nueva seleccion
+                } else {
+                    Write-Warning "No se selecciono ruta. Saliendo."
+                    Read-Host "Presiona Enter para salir."; exit
+                }
+            }
+            default {
+                Write-Host "Operacion cancelada por el usuario. Saliendo."
+                Write-Log -LogLevel INFO -Message "Usuario cancelo en la verificacion de directorios."
+                exit
+            }
+        }
+    }
+    
+    Write-Log -LogLevel INFO -Message "Verificacion de directorios de trabajo completada."
+    Start-Sleep -Seconds 1
+}
+
 # =================================================================
 #  Verificacion de Permisos de Administrador
 # =================================================================
@@ -206,7 +345,7 @@ try {
     # Si $PSScriptRoot es null (ejecutando seleccion en ISE), usar directorio actual como fallback
     $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
     # Determinar directorio padre (asumiendo que puede estar en /bin o no)
-    $parentDir = if ((Split-Path $scriptRoot -Leaf) -eq 'bin') { Split-Path -Parent $scriptRoot } else { $scriptRoot }
+    $parentDir = Split-Path -Parent $scriptRoot
     $script:logDir = Join-Path -Path $parentDir -ChildPath "Logs"
     if (-not (Test-Path $script:logDir)) {
         New-Item -Path $script:logDir -ItemType Directory -Force | Out-Null
@@ -223,18 +362,31 @@ Write-Log -LogLevel INFO -Message "AdminImagenOffline v$($script:Version) inicia
 # =================================================================
 #  Variables Globales y Rutas
 # =================================================================
+# --- Rutas por Defecto ---
+$defaultMountDir = "C:\TEMP"
+$defaultScratchDir = "C:\TEMP1"
+
+# --- Ruta del Archivo de Configuracion ---
+# ($scriptRoot se define en la seccion "Registro Inicial")
+$script:configFile = Join-Path $scriptRoot "config.json"
+
+# --- Inicializar variables globales con los valores por defecto ---
 $Script:WIM_FILE_PATH = $null
-$Script:MOUNT_DIR = "C:\TEMP"
-# ERROR PRESERVADO: Este directorio no se crea en ningún momento
-$Script:Scratch_DIR = "C:\TEMP1"
+$Script:MOUNT_DIR = $defaultMountDir
+# ERROR PRESERVADO (inicialmente): Se usa el valor por defecto que podria no existir
+$Script:Scratch_DIR = $defaultScratchDir 
 $Script:IMAGE_MOUNTED = 0
 $Script:MOUNTED_INDEX = $null
 
+# --- Cargar Configuracion Guardada ---
+# Sobrescribe $Script:MOUNT_DIR y $Script:Scratch_DIR si el archivo config.json existe
+Load-Config
+
 # =================================================================
-#  Módulos de Diálogo GUI
+#  Modulos de Dialogo GUI
 # =================================================================
 
-# --- Función para ABRIR archivos o carpetas ---
+# --- Funcion para ABRIR archivos o carpetas ---
 function Select-PathDialog {
     param(
         [Parameter(Mandatory=$true)]
@@ -273,7 +425,7 @@ function Select-PathDialog {
     return $null # Devuelve nulo si el usuario cancela
 }
 
-# --- Función para GUARDAR archivos ---
+# --- Funcion para GUARDAR archivos ---
 function Select-SavePathDialog {
     param(
         [string]$Title = "Guardar archivo como...",
@@ -315,7 +467,7 @@ function Mount-Image {
 
     $path = Select-PathDialog -DialogType File -Title "Seleccione el archivo WIM a montar" -Filter "Archivos WIM (*.wim)|*.wim|Archivos ESD (*.esd)|*.esd|Todos (*.*)|*.*"
     if ([string]::IsNullOrEmpty($path)) {
-        Write-Warning "Operación cancelada."
+        Write-Warning "Operacion cancelada."
         Pause
         return
     }
@@ -326,19 +478,6 @@ function Mount-Image {
 
     $INDEX = Read-Host "`nIngrese el numero de indice a montar"
     # Validar que INDEX sea un numero podría añadirse aquí
-
-    if (-not (Test-Path -Path $Script:MOUNT_DIR)) {
-        Write-Host "[+] Creando directorio de montaje: $Script:MOUNT_DIR" -ForegroundColor Gray
-        try {
-            New-Item -Path $Script:MOUNT_DIR -ItemType Directory -Force | Out-Null
-        } catch {
-            Write-Error "No se pudo crear el directorio '$Script:MOUNT_DIR'. Error: $($_.Exception.Message)"
-            Write-Log -LogLevel ERROR -Message "Fallo al crear MOUNT_DIR '$Script:MOUNT_DIR': $($_.Exception.Message)"
-            Pause
-            return
-        }
-    }
-
     Write-Host "[+] Montando imagen (Indice: $INDEX)... Esto puede tardar." -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "Montando imagen: '$Script:WIM_FILE_PATH' (Indice: $INDEX) en '$Script:MOUNT_DIR'"
     dism /mount-wim /wimfile:"$Script:WIM_FILE_PATH" /index:$INDEX /mountdir:"$Script:MOUNT_DIR"
@@ -417,7 +556,7 @@ function Reload-Image {
         dism /cleanup-wim
         Write-Host "Limpieza completada. Reintentando en 5 segundos..."
         Start-Sleep -Seconds 5
-        Reload-Image # Recursión para reintentar
+        Reload-Image # Recursion para reintentar
         return
     }
 
@@ -472,7 +611,7 @@ function Save-Changes {
 
 
 # =============================================
-#  FUNCIONES DE ACCION (Edición de Índices)
+#  FUNCIONES DE ACCION (Edicion de Índices)
 # =============================================
 
 function Export-Index {
@@ -481,7 +620,7 @@ function Export-Index {
         $path = Select-PathDialog -DialogType File -Title "Seleccione el archivo WIM de origen" -Filter "Archivos WIM (*.wim)|*.wim|Todos (*.*)|*.*"
         if (-not $path)
 		{
-			Write-Warning "Operación cancelada."
+			Write-Warning "Operacion cancelada."
 			Pause
 			return
 		}
@@ -497,7 +636,7 @@ function Export-Index {
     $DEFAULT_DEST_PATH = Join-Path $wimFileObject.DirectoryName "$($wimFileObject.BaseName)_indice_$($INDEX_TO_EXPORT).wim"
 
     $DEST_WIM_PATH = Select-SavePathDialog -Title "Exportar índice como..." -Filter "Archivos WIM (*.wim)|*.wim" -DefaultFileName $DEFAULT_DEST_PATH
-    if (-not $DEST_WIM_PATH) { Write-Warning "Operación cancelada."; Pause; return }
+    if (-not $DEST_WIM_PATH) { Write-Warning "Operacion cancelada."; Pause; return }
 
     Write-Host "[+] Exportando Indice $INDEX_TO_EXPORT a '$DEST_WIM_PATH'..." -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "Exportando Indice $INDEX_TO_EXPORT de '$($Script:WIM_FILE_PATH)' a '$DEST_WIM_PATH'."
@@ -516,16 +655,16 @@ function Delete-Index {
     Clear-Host
     if (-not $Script:WIM_FILE_PATH) {
         $path = Select-PathDialog -DialogType File -Title "Seleccione WIM para borrar índice" -Filter "Archivos WIM (*.wim)|*.wim|Todos (*.*)|*.*"
-        if (-not $path) { Write-Warning "Operación cancelada."; Pause; return }
+        if (-not $path) { Write-Warning "Operacion cancelada."; Pause; return }
         $Script:WIM_FILE_PATH = $path
     }
 
     Write-Host "Archivo WIM actual: $Script:WIM_FILE_PATH" -ForegroundColor Gray
     dism /get-wiminfo /wimfile:"$Script:WIM_FILE_PATH"
-    $INDEX_TO_DELETE = Read-Host "`nIngrese el número de Indice que desea eliminar"
+    $INDEX_TO_DELETE = Read-Host "`nIngrese el numero de Indice que desea eliminar"
     # Validar que INDEX_TO_DELETE sea un numero valido podría añadirse aquí
 
-    $CONFIRM = Read-Host "Está seguro que desea eliminar el Indice $INDEX_TO_DELETE de forma PERMANENTE? (S/N)"
+    $CONFIRM = Read-Host "Esta seguro que desea eliminar el Indice $INDEX_TO_DELETE de forma PERMANENTE? (S/N)"
 
     if ($CONFIRM -match '^(s|S)$') {
         Write-Host "[+] Eliminando Indice $INDEX_TO_DELETE..." -ForegroundColor Yellow
@@ -538,20 +677,20 @@ function Delete-Index {
             Write-Log -LogLevel ERROR -Message "Fallo la eliminacion del indice. Codigo: $LASTEXITCODE"
         }
     } else {
-        Write-Warning "Operación cancelada."
+        Write-Warning "Operacion cancelada."
     }
     Pause
 }
 
 # =============================================
-#  FUNCIONES DE ACCION (Conversión de Imagen)
+#  FUNCIONES DE ACCION (Conversion de Imagen)
 # =============================================
 
 function Convert-ESD {
     Clear-Host; Write-Host "--- Convertir ESD a WIM ---" -ForegroundColor Yellow
 
     $path = Select-PathDialog -DialogType File -Title "Seleccione el archivo ESD a convertir" -Filter "Archivos ESD (*.esd)|*.esd|Todos (*.*)|*.*"
-    if (-not $path) { Write-Warning "Operación cancelada."; Pause; return }
+    if (-not $path) { Write-Warning "Operacion cancelada."; Pause; return }
     $ESD_FILE_PATH = $path
 
     Write-Host "[+] Obteniendo informacion de los indices del ESD..." -ForegroundColor Yellow
@@ -563,7 +702,7 @@ function Convert-ESD {
     $DEFAULT_DEST_PATH = Join-Path $esdFileObject.DirectoryName "$($esdFileObject.BaseName)_indice_$($INDEX_TO_CONVERT).wim"
 
     $DEST_WIM_PATH = Select-SavePathDialog -Title "Convertir ESD a WIM..." -Filter "Archivos WIM (*.wim)|*.wim" -DefaultFileName $DEFAULT_DEST_PATH
-    if (-not $DEST_WIM_PATH) { Write-Warning "Operación cancelada."; Pause; return }
+    if (-not $DEST_WIM_PATH) { Write-Warning "Operacion cancelada."; Pause; return }
 
     Write-Host "[+] Convirtiendo... Esto puede tardar varios minutos." -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "Convirtiendo ESD '$ESD_FILE_PATH' (Indice: $INDEX_TO_CONVERT) a WIM '$DEST_WIM_PATH'."
@@ -586,14 +725,14 @@ function Convert-VHD {
     Clear-Host; Write-Host "--- Convertir VHD/VHDX a WIM ---" -ForegroundColor Yellow
 
     $path = Select-PathDialog -DialogType File -Title "Seleccione el archivo VHD o VHDX a convertir" -Filter "Archivos VHD (*.vhd, *.vhdx)|*.vhd;*.vhdx|Todos (*.*)|*.*"
-    if (-not $path) { Write-Warning "Operación cancelada."; Pause; return }
+    if (-not $path) { Write-Warning "Operacion cancelada."; Pause; return }
     $VHD_FILE_PATH = $path
 
     $vhdFileObject = Get-Item -Path $VHD_FILE_PATH
     $DEFAULT_DEST_PATH = Join-Path $vhdFileObject.DirectoryName "$($vhdFileObject.BaseName).wim"
 
     $DEST_WIM_PATH = Select-SavePathDialog -Title "Capturar VHD como WIM..." -Filter "Archivos WIM (*.wim)|*.wim" -DefaultFileName $DEFAULT_DEST_PATH
-    if (-not $DEST_WIM_PATH) { Write-Warning "Operación cancelada."; Pause; return }
+    if (-not $DEST_WIM_PATH) { Write-Warning "Operacion cancelada."; Pause; return }
 
     Write-Host "`n--- Ingrese los metadatos para la nueva imagen WIM ---" -ForegroundColor Yellow
     $IMAGE_NAME = Read-Host "Ingrese el NOMBRE de la imagen (ej: Captured VHD)"
@@ -643,6 +782,63 @@ function Convert-VHD {
 #  FUNCIONES DE MENU (Interfaz de Usuario)
 # =============================================
 
+# --- NUEVO: Menu de Configuracion de Rutas ---
+function Show-ConfigMenu {
+    while ($true) {
+        Clear-Host
+        Write-Host "=======================================================" -ForegroundColor Cyan
+        Write-Host "             Configuracion de Rutas de Trabajo         " -ForegroundColor Cyan
+        Write-Host "=======================================================" -ForegroundColor Cyan
+        Write-Host "Estas rutas se guardaran permanentemente."
+        Write-Host ""
+        Write-Host "   [1] Directorio de Montaje (MOUNT_DIR)"
+        Write-Host "       Ruta actual: " -NoNewline; Write-Host $Script:MOUNT_DIR -ForegroundColor Yellow
+        Write-Host "       (Donde se montara la imagen WIM para edicion)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   [2] Directorio Temporal (Scratch_DIR)"
+        Write-Host "       Ruta actual: " -NoNewline; Write-Host $Script:Scratch_DIR -ForegroundColor Yellow
+        Write-Host "       (Usado por DISM para operaciones de limpieza)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "-------------------------------------------------------"
+        Write-Host ""
+        Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
+        Write-Host ""
+        $opcionC = Read-Host "Selecciona una opcion"
+
+        switch ($opcionC.ToUpper()) {
+            "1" {
+                Write-Host "`n[+] Selecciona el NUEVO Directorio de Montaje..." -ForegroundColor Yellow
+                $newPath = Select-PathDialog -DialogType Folder -Title "Selecciona el Directorio de Montaje (ej. D:\TEMP)"
+                if (-not [string]::IsNullOrWhiteSpace($newPath)) {
+                    $Script:MOUNT_DIR = $newPath
+                    Write-Log -LogLevel ACTION -Message "CONFIG: MOUNT_DIR cambiado a '$newPath'"
+                    Save-Config # Guardar inmediatamente
+                } else {
+                    Write-Warning "Operacion cancelada. No se realizaron cambios."
+                }
+                Pause
+            }
+            "2" {
+                Write-Host "`n[+] Selecciona el NUEVO Directorio Temporal (Scratch)..." -ForegroundColor Yellow
+                $newPath = Select-PathDialog -DialogType Folder -Title "Selecciona el Directorio Temporal (ej. D:\Scratch)"
+                if (-not [string]::IsNullOrWhiteSpace($newPath)) {
+                    $Script:Scratch_DIR = $newPath
+                    Write-Log -LogLevel ACTION -Message "CONFIG: Scratch_DIR cambiado a '$newPath'"
+                    Save-Config # Guardar inmediatamente
+                } else {
+                    Write-Warning "Operacion cancelada. No se realizaron cambios."
+                }
+                Pause
+            }
+            "V" {
+                Write-Log -LogLevel INFO -Message "Saliendo del menu de configuracion."
+                return
+            }
+            default { Write-Warning "Opcion no valida."; Start-Sleep 1 }
+        }
+    }
+}
+
 function Mount-Unmount-Menu {
     while ($true) {
         Clear-Host
@@ -657,7 +853,7 @@ function Mount-Unmount-Menu {
         Write-Host "       (Descarga la imagen. ¡Cambios no guardados se pierden!)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "   [3] Recargar Imagen (Descartar Cambios)"
-        Write-Host "       (Desmonta y vuelve a montar. Útil para revertir)" -ForegroundColor Gray
+        Write-Host "       (Desmonta y vuelve a montar. util para revertir)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
@@ -687,7 +883,7 @@ function Save-Changes-Menu {
         Write-Host "       (Sobrescribe el indice actual con los cambios)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "   [2] Guardar cambios en un nuevo Indice (Append)"
-        Write-Host "       (Añade un nuevo indice al WIM con los cambios)" -ForegroundColor Gray
+        Write-Host "       (Agrega un nuevo indice al WIM con los cambios)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
@@ -822,7 +1018,7 @@ function Cambio-Edicion-Menu {
         if ($hiveLoaded) { reg unload HKLM\OfflineImage 2>$null | Out-Null }
     }
 
-    # Determinar versión amigable
+    # Determinar version amigable
     if ($WIN_CURRENT_BUILD) {
         $buildNum = 0; [int]::TryParse($WIN_CURRENT_BUILD, [ref]$buildNum) | Out-Null
         if ($buildNum -ge 22000) { $WIN_VERSION_FRIENDLY = "Windows 11" }
@@ -837,14 +1033,14 @@ function Cambio-Edicion-Menu {
         elseif ($WIN_PRODUCT_NAME -match "Windows 7|Server 2008 R2") { $WIN_VERSION_FRIENDLY = "Windows 7" }
     }
 
-    # Obtener edición actual con DISM
+    # Obtener edicion actual con DISM
     try {
         $dismEdition = dism /Image:$Script:MOUNT_DIR /Get-CurrentEdition 2>$null
         $currentEditionLine = $dismEdition | Select-String "Current Edition :"
         if ($currentEditionLine) { $CURRENT_EDITION_DETECTED = ($currentEditionLine.Line -split ':', 2)[1].Trim() }
-    } catch { Write-Warning "No se pudo obtener la edición actual vía DISM." }
+    } catch { Write-Warning "No se pudo obtener la edicion actual vía DISM." }
 
-    # Traducir nombre de edición
+    # Traducir nombre de edicion
     $DISPLAY_EDITION = switch -Wildcard ($CURRENT_EDITION_DETECTED) {
         "Core" { "Home" } "CoreSingleLanguage" { "Home SL" } "ProfessionalCountrySpecific" { "Pro CS" }
         "ProfessionalEducation" { "Pro Edu" } "ProfessionalSingleLanguage" { "Pro SL" } "ProfessionalWorkstation" { "Pro WS" }
@@ -963,7 +1159,7 @@ function Limpieza-Menu {
         function Invoke-RestoreHealthWithFallback {
             param(
                 [string]$MountDir,
-                [switch]$IsSequence # Para saber si estamos en la opción '7'
+                [switch]$IsSequence # Para saber si estamos en la opcion '7'
             )
 
             Write-Host "`n[+] Ejecutando DISM /RestoreHealth..." -ForegroundColor Yellow
@@ -1053,12 +1249,6 @@ function Limpieza-Menu {
             "6" {
                 Write-Host "`n[+] Limpiando componentes..." -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /StartComponentCleanup /ResetBase..."
-                 if (-not (Test-Path $Script:Scratch_DIR)) {
-                    Write-Warning "El directorio Scratch '$($Script:Scratch_DIR)' no existe. Intentando crear..."
-                    try { New-Item -Path $Script:Scratch_DIR -ItemType Directory -Force | Out-Null; Write-Host "[OK] Directorio Scratch creado." -FG Green }
-                    catch { Write-Error "Fallo creacion dir Scratch. Limpieza puede fallar."
-					Write-Log -LogLevel ERROR -Message "Fallo crear SCRATCH_DIR: $($_.Exception.Message)" }
-                }
                 DISM /Cleanup-Image /Image:$Script:MOUNT_DIR /StartComponentCleanup /ResetBase /ScratchDir:$Script:Scratch_DIR
                 Pause
             }
@@ -1087,11 +1277,6 @@ function Limpieza-Menu {
                 if ($cleanupRecommended -eq "Yes") {
                     Write-Host "Limpieza recomendada. Procediendo..." -FG Cyan;
                     Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Limpieza recomendada. Ejecutando..."
-                     if (-not (Test-Path $Script:Scratch_DIR)) {
-                        Write-Warning "El directorio Scratch '$($Script:Scratch_DIR)' no existe. Intentando crear..."
-                        try { New-Item -Path $Script:Scratch_DIR -ItemType Directory -Force | Out-Null; Write-Host "[OK] Directorio Scratch creado." -FG Green }
-                        catch { Write-Error "Fallo creacion dir Scratch. Limpieza puede fallar."; Write-Log -LogLevel ERROR -Message "Fallo crear SCRATCH_DIR: $($_.Exception.Message)" }
-                    }
                     DISM /Cleanup-Image /Image:$Script:MOUNT_DIR /StartComponentCleanup /ResetBase /ScratchDir:$Script:Scratch_DIR
                 } else {
                     Write-Host "La limpieza del almacen de componentes no es necesaria." -FG Green;
@@ -1105,15 +1290,18 @@ function Limpieza-Menu {
     }
 }
 
+# :main_menu (Función principal que muestra el menú inicial)
 function Main-Menu {
-    $Host.UI.RawUI.WindowTitle = "Admin Imagen Offline v$($script:Version) by SOFTMAXTER"
+    $Host.UI.RawUI.WindowTitle = "Admin Imagen Offline by SOFTMAXTER v$($script:Version)"
     while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "    Administrador de Imagen offline v$($script:Version) by SOFTMAXTER" -ForegroundColor Cyan
+        Write-Host "    Administrador de Imagen offline by SOFTMAXTER v$($script:Version) " -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host "  Ruta WIM : $Script:WIM_FILE_PATH" -ForegroundColor Gray
-        Write-Host "  Montado  : $($Script:IMAGE_MOUNTED) (Indice: $($Script:MOUNTED_INDEX)) en $($Script:MOUNT_DIR)" -ForegroundColor Gray
+        Write-Host "  Montado  : $($Script:IMAGE_MOUNTED) (Indice: $($Script:MOUNTED_INDEX))" -ForegroundColor Gray
+        Write-Host "  Dir Montaje: $Script:MOUNT_DIR" -ForegroundColor Gray
+        Write-Host "  Dir Scratch: $Script:Scratch_DIR" -ForegroundColor Gray
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
         Write-Host "   [1] Gestionar Imagen (Montar/Desmontar/Guardar/Convertir)" -ForegroundColor White
@@ -1124,6 +1312,9 @@ function Main-Menu {
         Write-Host ""
         Write-Host "   [3] Herramientas de Limpieza y Reparacion (Offline)" -ForegroundColor White
         Write-Host "       (Ejecuta DISM y SFC en la imagen montada)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   [4] Configurar Rutas de Trabajo" -ForegroundColor Yellow
+        Write-Host "       (Cambia las carpetas de Montaje y Scratch)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
@@ -1137,13 +1328,12 @@ function Main-Menu {
             "1" { Image-Management-Menu }
             "2" { Cambio-Edicion-Menu }
             "3" { Limpieza-Menu }
+            "4" { Show-ConfigMenu }
             "L" { if (Test-Path $script:logFile)
-			{
-				Write-Host "`n[+] Abriendo log..." -FG Green
-				Start-Process notepad.exe -ArgumentList $script:logFile
-				} else {
-					Write-Warning "Log no creado aun."
-					Read-Host "`nEnter para continuar..."
+		  	        {
+			        	Write-Host "`n[+] Abriendo log..." -FG Green; Start-Process notepad.exe -ArgumentList $script:logFile
+		                } else {
+					    Write-Warning "Log no creado aun."; Read-Host "`nEnter para continuar..."
 					}
 				}
             "S" {
@@ -1151,14 +1341,14 @@ function Main-Menu {
 				Write-Log -LogLevel INFO -Message "Script cerrado."
 				Write-Log -LogLevel INFO -Message "================================================="
 				exit
-			}
+				}
             default { Write-Warning "Opcion invalida."; Start-Sleep 1 }
         }
     }
 }
 
 # =================================================================
-#  Verificación de Montaje Existente (Se ejecuta antes del menú)
+#  Verificacion de Montaje Existente (Se ejecuta antes del menu)
 # =================================================================
 $Script:IMAGE_MOUNTED = 0; $Script:WIM_FILE_PATH = $null; $Script:MOUNTED_INDEX = $null
 $TEMP_DISM_OUT = Join-Path $env:TEMP "dism_check_$($RANDOM).tmp"
@@ -1187,10 +1377,12 @@ try {
     Write-Warning "Error al verificar imagenes montadas: $($_.Exception.Message)"
     Write-Log -LogLevel WARN -Message "Error verificando montaje previo: $($_.Exception.Message)"
 } finally {
-    if (Test-Path $TEMP_DISM_OUT) { Remove-Item -Path $TEMP_DISM_OUT -Force -ErrorAction SilentlyContinue }
+if (Test-Path $TEMP_DISM_OUT) { Remove-Item -Path $TEMP_DISM_OUT -Force -ErrorAction SilentlyContinue }
 }
 
+Ensure-WorkingDirectories
+
 # =============================================
-#  Punto de Entrada: Iniciar el Menú Principal
+#  Punto de Entrada: Iniciar el Menu Principal
 # =============================================
 Main-Menu
