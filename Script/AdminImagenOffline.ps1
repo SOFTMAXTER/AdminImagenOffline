@@ -142,7 +142,7 @@ try {
 
     Write-UpdateLog "[PASO 4/6] Preparando instalacion (limpiando archivos antiguos)..."
     
-    # --- EXCLUSIONES ESPECIFICAS DE AEGIS PHOENIX SUITE ---
+    # --- EXCLUSIONES ESPECIFICAS DE AdminImagenOffline ---
     `$itemsToRemove = Get-ChildItem -Path "$installPath" -Exclude "Logs"
     if (`$null -ne `$itemsToRemove) { 
         Remove-Item -Path `$itemsToRemove.FullName -Recurse -Force -ErrorAction SilentlyContinue
@@ -155,7 +155,7 @@ try {
     Get-ChildItem -Path "$installPath" -Recurse | Unblock-File -ErrorAction SilentlyContinue
 
     Write-UpdateLog "[PASO 6/6] ¡Actualizacion completada con exito!"
-    Write-Host "`nReiniciando Aegis Phoenix Suite en 5 segundos..." -ForegroundColor Green
+    Write-Host "`nReiniciando AdminImagenOffline en 5 segundos..." -ForegroundColor Green
     Start-Sleep -Seconds 5
     
     # Limpieza y reinicio
