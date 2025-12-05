@@ -26,11 +26,11 @@ if '%errorlevel%' NEQ '0' (
 :: ============================================================================
 
 echo.
-echo Privilegios de Administrador obtenidos. Ejecutando Admin Imagen Offline..
+echo Privilegios de Administrador obtenidos. Ejecutando AdminImagenOffline..
 echo.
 
 :: Establecer el titulo de la ventana
-title Admin Imagen Offline v1.3.2 by SOFTMAXTER
+title AdminImagenOffline v1.3.3 by SOFTMAXTER
 
 :: Ruta al script de PowerShell (asume que esta en una carpeta llamada SCRIPT)
 set "scriptPath=%~dp0Script\AdminImagenOffline.ps1"
