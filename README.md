@@ -1,40 +1,36 @@
-# AdminImagenOffline V1.3 by SOFTMAXTER
+# AdminImagenOffline V1.4 by SOFTMAXTER
 
-**AdminImagenOffline** es un completo script en PowerShell, diseñado para simplificar la administración y el mantenimiento de imágenes de instalación de Windows (`.wim`, `.esd`, `.vhd/vhdx`). El script encapsula complejas operaciones de `DISM` y otras herramientas del sistema en una interfaz de menús interactiva y fácil de usar.
+**AdminImagenOffline** es un completo script en PowerShell, diseñado para simplificar la administración y el mantenimiento de imágenes de instalación de Windows (`.wim`, `.esd`, `.vhd/vhdx`). El script encapsula complejas operaciones de `DISM`, manipulación del Registro y otras herramientas del sistema en una interfaz de menús interactiva y fácil de usar.
 
-Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar o convertir imágenes del sistema operativo de manera eficiente y sin conexión.
+Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente y sin conexión.
 
 ## Características Principales
 
-* **Interfaz Guiada por Menús**: Todas las funciones están organizadas en menús y submenús claros y fáciles de navegar, con un estilo visual profesional.
+* **Interfaz Híbrida (Consola + GUI)**: Combina la rapidez de la consola para operaciones básicas con interfaces gráficas (Windows Forms) modernas para la gestión de drivers, servicios, bloatware y registro.
 * **Auto-Actualizador**: El script busca automáticamente nuevas versiones en GitHub al iniciar y ofrece al usuario la posibilidad de actualizarse.
 * **Configuración Persistente**: Guarda las rutas de trabajo (Directorio de Montaje y Directorio Temporal) en un archivo `config.json` para que las preferencias del usuario sean permanentes.
-* **Gestión de Directorios**: Comprueba si los directorios de trabajo (Montaje y Temporal) existen al inicio. Si no existen, ofrece crearlos automáticamente o permite al usuario seleccionar una nueva ubicación.
-* **Detección Automática**: Verifica al inicio si ya existe una imagen montada en el sistema y carga su información dinámicamente (ruta, índice).
-* **Autoelevación de Privilegios**: El script `Run.bat` incluido comprueba si se está ejecutando como Administrador y, de no ser así, intenta reiniciarse con los permisos necesarios.
-* **Gestión de Imágenes**:
-    * **Montaje/Desmontaje**: Permite montar un índice específico de un archivo WIM en un directorio local configurable y desmontarlo.
-    * **Guardado de Cambios**: Ofrece la opción de guardar los cambios en el índice actual o crear un nuevo índice con las modificaciones (append).
-    * **Recarga de Imagen**: Descarta todos los cambios no guardados desmontando y volviendo a montar la imagen rápidamente.
-* **Edición de Índices WIM**:
-    * **Exportar Índice**: Permite guardar un índice específico de un archivo WIM en un nuevo archivo WIM de destino.
-    * **Eliminar Índice**: Ofrece la capacidad de borrar de forma permanente un índice de un archivo WIM.
-* **Conversión de Formatos de Imagen**:
-    * **ESD a WIM**: Convierte un índice específico de un archivo `.esd` (Electronic Software Download) a un archivo `.wim` con compresión máxima.
-    * **VHD/VHDX a WIM**: Monta automáticamente un disco duro virtual (`.vhd` o `.vhdx`), captura su contenido en un nuevo archivo `.wim` y lo desmonta al finalizar.
-* **Cambio de Edición de Windows**:
-    * Detecta automáticamente la versión del SO (Windows 7/8.1/10/11) y la edición actual de la imagen montada.
-    * Muestra las ediciones de destino a las que se puede actualizar y realiza el cambio con un solo comando.
-* **Suite de Limpieza y Reparación**:
-    * Integra las funciones más importantes de `DISM /Cleanup-Image` y `SFC` para imágenes offline.
-    * **Reparación con Fuente Alternativa**: Si `DISM /RestoreHealth` falla, el script ofrece automáticamente la opción de especificar un archivo `install.wim` como fuente de reparación alternativa.
-    * Permite ejecutar análisis, verificaciones, reparaciones y limpieza del almacén de componentes de forma individual o todas a la vez.
+* **Gestión de Directorios**: Comprueba y gestiona automáticamente la creación de los directorios de trabajo necesarios.
+* **Detección Automática**: Verifica al inicio si ya existe una imagen montada en el sistema y carga su información dinámicamente.
+* **Autoelevación de Privilegios**: Incluye un lanzador `Run.bat` que asegura la ejecución con permisos de Administrador.
+* **Gestión de Imágenes**: Montaje, desmontaje (con descartes), guardado de cambios (commit/append) y recarga rápida.
+* **Edición de Índices WIM**: Exportación y eliminación de índices específicos.
+* **Conversión de Formatos**: ESD a WIM y VHD/VHDX a WIM.
+* **Cambio de Edición de Windows**: Detección y cambio de edición (ej. Home a Pro) offline.
+* **Gestión Avanzada de Drivers**:
+    * **Inyector Inteligente**: Compara una carpeta local de drivers contra la imagen montada, detectando duplicados y permitiendo la inyección masiva.
+    * **Desinstalador de Drivers**: Lista los drivers de terceros (OEM) instalados en la imagen y permite su eliminación selectiva.
+* **Eliminación de Bloatware**: Interfaz gráfica con clasificación por colores (Verde=Seguro, Naranja=Recomendado, Blanco=Otros) para eliminar aplicaciones preinstaladas (Appx).
+* **Optimización de Servicios**: Permite deshabilitar servicios del sistema innecesarios organizados por categorías mediante una interfaz de pestañas.
+* **Tweaks y Registro Offline**:
+    * **Gestor Nativo**: Aplica ajustes de rendimiento y privacidad escribiendo directamente en el registro offline (sin depender de `reg.exe` para la escritura), garantizando estabilidad.
+    * **Importador .REG Inteligente**: Permite importar archivos `.reg` externos. Incluye una **Vista Previa de Análisis** que traduce automáticamente las rutas (ej. `HKEY_CLASSES_ROOT` o `HKLM\SOFTWARE`) a sus ubicaciones offline correctas y muestra una comparativa de valores antes de aplicar.
+* **Suite de Limpieza y Reparación**: `CheckHealth`, `ScanHealth`, `RestoreHealth` (con soporte para fuente WIM alternativa), `SFC` offline y limpieza de componentes (`ResetBase`).
 
 ---
 
 ## Requisitos
 
-* Sistema Operativo Windows.
+* Sistema Operativo Windows (Host).
 * PowerShell 5.1 o superior.
 * Privilegios de Administrador para ejecutar el script.
 * Conexión a internet (opcional, para el auto-actualizador).
@@ -43,10 +39,10 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ## Modo de Uso
 
-1.  Descarga la estructura de carpetas (el archivo `Run.bat` debe estar en el directorio raíz y `AdminImagenOffline.ps1` dentro de la carpeta `Script`).
-2.  Haz clic derecho sobre el archivo `Run.bat` y selecciona **"Ejecutar como administrador"**. El script validará los permisos e iniciará el entorno de PowerShell.
-3.  Sigue las instrucciones en pantalla, seleccionando las opciones numéricas de los menús.
-4.  Si es la primera ejecución, ve al menú **[4] Configurar Rutas de Trabajo** para definir tus directorios de Montaje y Temporal.
+1.  Descarga la estructura de carpetas (el archivo `Run.bat` debe estar en el directorio raíz y `AdminImagenOffline.ps1`, `Ajustes.ps1` y `Servicios.ps1` dentro de la carpeta `Script` o `Script\Catalogos`).
+2.  Haz clic derecho sobre el archivo `Run.bat` y selecciona **"Ejecutar como administrador"**.
+3.  Sigue las instrucciones en pantalla.
+4.  Si es la primera ejecución, ve al menú **[8] Configurar Rutas de Trabajo** para definir tus directorios.
 
 ---
 
@@ -54,58 +50,62 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ### Menú Principal
 
-Al iniciar, se muestra el estado actual (rutas, imagen montada) y las categorías principales de herramientas.
+* **1. Gestionar Imagen**: Operaciones base de WIM (Montar, Guardar, Exportar, Convertir).
+* **2. Cambiar Edicion de Windows**: Actualización de edición (ej. Home -> Pro).
+* **3. Integrar Drivers (Controladores)**: Herramientas GUI para añadir o quitar drivers.
+* **4. Eliminar Bloatware (Apps)**: Herramienta GUI para borrar aplicaciones Appx.
+* **5. Servicios del Sistema**: Herramienta GUI para deshabilitar servicios.
+* **6. Tweaks y Registro**: Herramienta GUI para aplicar optimizaciones e importar archivos .reg.
+* **7. Herramientas de Limpieza**: Utilidades de reparación (DISM/SFC).
+* **8. Configurar Rutas de Trabajo**: Configuración de directorios de montaje y temporales.
 
-* **1. Gestionar Imagen**: Accede al submenú para operaciones de montaje, guardado, edición y conversión de la imagen WIM.
-* **2. Cambiar Edicion de Windows**: Permite cambiar la edición de una imagen previamente montada.
-* **3. Herramientas de Limpieza**: Accede a las utilidades de mantenimiento y reparación de la imagen.
-* **4. Configurar Rutas de Trabajo**: Permite cambiar y guardar permanentemente las rutas para el Directorio de Montaje (ej. `D:\TEMP`) y el Directorio Temporal (ej. `D:\Scratch`).
-* **L. Ver Registro de Actividad**: Abre el archivo `.log` con un registro de todas las acciones realizadas.
+### 3. Integrar Drivers (Controladores)
 
-### 1. Gestión de Imagen
+* **1. Inyectar Drivers (Instalacion Inteligente)**: Abre una ventana que compara los archivos `.inf` de una carpeta local con los drivers ya presentes en la imagen. Marca en amarillo los ya instalados y permite inyectar solo los nuevos.
+* **2. Desinstalar Drivers**: Escanea el almacén de drivers de la imagen y lista los controladores de terceros. Permite seleccionar y eliminar drivers problemáticos u obsoletos para reducir el tamaño de la imagen.
 
-#### → 1. Montar/Desmontar Imagen
-* `1. Montar Imagen`: Solicita la ruta a un archivo `.wim` o `.esd` y el número de índice. Lo monta en el `MOUNT_DIR` configurado.
-* `2. Desmontar Imagen`: Ejecuta `dism /unmount-wim /discard` para desmontar la imagen, descartando cualquier cambio no guardado.
-* `3. Recargar Imagen (Descartar cambios)`: Desmonta la imagen actual sin guardar (`/discard`) y la vuelve a montar usando la misma ruta e índice.
+### 4. Eliminar Bloatware (Apps)
 
-#### → 2. Guardar Cambios
-* `1. Guardar cambios en el Indice actual`: Ejecuta `dism /commit-image` para guardar las modificaciones.
-* `2. Guardar cambios en un nuevo Indice (Append)`: Usa la opción `/append` para crear un nuevo índice en el WIM con los cambios.
+Abre una interfaz gráfica que lista todas las aplicaciones `AppxProvisionedPackage` detectadas en la imagen.
+* **Código de Colores**:
+    * **Verde**: Apps del sistema (Calculadora, Fotos, Store). No se recomienda borrar.
+    * **Naranja**: Bloatware común recomendado para borrar.
+    * **Blanco**: Otras apps.
+* Permite selección múltiple y eliminación segura.
 
-#### → 3. Editar Índices
-* `1. Exportar un Indice`: Exporta un índice de un WIM existente a un nuevo archivo WIM.
-* `2. Eliminar un Indice`: Elimina permanentemente un índice del archivo WIM.
+### 5. Servicios del Sistema
 
-#### → 4. Convertir Imagen a WIM
-* `1. Convertir ESD a WIM`: Pide un `.esd` y el índice, y lo convierte a `.wim` (`/Compress:max /CheckIntegrity`).
-* `2. Convertir VHD/VHDX a WIM`: Monta un VHD/VHDX, captura el contenido con `dism /capture-image` y lo desmonta.
+Carga los hives del registro y muestra una interfaz con pestañas por categorías (Estandar, Avanzado, Telemetría, etc.).
+* Lee el estado actual (`Start`) de cada servicio en la imagen offline.
+* Permite marcar servicios para deshabilitarlos masivamente.
 
-### 2. Cambiar Edición de Windows
+### 6. Tweaks y Registro
 
-Esta opción solo está disponible si hay una imagen montada.
+Un potente gestor de registro en modo nativo.
+* **Pestañas de Categorías**: Rendimiento, Privacidad, UI, etc.
+* **Estado en Tiempo Real**: Muestra si un ajuste está `ACTIVO` (Cian) o `INACTIVO` (Gris/Blanco) leyendo directamente el hive montado.
+* **Aplicación Segura**: Usa comandos nativos de PowerShell para aplicar cambios y verifica la escritura inmediatamente.
+* **Importador .REG**:
+    * Botón para importar archivos de registro externos.
+    * **Analizador de Seguridad**: Antes de importar, muestra una ventana de "Vista Previa" que detalla qué claves se crearán, modificarán o eliminarán.
+    * **Traducción de Rutas**: Convierte automáticamente rutas como `HKEY_CLASSES_ROOT` o `HKEY_CURRENT_USER` a sus rutas físicas correspondientes en la imagen montada (`OfflineSoftware\Classes`, `OfflineUser`, etc.).
 
-1.  **Obtención de Información**: Carga temporalmente el hive del registro (`SOFTWARE`) de la imagen para leer la versión y el build.
-2.  **Listado de Ediciones de Destino**: Ejecuta `dism /Image:%MOUNT_DIR% /Get-TargetEditions` para mostrar las actualizaciones posibles.
-3.  **Cambio de Edición**: Ejecuta `dism /Image:%MOUNT_DIR% /Set-Edition` para aplicar el cambio.
-
-### 3. Herramientas de Limpieza
+### 7. Herramientas de Limpieza
 
 Requiere una imagen montada. Ofrece un menú con las siguientes herramientas:
 
 * **1. Verificar Salud de Imagen**: `DISM /... /CheckHealth`.
 * **2. Escaneo Avanzado de Salud**: `DISM /... /ScanHealth`.
-* **3. Reparar Imagen**: `DISM /... /RestoreHealth`.
-    * **¡NUEVO!** Si este comando falla, el script preguntará si deseas reintentar la operación usando un archivo `install.wim` como fuente de reparación alternativa.
-* **4. Escaneo y Reparacion SFC**: `SFC /scannow /offwindir=%MOUNT_DIR%\Windows`. (Corregido para usar la sintaxis correcta para imágenes montadas).
+* **3. Reparar Imagen**: `DISM /... /RestoreHealth`. (Soporta fuente WIM alternativa si falla).
+* **4. Reparación SFC (Offline)**: Ejecuta `SFC /scannow` redirigiendo los directorios de boot y windows a la imagen montada.
 * **5. Analizar Almacen de Componentes**: `DISM /... /AnalyzeComponentStore`.
-* **6. Limpieza de Componentes**: `DISM /... /StartComponentCleanup /ResetBase` usando el `Scratch_DIR` configurado.
-* **7. Ejecutar Todas las Opciones**: Ejecuta las tareas 1-6 en secuencia.
+* **6. Limpieza de Componentes**: `DISM /... /StartComponentCleanup /ResetBase`.
+* **7. Ejecutar TODO**: Secuencia automática de mantenimiento completo.
 
 ## Notas Importantes
 
 * **COPIA DE SEGURIDAD:** Es **altamente recomendable** realizar una copia de seguridad de tu imagen de Windows antes de utilizar las funciones de cambio de edición o reparación.
-* **CONOCIMIENTOS TÉCNICOS:** Se recomienda tener conocimientos básicos sobre DISM, SFC y la administración de imágenes de Windows.
+* **COMPATIBILIDAD:** El script traduce automáticamente las claves de registro para edición offline, protegiendo el sistema operativo del técnico.
 * **IDIOMA:** El script y sus mensajes en consola están en español.
 
 ## Descargo de Responsabilidad
@@ -114,9 +114,10 @@ Este script realiza operaciones avanzadas que modifican archivos de imagen de Wi
 
 **Se recomienda encarecidamente crear una copia de seguridad de tus archivos `.wim` antes de utilizar esta herramienta.**
 
-## Autor
+## Autor y Colaboradores
 
-* **SOFTMAXTER**
+* **Autor Principal**: SOFTMAXTER
+* **Análisis y refinamiento de código**: Realizado en colaboración con **Gemini**, para garantizar calidad, seguridad y compatibilidad internacional del script.
 
 ---
 ### Cómo Contribuir
