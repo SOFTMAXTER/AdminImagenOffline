@@ -9,7 +9,9 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 * **Interfaz Híbrida (Consola + GUI)**: Combina la rapidez de la consola para operaciones básicas con interfaces gráficas (Windows Forms) modernas para la gestión de drivers, servicios, bloatware y registro.
 * **Auto-Actualizador**: El script busca automáticamente nuevas versiones en GitHub al iniciar y ofrece al usuario la posibilidad de actualizarse.
 * **Configuración Persistente**: Guarda las rutas de trabajo (Directorio de Montaje y Directorio Temporal) en un archivo `config.json` para que las preferencias del usuario sean permanentes.
-* **Gestión de Directorios**: Comprueba y gestiona automáticamente la creación de los directorios de trabajo necesarios.
+* **Robustez y Seguridad**:
+    * **Protección de Hives**: Implementa limpieza de memoria (`GC`) y pausas de seguridad para evitar la corrupción del registro al desmontar.
+    * **Gestión de Directorios**: Comprueba y gestiona automáticamente la creación de los directorios de trabajo.
 * **Detección Automática**: Verifica al inicio si ya existe una imagen montada en el sistema y carga su información dinámicamente.
 * **Autoelevación de Privilegios**: Incluye un lanzador `Run.bat` que asegura la ejecución con permisos de Administrador.
 * **Gestión de Imágenes**: Montaje, desmontaje (con descartes), guardado de cambios (commit/append) y recarga rápida.
@@ -17,13 +19,15 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 * **Conversión de Formatos**: ESD a WIM y VHD/VHDX a WIM.
 * **Cambio de Edición de Windows**: Detección y cambio de edición (ej. Home a Pro) offline.
 * **Gestión Avanzada de Drivers**:
-    * **Inyector Inteligente**: Compara una carpeta local de drivers contra la imagen montada, detectando duplicados y permitiendo la inyección masiva.
+    * **Inyector Flexible (v5.1)**: Nueva interfaz que permite cargar carpetas recursivamente o agregar archivos `.inf` individuales "al vuelo". Incluye detección precisa por **Versión** y **Clase** para evitar duplicados.
     * **Desinstalador de Drivers**: Lista los drivers de terceros (OEM) instalados en la imagen y permite su eliminación selectiva.
 * **Eliminación de Bloatware**: Interfaz gráfica con clasificación por colores (Verde=Seguro, Naranja=Recomendado, Blanco=Otros) para eliminar aplicaciones preinstaladas (Appx).
 * **Optimización de Servicios**: Permite deshabilitar servicios del sistema innecesarios organizados por categorías mediante una interfaz de pestañas.
 * **Tweaks y Registro Offline**:
-    * **Gestor Nativo**: Aplica ajustes de rendimiento y privacidad escribiendo directamente en el registro offline (sin depender de `reg.exe` para la escritura), garantizando estabilidad.
-    * **Importador .REG Inteligente**: Permite importar archivos `.reg` externos. Incluye una **Vista Previa de Análisis** que traduce automáticamente las rutas (ej. `HKEY_CLASSES_ROOT` o `HKLM\SOFTWARE`) a sus ubicaciones offline correctas y muestra una comparativa de valores antes de aplicar.
+    * **Gestor Nativo**: Aplica ajustes de rendimiento y privacidad escribiendo directamente en el registro offline.
+    * **Importador .REG Inteligente**: Permite importar archivos `.reg` externos.
+    * **Traducción de Rutas**: Convierte automáticamente rutas como `HKEY_CLASSES_ROOT` (a `OfflineSoftware\Classes`) o `HKLM\SOFTWARE` a sus ubicaciones offline correctas.
+    * **Vista Previa**: Muestra una comparativa de valores antes de aplicar los cambios.
 * **Suite de Limpieza y Reparación**: `CheckHealth`, `ScanHealth`, `RestoreHealth` (con soporte para fuente WIM alternativa), `SFC` offline y limpieza de componentes (`ResetBase`).
 
 ---
@@ -39,7 +43,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ## Modo de Uso
 
-1.  Descarga la estructura de carpetas (el archivo `Run.bat` debe estar en el directorio raíz y `AdminImagenOffline.ps1`, `Ajustes.ps1` y `Servicios.ps1` dentro de la carpeta `Script` o `Script\Catalogos`).
+1.  Descarga la estructura de carpetas (el archivo `Run.bat` debe estar en el directorio raíz y `AdminImagenOffline.ps1` dentro de la carpeta `Script`. Los catálogos deben estar en `Script\Catalogos` o en la raíz de `Script`).
 2.  Haz clic derecho sobre el archivo `Run.bat` y selecciona **"Ejecutar como administrador"**.
 3.  Sigue las instrucciones en pantalla.
 4.  Si es la primera ejecución, ve al menú **[8] Configurar Rutas de Trabajo** para definir tus directorios.
@@ -61,8 +65,11 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ### 3. Integrar Drivers (Controladores)
 
-* **1. Inyectar Drivers (Instalacion Inteligente)**: Abre una ventana que compara los archivos `.inf` de una carpeta local con los drivers ya presentes en la imagen. Marca en amarillo los ya instalados y permite inyectar solo los nuevos.
-* **2. Desinstalar Drivers**: Escanea el almacén de drivers de la imagen y lista los controladores de terceros. Permite seleccionar y eliminar drivers problemáticos u obsoletos para reducir el tamaño de la imagen.
+* **1. Inyectar Drivers (Instalacion Inteligente)**:
+    * **Carga Flexible**: Usa el botón `[CARPETA] Cargar...` para escanear directorios completos o `+ Agregar Archivo .INF` para archivos sueltos.
+    * **Análisis Profundo**: Lee la versión interna (`DriverVer`) de cada archivo `.inf` y la compara con los drivers ya instalados en la imagen.
+    * **Visualización**: Muestra una tabla detallada con Estado, Nombre, Clase y **Versión**. Marca en amarillo los drivers ya existentes para evitar redundancia.
+* **2. Desinstalar Drivers**: Escanea el almacén de drivers de la imagen y lista los controladores de terceros (renombrados como `oemXX.inf`). Permite seleccionar y eliminar drivers problemáticos u obsoletos para reducir el tamaño de la imagen.
 
 ### 4. Eliminar Bloatware (Apps)
 
@@ -83,12 +90,10 @@ Carga los hives del registro y muestra una interfaz con pestañas por categoría
 
 Un potente gestor de registro en modo nativo.
 * **Pestañas de Categorías**: Rendimiento, Privacidad, UI, etc.
-* **Estado en Tiempo Real**: Muestra si un ajuste está `ACTIVO` (Cian) o `INACTIVO` (Gris/Blanco) leyendo directamente el hive montado.
-* **Aplicación Segura**: Usa comandos nativos de PowerShell para aplicar cambios y verifica la escritura inmediatamente.
+* **Estado en Tiempo Real**: Muestra si un ajuste está `ACTIVO` (Cian) o `INACTIVO` (Blanco) leyendo directamente el hive montado.
 * **Importador .REG**:
-    * Botón para importar archivos de registro externos.
-    * **Analizador de Seguridad**: Antes de importar, muestra una ventana de "Vista Previa" que detalla qué claves se crearán, modificarán o eliminarán.
-    * **Traducción de Rutas**: Convierte automáticamente rutas como `HKEY_CLASSES_ROOT` o `HKEY_CURRENT_USER` a sus rutas físicas correspondientes en la imagen montada (`OfflineSoftware\Classes`, `OfflineUser`, etc.).
+    * Analiza y traduce rutas complejas (incluyendo `HKCR`) para que funcionen en una imagen offline.
+    * Muestra una vista previa de los cambios (Crear clave, Modificar valor, Eliminar) antes de tocar el registro real.
 
 ### 7. Herramientas de Limpieza
 
@@ -96,7 +101,7 @@ Requiere una imagen montada. Ofrece un menú con las siguientes herramientas:
 
 * **1. Verificar Salud de Imagen**: `DISM /... /CheckHealth`.
 * **2. Escaneo Avanzado de Salud**: `DISM /... /ScanHealth`.
-* **3. Reparar Imagen**: `DISM /... /RestoreHealth`. (Soporta fuente WIM alternativa si falla).
+* **3. Reparar Imagen**: `DISM /... /RestoreHealth`. (Soporta fuente WIM alternativa interactiva si falla la reparación automática).
 * **4. Reparación SFC (Offline)**: Ejecuta `SFC /scannow` redirigiendo los directorios de boot y windows a la imagen montada.
 * **5. Analizar Almacen de Componentes**: `DISM /... /AnalyzeComponentStore`.
 * **6. Limpieza de Componentes**: `DISM /... /StartComponentCleanup /ResetBase`.
