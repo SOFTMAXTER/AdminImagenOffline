@@ -8,13 +8,13 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.4.0
+    1.4.1
 #>
 
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.4.0"
+$script:Version = "1.4.1"
 
 function Write-Log {
     [CmdletBinding()]
@@ -1423,48 +1423,61 @@ function Show-Drivers-GUI {
     
     # 1. Validaciones
     if ($Script:IMAGE_MOUNTED -eq 0) { 
+        Add-Type -AssemblyName System.Windows.Forms
         [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
         return 
     }
 
-    # 2. Seleccionar Carpeta Fuente
-    $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $folderDialog.Description = "Selecciona la carpeta raiz donde tienes tus Drivers (.inf)"
-    
-    if ($folderDialog.ShowDialog() -ne 'OK') { return }
-    $sourceDir = $folderDialog.SelectedPath
-
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
-    # 3. Configuracion del Formulario
+    # 2. Configuración del Formulario
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Inyector de Drivers Inteligente - $sourceDir"
-    $form.Size = New-Object System.Drawing.Size(800, 600) # Un poco mas ancho
+    $form.Text = "Inyector de Drivers - (Offline)"
+    $form.Size = New-Object System.Drawing.Size(1000, 650)
     $form.StartPosition = "CenterScreen"
     $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
     $form.ForeColor = [System.Drawing.Color]::White
 
-    # Titulo
+    # Título
     $lblTitle = New-Object System.Windows.Forms.Label
-    $lblTitle.Text = "Comparando Drivers Locales vs Imagen..."
+    $lblTitle.Text = "Gestion de Drivers"
     $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
     $lblTitle.Location = New-Object System.Drawing.Point(20, 15)
     $lblTitle.AutoSize = $true
     $form.Controls.Add($lblTitle)
 
-    # Leyenda de Colores
+    # Botones Superiores
+    $btnLoadFolder = New-Object System.Windows.Forms.Button
+    $btnLoadFolder.Text = "[CARPETA] Cargar..."
+    $btnLoadFolder.Location = New-Object System.Drawing.Point(600, 12)
+    $btnLoadFolder.Size = New-Object System.Drawing.Size(160, 30)
+    $btnLoadFolder.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
+    $btnLoadFolder.ForeColor = [System.Drawing.Color]::White
+    $btnLoadFolder.FlatStyle = "Flat"
+    $form.Controls.Add($btnLoadFolder)
+
+    $btnAddFile = New-Object System.Windows.Forms.Button
+    $btnAddFile.Text = "+ Agregar Archivo .INF"
+    $btnAddFile.Location = New-Object System.Drawing.Point(770, 12)
+    $btnAddFile.Size = New-Object System.Drawing.Size(180, 30)
+    $btnAddFile.BackColor = [System.Drawing.Color]::RoyalBlue
+    $btnAddFile.ForeColor = [System.Drawing.Color]::White
+    $btnAddFile.FlatStyle = "Flat"
+    $form.Controls.Add($btnAddFile)
+
+    # Leyenda
     $lblLegend = New-Object System.Windows.Forms.Label
-    $lblLegend.Text = "Amarillo = Ya instalado en la imagen | Blanco = Nuevo"
-    $lblLegend.Location = New-Object System.Drawing.Point(450, 20)
+    $lblLegend.Text = "Amarillo = Ya instalado | Blanco = Nuevo"
+    $lblLegend.Location = New-Object System.Drawing.Point(20, 45)
     $lblLegend.AutoSize = $true
     $lblLegend.ForeColor = [System.Drawing.Color]::Gold
     $form.Controls.Add($lblLegend)
 
     # ListView
     $listView = New-Object System.Windows.Forms.ListView
-    $listView.Location = New-Object System.Drawing.Point(20, 50)
-    $listView.Size = New-Object System.Drawing.Size(740, 450)
+    $listView.Location = New-Object System.Drawing.Point(20, 70)
+    $listView.Size = New-Object System.Drawing.Size(940, 470)
     $listView.View = [System.Windows.Forms.View]::Details
     $listView.CheckBoxes = $true
     $listView.FullRowSelect = $true
@@ -1475,23 +1488,24 @@ function Show-Drivers-GUI {
     # Columnas
     $listView.Columns.Add("Estado", 100) | Out-Null
     $listView.Columns.Add("Archivo INF", 180) | Out-Null
-    $listView.Columns.Add("Clase (Tipo)", 120) | Out-Null
-    $listView.Columns.Add("Ruta Completa", 300) | Out-Null
+    $listView.Columns.Add("Clase", 100) | Out-Null
+    $listView.Columns.Add("Version", 120) | Out-Null
+    $listView.Columns.Add("Ruta Completa", 400) | Out-Null
 
     $form.Controls.Add($listView)
 
     # Estado
     $lblStatus = New-Object System.Windows.Forms.Label
-    $lblStatus.Text = "Iniciando analisis..."
-    $lblStatus.Location = New-Object System.Drawing.Point(20, 510)
+    $lblStatus.Text = "Listo."
+    $lblStatus.Location = New-Object System.Drawing.Point(20, 550)
     $lblStatus.AutoSize = $true
     $lblStatus.ForeColor = [System.Drawing.Color]::Cyan
     $form.Controls.Add($lblStatus)
 
-    # Botones
+    # Botones Inferiores
     $btnInstall = New-Object System.Windows.Forms.Button
     $btnInstall.Text = "INYECTAR SELECCIONADOS"
-    $btnInstall.Location = New-Object System.Drawing.Point(560, 520)
+    $btnInstall.Location = New-Object System.Drawing.Point(760, 560)
     $btnInstall.Size = New-Object System.Drawing.Size(200, 35)
     $btnInstall.BackColor = [System.Drawing.Color]::SeaGreen
     $btnInstall.ForeColor = [System.Drawing.Color]::White
@@ -1500,126 +1514,146 @@ function Show-Drivers-GUI {
 
     $btnSelectNew = New-Object System.Windows.Forms.Button
     $btnSelectNew.Text = "Seleccionar Solo Nuevos"
-    $btnSelectNew.Location = New-Object System.Drawing.Point(20, 530)
+    $btnSelectNew.Location = New-Object System.Drawing.Point(20, 580)
     $btnSelectNew.Size = New-Object System.Drawing.Size(150, 25)
     $btnSelectNew.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
     $btnSelectNew.FlatStyle = "Flat"
     $form.Controls.Add($btnSelectNew)
 
-    # 4. Logica de Escaneo Inteligente
-    $form.Add_Shown({
-        $form.Refresh()
-        $listView.BeginUpdate()
+    # Cache Global
+    $script:cachedInstalledDrivers = @()
+
+    # --- HELPER CORREGIDO: PROCESAMIENTO ROBUSTO DE INF ---
+    $Script:ProcessInfFile = {
+        param($fileObj)
         
-        # A) Obtener lista de drivers YA instalados en la imagen (Offline)
-        $lblStatus.Text = "Leyendo drivers de la imagen montada (esto tarda un poco)..."
-        $form.Refresh()
-        
-        $installedInfNames = @()
+        $classType = "Desconocido"; $localVersion = "---"
+        $statusText = "Nuevo"; $isInstalled = $false
+
         try {
-            # Usamos Get-WindowsDriver que es nativo y devuelve objetos limpios
-            $driversInImage = Get-WindowsDriver -Path $Script:MOUNT_DIR -ErrorAction SilentlyContinue
-            if ($driversInImage) {
-                # Guardamos solo el nombre del archivo original (ej: nvlddmkm.inf)
-                $installedInfNames = $driversInImage | ForEach-Object { 
-                    [System.IO.Path]::GetFileName($_.OriginalFileName) 
+            # Leemos las primeras 300 líneas
+            $content = Get-Content $fileObj.FullName -TotalCount 300 -ErrorAction SilentlyContinue
+            
+            # --- CAMBIO IMPORTANTE: Iterar línea por línea para usar -match ---
+            foreach ($line in $content) {
+                # Buscar Clase
+                if ($line -match "^Class\s*=\s*(.*)") {
+                    $classType = $matches[1].Trim()
                 }
+                # Buscar Versión (DriverVer = fecha, version)
+                if ($line -match "DriverVer\s*=\s*.*?,([0-9\.\s]+)") {
+                    $localVersion = $matches[1].Trim()
+                }
+
+                # Optimización: Si ya encontramos ambos, salimos del bucle
+                if ($classType -ne "Desconocido" -and $localVersion -ne "---") { break }
             }
-        } catch {
-            Write-Warning "No se pudo leer drivers instalados: $_"
+        } catch {}
+
+        # Lógica de Comparación (Ahora funcionará porque $localVersion tendrá datos)
+        $foundByName = $script:cachedInstalledDrivers | Where-Object { [System.IO.Path]::GetFileName($_.OriginalFileName) -eq $fileObj.Name }
+        
+        if ($foundByName) {
+            $isInstalled = $true; $statusText = "INSTALADO (Nombre)"
+        } 
+        elseif ($localVersion -ne "---") {
+            # Comparar versión exacta + clase
+            $foundByVer = $script:cachedInstalledDrivers | Where-Object { $_.Version -eq $localVersion -and $_.ClassName -eq $classType }
+            if ($foundByVer) { $isInstalled = $true; $statusText = "INSTALADO (Version)" }
         }
 
-        # B) Escanear carpeta local
-        $lblStatus.Text = "Comparando con carpeta local..."
+        # Crear Item
+        $item = New-Object System.Windows.Forms.ListViewItem($statusText)
+        $item.SubItems.Add($fileObj.Name) | Out-Null
+        $item.SubItems.Add($classType) | Out-Null
+        $item.SubItems.Add($localVersion) | Out-Null
+        $item.SubItems.Add($fileObj.FullName) | Out-Null
+        $item.Tag = $fileObj.FullName
+        
+        if ($isInstalled) {
+            $item.BackColor = [System.Drawing.Color]::FromArgb(60, 50, 0) # Amarillo oscuro
+            $item.ForeColor = [System.Drawing.Color]::Gold
+            $item.Checked = $false
+        } else {
+            $item.Checked = $true
+        }
+        return $item
+    }
+
+    # 3. EVENTO LOAD
+    $form.Add_Shown({
+        $form.Refresh(); $listView.BeginUpdate()
+        $lblStatus.Text = "Analizando drivers instalados en WIM..."
         $form.Refresh()
         
-        $infFiles = Get-ChildItem -Path $sourceDir -Filter "*.inf" -Recurse
-        
-        foreach ($file in $infFiles) {
-            # 1. Leer Clase
-            $classType = "Desconocido"
-            try {
-                $content = Get-Content $file.FullName -TotalCount 50 -ErrorAction SilentlyContinue
-                $match = $content | Select-String -Pattern "^Class\s*=\s*(.*)"
-                if ($match) { $classType = ($match.Line -split '=')[1].Trim() }
-            } catch {}
+        try {
+            $dismDrivers = Get-WindowsDriver -Path $Script:MOUNT_DIR -ErrorAction SilentlyContinue
+            if ($dismDrivers) { $script:cachedInstalledDrivers = $dismDrivers }
+        } catch {}
 
-            # 2. Verificar si existe en la lista instalada
-            $isInstalled = $installedInfNames -contains $file.Name
-            
-            # 3. Crear Item visual
-            $statusText = if ($isInstalled) { "INSTALADO" } else { "Nuevo" }
-            $item = New-Object System.Windows.Forms.ListViewItem($statusText)
-            $item.SubItems.Add($file.Name) | Out-Null
-            $item.SubItems.Add($classType) | Out-Null
-            $item.SubItems.Add($file.FullName) | Out-Null
-            $item.Tag = $file.FullName
-            
-            if ($isInstalled) {
-                # Si ya esta instalado: Color Amarillo, Desmarcado
-                $item.BackColor = [System.Drawing.Color]::FromArgb(60, 50, 0) # Fondo mostaza oscuro
-                $item.ForeColor = [System.Drawing.Color]::Gold
-                $item.Checked = $false
-            } else {
-                # Si es nuevo: Marcado por defecto
-                $item.Checked = $true
-            }
-
-            $listView.Items.Add($item) | Out-Null
-        }
-        
         $listView.EndUpdate()
-        $lblTitle.Text = "Drivers encontrados (.inf)"
-        $lblStatus.Text = "Analisis completado. Total: $($listView.Items.Count)"
+        $lblStatus.Text = "Listo. Usa los botones superiores."
         $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
     })
 
-    # 5. Botones
+    # Botones de Carga
+    $btnLoadFolder.Add_Click({
+        $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
+        $fbd.Description = "Buscar drivers recursivamente"
+        if ($fbd.ShowDialog() -eq 'OK') {
+            $selPath = $fbd.SelectedPath
+            $lblStatus.Text = "Escaneando..."
+            $form.Refresh()
+            $listView.BeginUpdate()
+            $files = Get-ChildItem -Path $selPath -Filter "*.inf" -Recurse
+            foreach ($f in $files) {
+                $newItem = & $Script:ProcessInfFile -fileObj $f
+                $listView.Items.Add($newItem) | Out-Null
+            }
+            $listView.EndUpdate()
+            $lblStatus.Text = "Drivers cargados: $($listView.Items.Count)"
+        }
+    })
+
+    $btnAddFile.Add_Click({
+        $ofd = New-Object System.Windows.Forms.OpenFileDialog
+        $ofd.Filter = "Archivos INF (*.inf)|*.inf"; $ofd.Multiselect = $true
+        if ($ofd.ShowDialog() -eq 'OK') {
+            $listView.BeginUpdate()
+            foreach ($fn in $ofd.FileNames) {
+                try {
+                    $newItem = & $Script:ProcessInfFile -fileObj (Get-Item $fn)
+                    $listView.Items.Add($newItem) | Out-Null
+                } catch {}
+            }
+            $listView.EndUpdate()
+        }
+    })
+
+    # Resto de lógica
     $btnSelectNew.Add_Click({
         foreach ($item in $listView.Items) {
-            # Solo marca si dice "Nuevo" en la primera columna
-            if ($item.Text -eq "Nuevo") { $item.Checked = $true } else { $item.Checked = $false }
+            if ($item.Text -match "Nuevo") { $item.Checked = $true } else { $item.Checked = $false }
         }
     })
 
     $btnInstall.Add_Click({
         $checkedItems = $listView.CheckedItems
         if ($checkedItems.Count -eq 0) { return }
-
-        $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a inyectar $($checkedItems.Count) drivers.`n¿Continuar?", "Confirmar", 'YesNo', 'Question')
-        if ($confirm -eq 'Yes') {
-            $btnInstall.Enabled = $false
-            $listView.Enabled = $false
-            
-            $count = 0
-            $total = $checkedItems.Count
-            $errors = 0
-
+        if ([System.Windows.Forms.MessageBox]::Show("Inyectar $($checkedItems.Count) drivers?", "Confirmar", 'YesNo') -eq 'Yes') {
+            $btnInstall.Enabled = $false; $listView.Enabled = $false
+            $count = 0; $errs = 0
             foreach ($item in $checkedItems) {
-                $count++
-                $infPath = $item.Tag
-                $lblStatus.Text = "Inyectando ($count/$total): $($item.SubItems[1].Text)..."
-                $form.Refresh()
-
+                $count++; $lblStatus.Text = "Instalando ($count): $($item.SubItems[1].Text)..."; $form.Refresh()
                 try {
-                    dism /Image:$Script:MOUNT_DIR /Add-Driver /Driver:"$infPath" /ForceUnsigned | Out-Null
-                    if ($LASTEXITCODE -ne 0) { throw "Error DISM" }
-                    
-                    $item.BackColor = [System.Drawing.Color]::DarkGreen
-                    $item.ForeColor = [System.Drawing.Color]::White
-                    $item.Text = "INSTALADO" # Actualizar estado visualmente
-                    $item.Checked = $false
-                } catch {
-                    $errors++
-                    $item.BackColor = [System.Drawing.Color]::DarkRed
-                    Write-Log -LogLevel ERROR -Message "Fallo driver $infPath"
-                }
+                    dism /Image:$Script:MOUNT_DIR /Add-Driver /Driver:"$($item.Tag)" /ForceUnsigned | Out-Null
+                    if ($LASTEXITCODE -eq 0) {
+                        $item.BackColor = [System.Drawing.Color]::DarkGreen; $item.Text = "INSTALADO"; $item.Checked = $false
+                    } else { throw "Error" }
+                } catch { $errs++; $item.BackColor = [System.Drawing.Color]::DarkRed }
             }
-
-            $btnInstall.Enabled = $true
-            $listView.Enabled = $true
-            $lblStatus.Text = "Proceso finalizado. Errores: $errors"
-            [System.Windows.Forms.MessageBox]::Show("Proceso completado.`nExitosos: $($total - $errors)`nFallidos: $errors", "Resultado", 'OK', 'Information')
+            $btnInstall.Enabled = $true; $listView.Enabled = $true
+            [System.Windows.Forms.MessageBox]::Show("Proceso terminado. Errores: $errs", "Info", 'OK', 'Information')
         }
     })
 
@@ -1833,7 +1867,7 @@ function Drivers-Menu {
 }
 
 # =================================================================
-#  Modulo GUI de Bloatware (Estilo Aegis Phoenix) - FINAL
+#  Modulo GUI de Bloatware
 # =================================================================
 function Show-Bloatware-GUI {
     param()
@@ -2275,6 +2309,7 @@ function Show-Services-Offline-GUI {
     $form.Add_FormClosing({ 
         $lblStatus.Text = "Guardando Hives..."
         $form.Refresh()
+		Start-Sleep -Seconds 1
         Unmount-Hives 
     })
 
@@ -2405,31 +2440,40 @@ function Mount-Hives {
 function Unmount-Hives {
     Write-Host "Guardando y descargando Hives..." -ForegroundColor Yellow
     
-    # CORRECCIoN: Solo intentamos actualizar la GUI si la etiqueta existe.
-    # Si estamos en modo consola, esto se salta y evita el error.
+    # 1. Actualizar GUI si existe
     if ($lblStatus) { 
-        try { $lblStatus.Text = "Guardando cambios en el registro..." } catch {} 
+        try { $lblStatus.Text = "Sincronizando disco y cerrando Hives..."; $form.Refresh() } catch {} 
     }
     
-    # Pausa de seguridad para permitir que el disco termine de escribir
-    Start-Sleep -Seconds 1
+    # 2. LIMPIEZA AGRESIVA DE MEMORIA (GC)
+    # Esto fuerza a .NET a soltar cualquier 'handle' abierto sobre los archivos del registro
     [GC]::Collect()
     [GC]::WaitForPendingFinalizers()
+    
+    # 3. PAUSA DE SEGURIDAD (Protección contra Antivirus/Defender)
+    # Damos tiempo al sistema de archivos para terminar la escritura diferida
+    Start-Sleep -Seconds 2
     
     $hives = @("HKLM\OfflineSystem", "HKLM\OfflineSoftware", "HKLM\OfflineUser")
     
     foreach ($hive in $hives) {
         $retries = 0; $done = $false
-        while ($retries -lt 5 -and -not $done) {
+        # Aumentamos reintentos y tiempo de espera entre ellos
+        while ($retries -lt 10 -and -not $done) {
             reg unload $hive 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 0) { $done = $true } 
-            else { 
+            if ($LASTEXITCODE -eq 0) { 
+                $done = $true 
+            } else { 
                 $retries++
                 Write-Host "." -NoNewline -ForegroundColor Yellow
-                Start-Sleep -Seconds 1 
+                # Espera progresiva si falla
+                Start-Sleep -Milliseconds 500 
             }
         }
-        if (-not $done) { Write-Error " [!] No se pudo guardar $hive. Es posible que los cambios no persistan." }
+        if (-not $done) { 
+            Write-Error "`n [!] CRITICO: No se pudo desmontar $hive. El archivo puede quedar bloqueado." 
+            Write-Log -LogLevel ERROR -Message "Fallo critico al desmontar hive $hive"
+        }
     }
     Write-Host " [OK]" -ForegroundColor Green
 }
@@ -3008,6 +3052,7 @@ function Show-Tweaks-Offline-GUI {
     $form.Add_FormClosing({ 
         $lblStatus.Text = "Guardando Hives..."
         $form.Refresh()
+		Start-Sleep -Seconds 1
         Unmount-Hives 
     })
     
@@ -3087,7 +3132,7 @@ function Main-Menu {
         switch ($opcionM.ToUpper()) {
             "1" { Image-Management-Menu }
             "2" { Cambio-Edicion-Menu }
-            "3" { if ($Script:IMAGE_MOUNTED) { Show-Drivers-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
+            "3" { if ($Script:IMAGE_MOUNTED) { Drivers-Menu } else { Write-Warning "Monta una imagen primero."; Pause } }
             "4" { if ($Script:IMAGE_MOUNTED) { Show-Bloatware-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
             "5" { Show-Services-Offline-GUI }
             "6" { Show-Tweaks-Offline-GUI }           
