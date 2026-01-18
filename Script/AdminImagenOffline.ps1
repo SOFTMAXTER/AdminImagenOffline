@@ -3244,13 +3244,11 @@ function Unlock-OfflineKey {
     # Si estamos tocando OfflineUser, la raíz es "OfflineUser".
     $hiveName = $psPath.Split('\')[0] 
     
-    # Lista de colmenas que gestionamos
-    if ($hiveName -in @("OfflineUser", "OfflineSoftware", "OfflineSystem")) {
+    # --- CORRECCIÓN: Agregados OfflineComponents y OfflineUserClasses ---
+    if ($hiveName -in @("OfflineUser", "OfflineSoftware", "OfflineSystem", "OfflineComponents", "OfflineUserClasses")) {
         $rootHivePath = $hiveName
         
-        # --- PASO CRÍTICO: DESBLOQUEAR LA RAÍZ PRIMERO ---
-        # Esto soluciona el error de "Acceso Denegado" al crear claves nuevas
-        # porque abrimos el permiso desde arriba del todo.
+        # DESBLOQUEAR LA RAÍZ PRIMERO
         Unlock-Single-Key -SubKeyPath $rootHivePath
     }
 
@@ -3505,22 +3503,30 @@ function Show-RegPreview-GUI {
                 $keyOffline = $keyRaw # Copia inicial
 
                 # --- LÓGICA DE TRADUCCIÓN ROBUSTA ---
-                # 1. Classes Root (CRÍTICO para tu caso) -> Software\Classes
+                # 1. Classes Root (Global) -> OfflineSoftware\Classes
                 if ($keyOffline -match "^HKEY_CLASSES_ROOT" -or $keyOffline -match "^HKCR") {
                      $keyOffline = $keyOffline -replace "^HKEY_CLASSES_ROOT", "HKLM:\OfflineSoftware\Classes"
                      $keyOffline = $keyOffline -replace "^HKCR", "HKLM:\OfflineSoftware\Classes"
                 }
-                # 2. Rutas Estándar
+                # 2. Clases de Usuario (HKCU\Software\Classes) -> OfflineUserClasses
+                # IMPORTANTE: Este elseif captura las clases de usuario antes que el HKCU general
+                elseif ($keyOffline -match "HKEY_CURRENT_USER\\Software\\Classes" -or $keyOffline -match "HKCU\\Software\\Classes") {
+                     $keyOffline = $keyOffline -replace "HKEY_CURRENT_USER\\Software\\Classes", "HKLM:\OfflineUserClasses"
+                     $keyOffline = $keyOffline -replace "HKCU\\Software\\Classes", "HKLM:\OfflineUserClasses"
+                }
+                # 3. Rutas Estándar (System, Software y resto de Usuario)
                 else {
                     $keyOffline = $keyOffline.Replace("HKEY_LOCAL_MACHINE\SOFTWARE", "HKLM:\OfflineSoftware")
                     $keyOffline = $keyOffline.Replace("HKLM\SOFTWARE", "HKLM:\OfflineSoftware")
                     $keyOffline = $keyOffline.Replace("HKEY_LOCAL_MACHINE\SYSTEM", "HKLM:\OfflineSystem")
                     $keyOffline = $keyOffline.Replace("HKLM\SYSTEM", "HKLM:\OfflineSystem")
+                    
+                    # Al haber filtrado ya las Classes en el paso 2, esto captura solo el resto de NTUSER.DAT
                     $keyOffline = $keyOffline.Replace("HKEY_CURRENT_USER", "HKLM:\OfflineUser")
                     $keyOffline = $keyOffline.Replace("HKCU", "HKLM:\OfflineUser")
                 }
 
-                # 3. Limpieza final para asegurar formato de unidad PowerShell
+                # 4. Limpieza final para asegurar formato de unidad PowerShell
                 if (-not $keyOffline.StartsWith("HKLM:\")) { 
                     $keyOffline = $keyOffline -replace "^HKLM\\", "HKLM:\" 
                 }
