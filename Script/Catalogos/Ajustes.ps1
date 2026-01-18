@@ -183,13 +183,13 @@ $script:SystemTweaks = @(
         DefaultValue   = 1
         RegistryType   = "DWord"
     },
-    [PSCustomObject]@{
-        Name           = "Deshabilitar Widgets y Noticias"
+	[PSCustomObject]@{
+        Name           = "Bloquear Widgets y Noticias (Directiva GPO)"
         Category       = "Windows 11 UI"
-        Description    = "Elimina el panel de Widgets (Tiempo/Noticias) para ahorrar RAM."
+        Description    = "Desactiva el panel de Widgets (Tiempo/Noticias) para ahorrar RAM."
         Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
-        RegistryKey    = "TaskbarDa"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Dsh"
+        RegistryKey    = "AllowNewsAndInterests"
         EnabledValue   = 0
         DefaultValue   = 1
         RegistryType   = "DWord"
@@ -357,7 +357,7 @@ $script:SystemTweaks = @(
         RegistryPath   = "Registry::HKEY_CURRENT_USER\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"
         RegistryKey    = "(Default)"
         EnabledValue   = ""
-        DefaultValue   = "DeleteKey" # Logica especial manejada por si el script borra la clave
+        DefaultValue   = "DeleteKey"
         RegistryType   = "String"
     },
     [PSCustomObject]@{
