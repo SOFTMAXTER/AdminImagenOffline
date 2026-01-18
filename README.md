@@ -1,4 +1,4 @@
-# AdminImagenOffline V1.4 by SOFTMAXTER
+# AdminImagenOffline V1.4.2 by SOFTMAXTER
 
 **AdminImagenOffline** es un completo script en PowerShell, diseñado para simplificar la administración y el mantenimiento de imágenes de instalación de Windows (`.wim`, `.esd`, `.vhd/vhdx`). El script encapsula complejas operaciones de `DISM`, manipulación del Registro y otras herramientas del sistema en una interfaz de menús interactiva y fácil de usar.
 
@@ -6,7 +6,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ## Características Principales
 
-* **Interfaz Híbrida (Consola + GUI)**: Combina la rapidez de la consola para operaciones básicas con interfaces gráficas (Windows Forms) modernas para la gestión de drivers, servicios, bloatware y registro.
+* **Interfaz Híbrida (Consola + GUI)**: Combina la rapidez de la consola para operaciones básicas con interfaces gráficas (Windows Forms) modernas para la gestión de drivers, servicios, bloatware, registro y metadatos.
 * **Auto-Actualizador**: El script busca automáticamente nuevas versiones en GitHub al iniciar y ofrece al usuario la posibilidad de actualizarse.
 * **Configuración Persistente**: Guarda las rutas de trabajo (Directorio de Montaje y Directorio Temporal) en un archivo `config.json` para que las preferencias del usuario sean permanentes.
 * **Robustez y Seguridad**:
@@ -15,11 +15,12 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 * **Detección Automática**: Verifica al inicio si ya existe una imagen montada en el sistema y carga su información dinámicamente.
 * **Autoelevación de Privilegios**: Incluye un lanzador `Run.bat` que asegura la ejecución con permisos de Administrador.
 * **Gestión de Imágenes**: Montaje, desmontaje (con descartes), guardado de cambios (commit/append) y recarga rápida.
+* **Edición de Metadatos WIM**: Herramienta nativa para modificar nombres, descripciones y visualizar detalles técnicos (Arquitectura, Versión, Tamaño, Fecha) de cada índice.
 * **Edición de Índices WIM**: Exportación y eliminación de índices específicos.
 * **Conversión de Formatos**: ESD a WIM y VHD/VHDX a WIM.
 * **Cambio de Edición de Windows**: Detección y cambio de edición (ej. Home a Pro) offline.
 * **Gestión Avanzada de Drivers**:
-    * **Inyector Flexible (v5.1)**: Nueva interfaz que permite cargar carpetas recursivamente o agregar archivos `.inf` individuales "al vuelo". Incluye detección precisa por **Versión** y **Clase** para evitar duplicados.
+    * **Inyector Flexible**: Interfaz que permite cargar carpetas recursivamente o agregar archivos `.inf` individuales "al vuelo". Incluye detección precisa por **Versión** y **Clase** para evitar duplicados.
     * **Desinstalador de Drivers**: Lista los drivers de terceros (OEM) instalados en la imagen y permite su eliminación selectiva.
 * **Eliminación de Bloatware**: Interfaz gráfica con clasificación por colores (Verde=Seguro, Naranja=Recomendado, Blanco=Otros) para eliminar aplicaciones preinstaladas (Appx).
 * **Optimización de Servicios**: Permite deshabilitar servicios del sistema innecesarios organizados por categorías mediante una interfaz de pestañas.
@@ -54,7 +55,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ### Menú Principal
 
-* **1. Gestionar Imagen**: Operaciones base de WIM (Montar, Guardar, Exportar, Convertir).
+* **1. Gestionar Imagen**: Acceso a submenú de operaciones WIM (Montar, Guardar, Metadatos, Índices, Convertir).
 * **2. Cambiar Edicion de Windows**: Actualización de edición (ej. Home -> Pro).
 * **3. Integrar Drivers (Controladores)**: Herramientas GUI para añadir o quitar drivers.
 * **4. Eliminar Bloatware (Apps)**: Herramienta GUI para borrar aplicaciones Appx.
@@ -62,6 +63,14 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 * **6. Tweaks y Registro**: Herramienta GUI para aplicar optimizaciones e importar archivos .reg.
 * **7. Herramientas de Limpieza**: Utilidades de reparación (DISM/SFC).
 * **8. Configurar Rutas de Trabajo**: Configuración de directorios de montaje y temporales.
+
+### 1. Gestionar Imagen (Submenú)
+
+* **1. Montar/Desmontar Imagen**: Carga o descarga la imagen para su edición.
+* **2. Guardar Cambios**: Opciones para guardar en el índice actual (Commit), en uno nuevo (Append) o crear un nuevo archivo WIM (Save As).
+* **3. Editar Info/Metadatos**: GUI para cambiar el Nombre y Descripción que se muestran durante la instalación de Windows, además de ver info técnica.
+* **4. Editar Indices**: Exportar un índice específico a un nuevo archivo o eliminar índices para ahorrar espacio.
+* **5. Convertir Imagen a WIM**: Importar desde formatos `.esd` o discos virtuales `.vhd/.vhdx`.
 
 ### 3. Integrar Drivers (Controladores)
 
