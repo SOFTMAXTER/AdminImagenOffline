@@ -1457,18 +1457,61 @@ function Limpieza-Menu {
             }
             "7" {
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: Iniciando secuencia COMPLETA..."
-                Write-Host "`n[1/5] Verificando salud..." -FG Yellow; Write-Log -LogLevel ACTION -Message "LIMPIEZA: (1/5) CheckHealth..."
-				DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /CheckHealth;
-                Write-Host "`n[2/5] Escaneando..." -FG Yellow; Write-Log -LogLevel ACTION -Message "LIMPIEZA: (2/5) ScanHealth..."
-				DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /ScanHealth;
+                
+                # --- PASO 1: CheckHealth ---
+                Write-Host "`n[1/5] Verificando salud rapida (CheckHealth)..." -FG Yellow
+                Write-Log -LogLevel ACTION -Message "LIMPIEZA: (1/5) CheckHealth..."
+                DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /CheckHealth
 
-                Write-Host "`n[3/5] Reparando imagen..." -ForegroundColor Yellow
-                Invoke-RestoreHealthWithFallback -MountDir $Script:MOUNT_DIR -IsSequence
+                # --- PASO 2: ScanHealth (Diagnostico Inteligente) ---
+                Write-Host "`n[2/5] Escaneando a fondo (ScanHealth)..." -FG Yellow
+                Write-Log -LogLevel ACTION -Message "LIMPIEZA: (2/5) ScanHealth..."
+                
+                $imageState = "Unknown" # Estado por defecto por si falla el Cmdlet
+                
+                try {
+                    # Usamos el Cmdlet nativo para obtener el objeto de estado
+                    $scanResult = Repair-WindowsImage -Path $Script:MOUNT_DIR -ScanHealth -ErrorAction Stop
+                    $imageState = $scanResult.ImageHealthState
+                    
+                    Write-Host "   Diagnostico: " -NoNewline
+                    switch ($imageState) {
+                        "Healthy"       { Write-Host "SALUDABLE (No requiere reparacion)" -ForegroundColor Green }
+                        "Repairable"    { Write-Host "DANADA (Reparable)" -ForegroundColor Cyan }
+                        "NonRepairable" { Write-Host "IRREPARABLE (Critico)" -ForegroundColor Red }
+                    }
+                }
+                catch {
+                    Write-Warning "Cmdlet nativo no disponible. Usando DISM clasico (Diagnostico ciego)..."
+                    DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /ScanHealth
+                    # Si cae aquí, $imageState sigue siendo "Unknown", asi que intentaremos reparar por si acaso.
+                }
 
+                # --- LOGICA DE DECISION ---
+                if ($imageState -eq "NonRepairable") {
+                    # CASO CRÍTICO: ABORTAR
+                    Write-Host "`n[!] ALERTA DE SEGURIDAD" -ForegroundColor Red
+                    Write-Warning "La imagen es IRREPARABLE. Deteniendo secuencia para evitar daños mayores."
+                    Write-Log -LogLevel ERROR -Message "LIMPIEZA: Abortado. Estado NonRepairable."
+                    [System.Windows.Forms.MessageBox]::Show("La imagen está en estado 'NonRepairable'.`nLa secuencia se detendrá.", "Error Fatal", 'OK', 'Error')
+                    Pause; return
+                }
+                elseif ($imageState -eq "Healthy") {
+                    # CASO OPTIMO: SALTAR REPARACIÓN
+                    Write-Host "`n[3/5] Reparando imagen..." -ForegroundColor DarkGray
+                    Write-Host "   >>> OMITIDO: La imagen ya esta saludable." -ForegroundColor Green
+                    Write-Log -LogLevel INFO -Message "LIMPIEZA: (3/5) RestoreHealth omitido (Imagen Saludable)."
+                }
+                else {
+                    # CASO REPARABLE O DESCONOCIDO: EJECUTAR
+                    Write-Host "`n[3/5] Reparando imagen..." -ForegroundColor Yellow
+                    Invoke-RestoreHealthWithFallback -MountDir $Script:MOUNT_DIR -IsSequence
+                }
+
+                # --- PASO 4 ---
                 Write-Host "`n[4/5] Verificando archivos (SFC)..." -FG Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: (4/5) SFC Offline..."
 
-                # Logica dinamica corregida para la secuencia completa
                 $sfcBoot = $Script:MOUNT_DIR
                 if (-not $sfcBoot.EndsWith("\")) { $sfcBoot += "\" }
                 $sfcWin = Join-Path -Path $Script:MOUNT_DIR -ChildPath "Windows"
@@ -1476,7 +1519,10 @@ function Limpieza-Menu {
                 SFC /scannow /offbootdir="$sfcBoot" /offwindir="$sfcWin"
                 if ($LASTEXITCODE -ne 0) { Write-Warning "SFC encontro errores o no pudo completar."}
 
-                Write-Host "`n[5/5] Analizando/Limpiando componentes..." -FG Yellow; Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Analyze/Cleanup..."
+                # --- PASO 5 ---
+                Write-Host "`n[5/5] Analizando/Limpiando componentes..." -FG Yellow
+                Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Analyze/Cleanup..."
+                
                 $cleanupRecommended = "No"
                 try {
                     $analysis = DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /AnalyzeComponentStore
@@ -1491,8 +1537,9 @@ function Limpieza-Menu {
                 } else {
                     Write-Host "La limpieza del almacen de componentes no es necesaria." -FG Green;
                 }
+                
                 Write-Host "[OK] Secuencia completada." -FG Green
-				Pause
+                Pause
             }
             "V" { return }
             default { Write-Warning "Opcion invalida."; Start-Sleep 1 }
@@ -4019,6 +4066,74 @@ function Show-Tweaks-Offline-GUI {
     $form.Dispose()
 }
 
+function Check-And-Repair-Mounts {
+    Write-Host "Verificando consistencia del entorno WIM..." -ForegroundColor DarkGray
+    
+    # 1. Obtener información de DISM
+    $dismInfo = dism /Get-MountedImageInfo 2>$null
+    
+    # 2. Detectar si nuestra carpeta de montaje está en estado "Needs Remount" o "Invalid"
+    # Esto ocurre si apagaste el PC sin desmontar.
+    $needsRemount = $dismInfo | Select-String -Pattern "Status : Needs Remount|Estado : Necesita volverse a montar|Status : Invalid|Estado : No v.lido"
+    
+    # 3. Detectar si la carpeta existe pero DISM no dice nada (Mount Fantasma)
+    $ghostMount = $false
+    if (Test-Path $Script:MOUNT_DIR) {
+        try { $null = Get-ChildItem -Path $Script:MOUNT_DIR -ErrorAction Stop } catch { $ghostMount = $true }
+    }
+
+    if ($needsRemount -or $ghostMount) {
+        [System.Console]::Beep(500, 300)
+        Add-Type -AssemblyName System.Windows.Forms
+        
+        # MENSAJE ESTILO DISM++ (Reparar sesión existente)
+        $msgResult = [System.Windows.Forms.MessageBox]::Show(
+            "La imagen montada en '$($Script:MOUNT_DIR)' parece estar danada (posible cierre inesperado).`n`n¿Quieres intentar RECUPERAR la sesión (Remount-Image)?`n`n[Sí] = Intentar reconectar y salvar cambios.`n[No] = Eliminar punto de montaje (Cleanup-Wim).", 
+            "Recuperacion de Imagen", 
+            [System.Windows.Forms.MessageBoxButtons]::YesNoCancel, 
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        )
+
+        if ($msgResult -eq 'Yes') {
+            Clear-Host
+            Write-Host ">>> INTENTANDO RECUPERAR SESION (Remount-Image)..." -ForegroundColor Yellow
+            
+            # Intento de Remount
+            dism /Remount-Image /MountDir:"$Script:MOUNT_DIR"
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[EXITO] Imagen recuperada." -ForegroundColor Green
+                $Script:IMAGE_MOUNTED = 1
+                
+                # Intentamos re-leer qué imagen es para actualizar las variables del script
+                try {
+                    $info = dism /Get-MountedImageInfo
+                    $wimLine = $info | Select-String -Pattern "Image File|Archivo de imagen" | Select -First 1
+                    if ($wimLine) { 
+                        $Script:WIM_FILE_PATH = ($wimLine.Line -split ':', 2)[1].Trim()
+                        if ($Script:WIM_FILE_PATH.StartsWith("\\?\")) { $Script:WIM_FILE_PATH = $Script:WIM_FILE_PATH.Substring(4) }
+                    }
+                    $idxLine = $info | Select-String -Pattern "Image Index|ndice de imagen" | Select -First 1
+                    if ($idxLine) { $Script:MOUNTED_INDEX = ($idxLine.Line -split ':', 2)[1].Trim() }
+                } catch {}
+                
+                [System.Windows.Forms.MessageBox]::Show("Imagen recuperada correctamente.", "Exito", 'OK', 'Information')
+            } else {
+                Write-Error "Fallo la recuperacion (Codigo: $LASTEXITCODE)."
+                [System.Windows.Forms.MessageBox]::Show("No se pudo recuperar la sesion. Se recomienda limpiar.", "Error", 'OK', 'Error')
+            }
+        }
+        elseif ($msgResult -eq 'No') {
+            # Opción Nuclear (Lo que tenías antes)
+            Write-Host ">>> LIMPIANDO PUNTO DE MONTAJE (Cleanup-Wim)..." -ForegroundColor Red
+            Unmount-Hives # Asegurar que el registro no estorbe
+            dism /Cleanup-Wim
+            $Script:IMAGE_MOUNTED = 0
+            [System.Windows.Forms.MessageBox]::Show("Limpieza completada. Debes montar la imagen de nuevo.", "Limpieza", 'OK', 'Information')
+        }
+    }
+}
+
 # :main_menu (Funcion principal que muestra el menu inicial)
 function Main-Menu {
     $Host.UI.RawUI.WindowTitle = "AdminImagenOffline v$($script:Version) by SOFTMAXTER"
@@ -4131,6 +4246,8 @@ try {
 }
 
 Ensure-WorkingDirectories
+
+Check-And-Repair-Mounts
 
 # =============================================
 #  Punto de Entrada: Iniciar el Menu Principal
