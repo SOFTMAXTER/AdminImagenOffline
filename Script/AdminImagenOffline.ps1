@@ -1445,7 +1445,8 @@ function Limpieza-Menu {
                 Pause
             }
             "5" {
-				Write-Host "`n[+] Analizando componentes..." -ForegroundColor Yellow; Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /AnalyzeComponentStore..."
+				Write-Host "`n[+] Analizando componentes..." -ForegroundColor Yellow
+				Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /AnalyzeComponentStore..."
        			DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /AnalyzeComponentStore
 		       	Pause
 			}
@@ -1459,12 +1460,12 @@ function Limpieza-Menu {
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: Iniciando secuencia COMPLETA..."
                 
                 # --- PASO 1: CheckHealth ---
-                Write-Host "`n[1/5] Verificando salud rapida (CheckHealth)..." -FG Yellow
+                Write-Host "`n[1/5] Verificando salud rapida (CheckHealth)..." -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: (1/5) CheckHealth..."
                 DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /CheckHealth
 
                 # --- PASO 2: ScanHealth (Diagnostico Inteligente) ---
-                Write-Host "`n[2/5] Escaneando a fondo (ScanHealth)..." -FG Yellow
+                Write-Host "`n[2/5] Escaneando a fondo (ScanHealth)..." -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: (2/5) ScanHealth..."
                 
                 $imageState = "Unknown" # Estado por defecto por si falla el Cmdlet
@@ -1509,7 +1510,7 @@ function Limpieza-Menu {
                 }
 
                 # --- PASO 4 ---
-                Write-Host "`n[4/5] Verificando archivos (SFC)..." -FG Yellow
+                Write-Host "`n[4/5] Verificando archivos (SFC)..." -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: (4/5) SFC Offline..."
 
                 $sfcBoot = $Script:MOUNT_DIR
@@ -1520,7 +1521,7 @@ function Limpieza-Menu {
                 if ($LASTEXITCODE -ne 0) { Write-Warning "SFC encontro errores o no pudo completar."}
 
                 # --- PASO 5 ---
-                Write-Host "`n[5/5] Analizando/Limpiando componentes..." -FG Yellow
+                Write-Host "`n[5/5] Analizando/Limpiando componentes..." -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Analyze/Cleanup..."
                 
                 $cleanupRecommended = "No"
@@ -1531,14 +1532,14 @@ function Limpieza-Menu {
                 } catch { Write-Warning "No se pudo analizar el almacen de componentes." }
 
                 if ($cleanupRecommended -eq "Yes") {
-                    Write-Host "Limpieza recomendada. Procediendo..." -FG Cyan;
+                    Write-Host "Limpieza recomendada. Procediendo..." -ForegroundColor Cyan;
                     Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Limpieza recomendada. Ejecutando..."
                     DISM /Cleanup-Image /Image:$Script:MOUNT_DIR /StartComponentCleanup /ResetBase /ScratchDir:$Script:Scratch_DIR
                 } else {
-                    Write-Host "La limpieza del almacen de componentes no es necesaria." -FG Green;
+                    Write-Host "La limpieza del almacen de componentes no es necesaria." -ForegroundColor Green;
                 }
                 
-                Write-Host "[OK] Secuencia completada." -FG Green
+                Write-Host "[OK] Secuencia completada." -ForegroundColor Green
                 Pause
             }
             "V" { return }
