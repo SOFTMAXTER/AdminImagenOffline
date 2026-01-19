@@ -3046,19 +3046,29 @@ function Mount-Hives {
         if ($p2.ExitCode -ne 0) { throw "Fallo SOFTWARE" } else { Write-Host "OK" -ForegroundColor Green }
 
         # --- CARGA CONDICIONAL (BOOT / REPARACION) ---
-        
+
         # COMPONENTS (A veces no existe en WinPE/Boot.wim muy ligeros)
         if (Test-Path $compHive) {
             Write-Host "Cargando COMPONENTS..." -NoNewline
-            Start-Process reg.exe -ArgumentList "load HKLM\OfflineComponents `"$compHive`"" -Wait -NoNewWindow | Out-Null
-            Write-Host "OK" -ForegroundColor Green
+            $p = Start-Process reg.exe -ArgumentList "load HKLM\OfflineComponents `"$compHive`"" -Wait -PassThru -NoNewWindow
+            if ($p.ExitCode -eq 0) { 
+                Write-Host "OK" -ForegroundColor Green 
+            } else { 
+                Write-Host "FALLO (Omitido)" -ForegroundColor Red 
+                Write-Log -LogLevel WARN -Message "Fallo al cargar COMPONENTS (ExitCode: $($p.ExitCode))"
+            }
         }
 
         # NTUSER.DAT (No existe en Boot.wim)
         if (Test-Path $userHive) {
             Write-Host "Cargando USER..." -NoNewline
-            Start-Process reg.exe -ArgumentList "load HKLM\OfflineUser `"$userHive`"" -Wait -NoNewWindow | Out-Null
-            Write-Host "OK" -ForegroundColor Green
+            $p = Start-Process reg.exe -ArgumentList "load HKLM\OfflineUser `"$userHive`"" -Wait -PassThru -NoNewWindow
+            if ($p.ExitCode -eq 0) { 
+                Write-Host "OK" -ForegroundColor Green 
+            } else { 
+                Write-Host "FALLO (Omitido)" -ForegroundColor Red 
+                Write-Log -LogLevel WARN -Message "Fallo al cargar NTUSER.DAT (ExitCode: $($p.ExitCode))"
+            }
         } else {
             Write-Host "USER (Omitido - Modo Boot/WinPE)" -ForegroundColor DarkGray
         }
@@ -3066,8 +3076,13 @@ function Mount-Hives {
         # UsrClass.dat (No existe en Boot.wim)
         if (Test-Path $classHive) {
             Write-Host "Cargando CLASSES..." -NoNewline
-            Start-Process reg.exe -ArgumentList "load HKLM\OfflineUserClasses `"$classHive`"" -Wait -NoNewWindow | Out-Null
-            Write-Host "OK" -ForegroundColor Green
+            $p = Start-Process reg.exe -ArgumentList "load HKLM\OfflineUserClasses `"$classHive`"" -Wait -PassThru -NoNewWindow
+            if ($p.ExitCode -eq 0) { 
+                Write-Host "OK" -ForegroundColor Green 
+            } else { 
+                Write-Host "FALLO (Omitido)" -ForegroundColor Red 
+                Write-Log -LogLevel WARN -Message "Fallo al cargar UsrClass.dat (ExitCode: $($p.ExitCode))"
+            }
         }
 
         return $true
@@ -3137,7 +3152,6 @@ function Translate-OfflinePath {
     # --- CORRECCION: Mapeo de Clases de Usuario (UsrClass.dat) ---
     # Debe ir ANTES de HKCU general, porque es mas especifico.
     if ($cleanPath -match "HKEY_CURRENT_USER\\Software\\Classes") {
-        # Si el tweak toca clases de usuario, va al hive UsrClass.dat
         return $cleanPath -replace "HKEY_CURRENT_USER\\Software\\Classes", "HKLM\OfflineUserClasses"
     }
 
@@ -3161,6 +3175,10 @@ function Translate-OfflinePath {
     # CLASSES ROOT (Global) -> Lo mandamos a Software\Classes de la Maquina
     if ($cleanPath -match "HKEY_CLASSES_ROOT") {
         return $cleanPath -replace "HKEY_CLASSES_ROOT", "HKLM\OfflineSoftware\Classes"
+    }
+	
+    if ($cleanPath -match "HKEY_LOCAL_MACHINE\\COMPONENTS") {
+        return $cleanPath -replace "HKEY_LOCAL_MACHINE\\COMPONENTS", "HKLM\OfflineComponents"
     }
     
     return $null
@@ -3281,7 +3299,7 @@ function Restore-KeyOwner {
     $subKeyPath = $cleanPath -replace "^(HKEY_LOCAL_MACHINE|HKLM|HKLM:|HKEY_LOCAL_MACHINE:)[:\\]+", ""
 
     $targetSid = $null
-    $isUserHive = $subKeyPath -match "^OfflineUser"
+    $isUserHive = $subKeyPath -match "^(OfflineUser|OfflineUserClasses)"
 
     if ($isUserHive) {
         $targetSid = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
@@ -3357,9 +3375,9 @@ function Unlock-Single-Key {
     param([string]$SubKeyPath)
     
     # Filtro de seguridad para raíces
-    if ($SubKeyPath -match "^(OfflineSystem|OfflineSoftware|OfflineUser|OfflineUserClasses)$") { return }
-
-    Enable-Privileges
+    if ($SubKeyPath -match "^(OfflineSystem|OfflineSoftware|OfflineUser|OfflineUserClasses|OfflineComponents)$") { return }
+    
+	Enable-Privileges
     $rootKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Default)
 
     # --- VERIFICACIÓN PREVIA ---
@@ -3739,15 +3757,22 @@ function Show-Tweaks-Offline-GUI {
                     $content = Get-Content -Path $file -Raw
                     
                     # --- A. TRADUCCIÓN DE RUTAS ---
-                    # HKLM Software y System
+                    # 1. HKLM (Software y System)
                     $newContent = $content -replace "HKEY_LOCAL_MACHINE\\SOFTWARE", "HKEY_LOCAL_MACHINE\OfflineSoftware"
                     $newContent = $newContent -replace "HKLM\\SOFTWARE", "HKEY_LOCAL_MACHINE\OfflineSoftware"
                     $newContent = $newContent -replace "HKEY_LOCAL_MACHINE\\SYSTEM", "HKEY_LOCAL_MACHINE\OfflineSystem"
                     $newContent = $newContent -replace "HKLM\\SYSTEM", "HKEY_LOCAL_MACHINE\OfflineSystem"
-                    # HKCU -> HKLM\OfflineUser
+
+                    # 2. Clases de Usuario (CRÍTICO: ANTES de HKCU General)
+                    # Redirige HKCU\Software\Classes -> OfflineUserClasses (UsrClass.dat)
+                    $newContent = $newContent -replace "HKEY_CURRENT_USER\\Software\\Classes", "HKEY_LOCAL_MACHINE\OfflineUserClasses"
+                    $newContent = $newContent -replace "HKCU\\Software\\Classes", "HKEY_LOCAL_MACHINE\OfflineUserClasses"
+
+                    # 3. Usuario General (El resto de HKCU -> OfflineUser / NTUSER.DAT)
                     $newContent = $newContent -replace "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE\OfflineUser"
                     $newContent = $newContent -replace "HKCU", "HKEY_LOCAL_MACHINE\OfflineUser"
-                    # HKCR -> Classes (CRÍTICO)
+                    
+                    # 4. Classes Root (Global) -> OfflineSoftware\Classes
                     $newContent = $newContent -replace "HKEY_CLASSES_ROOT", "HKEY_LOCAL_MACHINE\OfflineSoftware\Classes"
                     $newContent = $newContent -replace "HKCR", "HKEY_LOCAL_MACHINE\OfflineSoftware\Classes"
 
