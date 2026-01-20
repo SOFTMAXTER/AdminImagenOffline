@@ -1548,6 +1548,9 @@ function Limpieza-Menu {
     }
 }
 
+# =================================================================
+#  Modulo GUI de Metadatos
+# =================================================================
 function Show-WimMetadata-GUI {
     
     # 1. Cargar dependencias
@@ -1880,7 +1883,7 @@ public class WimMasterEngine
                     $gb = [math]::Round([long]$bytesStr / 1GB, 2)
                     $sizeDisplay = "$gb GB"
                 }
-                $rowSize = $dgv.Rows.Add("Tamano", $sizeDisplay)
+                $rowSize = $dgv.Rows.Add("Size", $sizeDisplay)
 
                 # D) Fecha Creación
                 $dateStr = ""
@@ -2190,7 +2193,6 @@ function Show-Drivers-GUI {
 
         if ([System.Windows.Forms.MessageBox]::Show("Inyectar $($checkedItems.Count) drivers?", "Confirmar", 'YesNo') -eq 'Yes') {
             $btnInstall.Enabled = $false
-            $listView.Enabled = $false
             
             $count = 0
             $errs = 0
@@ -2238,7 +2240,6 @@ function Show-Drivers-GUI {
             # ----------------------------------------
 
             $btnInstall.Enabled = $true
-            $listView.Enabled = $true
             $lblStatus.Text = "Proceso terminado. Errores: $errs"
             
             [System.Windows.Forms.MessageBox]::Show("Proceso terminado.`nErrores: $errs`n`nLa lista de drivers instalados se ha actualizado internamente.", "Info", 'OK', 'Information')
@@ -2394,8 +2395,7 @@ function Show-Uninstall-Drivers-GUI {
         $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a ELIMINAR PERMANENTEMENTE $($checkedItems.Count) drivers.`n¿Estas seguro?", "Confirmar Eliminacion", 'YesNo', 'Warning')
         if ($confirm -eq 'Yes') {
             $btnDelete.Enabled = $false
-            $listView.Enabled = $false
-            
+
             $count = 0
             $total = $checkedItems.Count
             $errors = 0
@@ -2429,7 +2429,6 @@ function Show-Uninstall-Drivers-GUI {
             }
 
             $btnDelete.Enabled = $true
-            $listView.Enabled = $true
             $lblStatus.Text = "Proceso finalizado. Errores: $errors"
             [System.Windows.Forms.MessageBox]::Show("Proceso completado.`nEliminados: $($total - $errors)`nErrores: $errors", "Resultado", 'OK', 'Information')
         }
@@ -2474,8 +2473,8 @@ function Drivers-Menu {
         $opcionD = Read-Host "`nSelecciona una opcion"
         
         switch ($opcionD.ToUpper()) {
-            "1" { Show-Drivers-GUI }           # Tu funcion de instalacion (v2.0)
-            "2" { Show-Uninstall-Drivers-GUI } # La nueva funcion de desinstalacion
+            "1" { if ($Script:IMAGE_MOUNTED) { Show-Drivers-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
+            "2" { if ($Script:IMAGE_MOUNTED) { Show-Uninstall-Drivers-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
             "V" { return }
             default { Write-Warning "Opcion no valida."; Start-Sleep 1 }
         }
@@ -3679,7 +3678,7 @@ function Show-RegPreview-GUI {
 }
 
 # =================================================================
-#  Modulo de Tweaks Offline
+#  Modulo GUI de Tweaks Offline
 # =================================================================
 function Show-Tweaks-Offline-GUI {
     # 1. Validaciones Previas
@@ -4175,11 +4174,11 @@ function Main-Menu {
         
         switch ($opcionM.ToUpper()) {
             "1" { Image-Management-Menu }
-            "2" { Cambio-Edicion-Menu }
-            "3" { if ($Script:IMAGE_MOUNTED) { Drivers-Menu } else { Write-Warning "Monta una imagen primero."; Pause } }
+            "2" { if ($Script:IMAGE_MOUNTED) { Cambio-Edicion-Menu } else { Write-Warning "Monta una imagen primero."; Pause } }
+            "3" { Drivers-Menu }
             "4" { if ($Script:IMAGE_MOUNTED) { Show-Bloatware-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
-            "5" { Show-Services-Offline-GUI }
-            "6" { Show-Tweaks-Offline-GUI }           
+            "5" { if ($Script:IMAGE_MOUNTED) { Show-Services-Offline-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
+            "6" { if ($Script:IMAGE_MOUNTED) { Show-Tweaks-Offline-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
             "7" { Limpieza-Menu }
             "8" { Show-ConfigMenu }
             "S" { 
