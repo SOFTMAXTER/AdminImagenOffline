@@ -129,7 +129,7 @@ try {
     Write-UpdateLog "[PASO 2/6] Descomprimiendo archivos..."
     Expand-Archive -Path "`$tempZip_updater" -DestinationPath "`$tempExtract_updater" -Force
     
-    # GitHub extrae en una subcarpeta (ej: Aegis-Phoenix-Suite-main)
+    # GitHub extrae en una subcarpeta
     `$updateSourcePath = (Get-ChildItem -Path "`$tempExtract_updater" -Directory | Select-Object -First 1).FullName
 
     Write-UpdateLog "[PASO 3/6] Esperando a que el proceso principal finalice..."
@@ -143,7 +143,7 @@ try {
     Write-UpdateLog "[PASO 4/6] Preparando instalacion (limpiando archivos antiguos)..."
     
     # --- EXCLUSIONES ESPECIFICAS DE AdminImagenOffline ---
-    `$itemsToRemove = Get-ChildItem -Path "$installPath" -Exclude "Logs"
+    `$itemsToRemove = Get-ChildItem -Path "$installPath" -Exclude "Logs", "config.json"
     if (`$null -ne `$itemsToRemove) { 
         Remove-Item -Path `$itemsToRemove.FullName -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -262,7 +262,7 @@ function Load-Config {
     }
 }
 
-# --- NUEVO: Guarda la configuracion actual en el archivo JSON ---
+# --- Guarda la configuracion actual en el archivo JSON ---
 function Save-Config {
     Write-Log -LogLevel INFO -Message "Guardando configuracion..."
     try {
@@ -417,7 +417,8 @@ $defaultScratchDir = "C:\TEMP1"
 
 # --- Ruta del Archivo de Configuracion ---
 # ($scriptRoot se define en la seccion "Registro Inicial")
-$script:configFile = Join-Path $scriptRoot "config.json"
+$parentDir = Split-Path -Parent $scriptRoot
+$script:configFile = Join-Path $parentDir "config.json"
 
 # --- Inicializar variables globales con los valores por defecto ---
 $Script:WIM_FILE_PATH = $null
@@ -505,7 +506,6 @@ function Select-SavePathDialog {
 # =============================================
 #  FUNCIONES DE ACCION (Montaje/Desmontaje)
 # =============================================
-
 function Mount-Image {
     Clear-Host
     if ($Script:IMAGE_MOUNTED -eq 1) {
@@ -1319,6 +1319,35 @@ function Cambio-Edicion-Menu {
     Pause
 }
 
+function Drivers-Menu {
+    while ($true) {
+        Clear-Host
+        if ($Script:IMAGE_MOUNTED -eq 0) { Write-Warning "Necesita montar imagen primero."; Pause; return }
+        
+        Write-Host "=======================================================" -ForegroundColor Cyan
+        Write-Host "             Gestion de Drivers (Offline)              " -ForegroundColor Cyan
+        Write-Host "=======================================================" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "   [1] Inyectar Drivers (Instalacion Inteligente)"
+        Write-Host "       (GUI: Compara carpeta local vs imagen)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   [2] Desinstalar Drivers"
+        Write-Host "       (GUI: Lista drivers instalados y permite borrarlos)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "-------------------------------------------------------"
+        Write-Host "   [V] Volver" -ForegroundColor Red
+        
+        $opcionD = Read-Host "`nSelecciona una opcion"
+        
+        switch ($opcionD.ToUpper()) {
+            "1" { if ($Script:IMAGE_MOUNTED) { Show-Drivers-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
+            "2" { if ($Script:IMAGE_MOUNTED) { Show-Uninstall-Drivers-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
+            "V" { return }
+            default { Write-Warning "Opcion no valida."; Start-Sleep 1 }
+        }
+    }
+}
+
 # :limpieza_menu
 function Limpieza-Menu {
      while ($true) {
@@ -1726,8 +1755,8 @@ public class WimMasterEngine
 
     # 4. GUI
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Editor Metadatos WIM (Nativo)"
-    $form.Size = New-Object System.Drawing.Size(850, 600) # Un poco más alto para ver más datos
+    $form.Text = "Editor Metadatos WIM"
+    $form.Size = New-Object System.Drawing.Size(850, 600)
     $form.StartPosition = "CenterScreen"
     $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
     $form.ForeColor = [System.Drawing.Color]::White
@@ -2073,7 +2102,7 @@ function Show-Drivers-GUI {
     # Cache Global
     $script:cachedInstalledDrivers = @()
 
-    # --- HELPER CORREGIDO: PROCESAMIENTO ROBUSTO DE INF ---
+    # --- HELPER: PROCESAMIENTO ROBUSTO DE INF ---
     $Script:ProcessInfFile = {
         param($fileObj)
         
@@ -2100,16 +2129,16 @@ function Show-Drivers-GUI {
             }
         } catch {}
 
-        # Lógica de Comparación (Ahora funcionará porque $localVersion tendrá datos)
+        # Lógica de Comparación
         $foundByName = $script:cachedInstalledDrivers | Where-Object { [System.IO.Path]::GetFileName($_.OriginalFileName) -eq $fileObj.Name }
         
         if ($foundByName) {
-            $isInstalled = $true; $statusText = "INSTALADO (Nombre)"
+            $isInstalled = $true; $statusText = "INSTALADO"
         } 
         elseif ($localVersion -ne "---") {
             # Comparar versión exacta + clase
             $foundByVer = $script:cachedInstalledDrivers | Where-Object { $_.Version -eq $localVersion -and $_.ClassName -eq $classType }
-            if ($foundByVer) { $isInstalled = $true; $statusText = "INSTALADO (Version)" }
+            if ($foundByVer) { $isInstalled = $true; $statusText = "INSTALADO" }
         }
 
         # Crear Item
@@ -2121,7 +2150,7 @@ function Show-Drivers-GUI {
         $item.Tag = $fileObj.FullName
         
         if ($isInstalled) {
-            $item.BackColor = [System.Drawing.Color]::FromArgb(60, 50, 0) # Amarillo oscuro
+            $item.BackColor = [System.Drawing.Color]::FromArgb(60, 50, 0)
             $item.ForeColor = [System.Drawing.Color]::Gold
             $item.Checked = $false
         } else {
@@ -2223,7 +2252,7 @@ function Show-Drivers-GUI {
                 }
             }
 
-            # --- MEJORA CRÍTICA: RECARGA DE CACHÉ ---
+            # --- RECARGA DE CACHÉ ---
             $lblStatus.Text = "Actualizando base de datos de drivers... Por favor espera."
             $form.Refresh()
             
@@ -2452,35 +2481,6 @@ function Show-Uninstall-Drivers-GUI {
     $form.Dispose()
 }
 
-function Drivers-Menu {
-    while ($true) {
-        Clear-Host
-        if ($Script:IMAGE_MOUNTED -eq 0) { Write-Warning "Necesita montar imagen primero."; Pause; return }
-        
-        Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "             Gestion de Drivers (Offline)              " -ForegroundColor Cyan
-        Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "   [1] Inyectar Drivers (Instalacion Inteligente)"
-        Write-Host "       (GUI: Compara carpeta local vs imagen)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "   [2] Desinstalar Drivers"
-        Write-Host "       (GUI: Lista drivers instalados y permite borrarlos)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host "   [V] Volver" -ForegroundColor Red
-        
-        $opcionD = Read-Host "`nSelecciona una opcion"
-        
-        switch ($opcionD.ToUpper()) {
-            "1" { if ($Script:IMAGE_MOUNTED) { Show-Drivers-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
-            "2" { if ($Script:IMAGE_MOUNTED) { Show-Uninstall-Drivers-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
-            "V" { return }
-            default { Write-Warning "Opcion no valida."; Start-Sleep 1 }
-        }
-    }
-}
-
 # =================================================================
 #  Modulo GUI de Bloatware
 # =================================================================
@@ -2573,7 +2573,7 @@ function Show-Bloatware-GUI {
     $btnRemove.BackColor = [System.Drawing.Color]::Crimson
     $btnRemove.ForeColor = [System.Drawing.Color]::White
     $btnRemove.FlatStyle = "Flat"
-    $btnRemove.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    $btnRemove.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
 
     $form.Controls.Add($btnSelectAll)
     $form.Controls.Add($btnSelectNone)
@@ -3965,7 +3965,7 @@ function Show-Tweaks-Offline-GUI {
                         $curr = (Get-ItemProperty -Path $psPath -Name $tw.RegistryKey -ErrorAction SilentlyContinue).($tw.RegistryKey)
                         if ("$curr" -eq "$($tw.EnabledValue)") {
                             $state = "ACTIVO"
-                            $color = [System.Drawing.Color]::Cyan # Activos siguen en Cyan
+                            $color = [System.Drawing.Color]::Cyan
                         }
                     } catch {}
 
@@ -4011,7 +4011,6 @@ function Show-Tweaks-Offline-GUI {
                             Set-ItemProperty -Path $psPath -Name $t.RegistryKey -Value $t.EnabledValue -Type $type -Force -ErrorAction Stop
 							
 							# Solo intentamos restaurar si es una clave de sistema protegida (Policies, Defender, etc)
-                            # Pero hacerlo en todas no hace daño.
                             Restore-KeyOwner -KeyPath $psPath
                             
                             # Verificación
