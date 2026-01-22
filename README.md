@@ -1,4 +1,4 @@
-# AdminImagenOffline V1.4.2 by SOFTMAXTER
+# AdminImagenOffline V1.4.3 by SOFTMAXTER
 
 **AdminImagenOffline** es un completo script en PowerShell, diseñado para simplificar la administración y el mantenimiento de imágenes de instalación de Windows (`.wim`, `.esd`, `.vhd/vhdx`). El script encapsula complejas operaciones de `DISM`, manipulación del Registro y otras herramientas del sistema en una interfaz de menús interactiva y fácil de usar.
 
@@ -12,15 +12,18 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 * **Robustez y Seguridad**:
     * **Protección de Hives**: Implementa limpieza de memoria (`GC`) y pausas de seguridad para evitar la corrupción del registro al desmontar.
     * **Gestión de Directorios**: Comprueba y gestiona automáticamente la creación de los directorios de trabajo.
+    * **Seguridad ESD**: Detecta si se intenta montar una imagen `.esd` (solo lectura/comprimida), advierte al usuario sobre los riesgos de corrupción y recomienda la conversión previa o el guardado como nuevo archivo WIM.
 * **Detección Automática**: Verifica al inicio si ya existe una imagen montada en el sistema y carga su información dinámicamente.
 * **Autoelevación de Privilegios**: Incluye un lanzador `Run.bat` que asegura la ejecución con permisos de Administrador.
-* **Gestión de Imágenes**: Montaje, desmontaje (con descartes), guardado de cambios (commit/append) y recarga rápida.
-* **Edición de Metadatos WIM**: Herramienta nativa para modificar nombres, descripciones y visualizar detalles técnicos (Arquitectura, Versión, Tamaño, Fecha) de cada índice.
+* **Gestión de Imágenes**:
+    * Montaje, desmontaje (con descartes) y recarga rápida.
+    * Guardado de cambios: Commit (sobreescribir), Append (nuevo índice) y **Save As New WIM** (captura como archivo nuevo).
+* **Editor de Metadatos WIM**: Nueva interfaz gráfica para visualizar y editar propiedades de la imagen (Nombre, Descripción, DisplayName) y ver datos de solo lectura (Arquitectura, Versión, Tamaño).
 * **Edición de Índices WIM**: Exportación y eliminación de índices específicos.
 * **Conversión de Formatos**: ESD a WIM y VHD/VHDX a WIM.
 * **Cambio de Edición de Windows**: Detección y cambio de edición (ej. Home a Pro) offline.
 * **Gestión Avanzada de Drivers**:
-    * **Inyector Flexible**: Interfaz que permite cargar carpetas recursivamente o agregar archivos `.inf` individuales "al vuelo". Incluye detección precisa por **Versión** y **Clase** para evitar duplicados.
+    * **Inyector Flexible (v5.1)**: Interfaz que permite cargar carpetas recursivamente o agregar archivos `.inf` individuales "al vuelo". Incluye detección precisa por **Versión** y **Clase** para evitar duplicados.
     * **Desinstalador de Drivers**: Lista los drivers de terceros (OEM) instalados en la imagen y permite su eliminación selectiva.
 * **Eliminación de Bloatware**: Interfaz gráfica con clasificación por colores (Verde=Seguro, Naranja=Recomendado, Blanco=Otros) para eliminar aplicaciones preinstaladas (Appx).
 * **Optimización de Servicios**: Permite deshabilitar servicios del sistema innecesarios organizados por categorías mediante una interfaz de pestañas.
@@ -55,7 +58,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ### Menú Principal
 
-* **1. Gestionar Imagen**: Acceso a submenú de operaciones WIM (Montar, Guardar, Metadatos, Índices, Convertir).
+* **1. Gestionar Imagen**: Operaciones base de WIM (Montar, Guardar, Exportar, Convertir) y **Editor de Metadatos**.
 * **2. Cambiar Edicion de Windows**: Actualización de edición (ej. Home -> Pro).
 * **3. Integrar Drivers (Controladores)**: Herramientas GUI para añadir o quitar drivers.
 * **4. Eliminar Bloatware (Apps)**: Herramienta GUI para borrar aplicaciones Appx.
@@ -66,11 +69,9 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ### 1. Gestionar Imagen (Submenú)
 
-* **1. Montar/Desmontar Imagen**: Carga o descarga la imagen para su edición.
-* **2. Guardar Cambios**: Opciones para guardar en el índice actual (Commit), en uno nuevo (Append) o crear un nuevo archivo WIM (Save As).
-* **3. Editar Info/Metadatos**: GUI para cambiar el Nombre y Descripción que se muestran durante la instalación de Windows, además de ver info técnica.
-* **4. Editar Indices**: Exportar un índice específico a un nuevo archivo o eliminar índices para ahorrar espacio.
-* **5. Convertir Imagen a WIM**: Importar desde formatos `.esd` o discos virtuales `.vhd/.vhdx`.
+Además de las funciones estándar, incluye:
+* **Editar Info/Metadatos**: Abre una ventana para cambiar el nombre y descripción que aparecen durante la instalación de Windows.
+* **Guardar Cambios**: Ofrece la opción crítica de "Guardar en un NUEVO archivo WIM", vital si se trabaja con orígenes ESD o VHD.
 
 ### 3. Integrar Drivers (Controladores)
 
@@ -78,7 +79,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
     * **Carga Flexible**: Usa el botón `[CARPETA] Cargar...` para escanear directorios completos o `+ Agregar Archivo .INF` para archivos sueltos.
     * **Análisis Profundo**: Lee la versión interna (`DriverVer`) de cada archivo `.inf` y la compara con los drivers ya instalados en la imagen.
     * **Visualización**: Muestra una tabla detallada con Estado, Nombre, Clase y **Versión**. Marca en amarillo los drivers ya existentes para evitar redundancia.
-* **2. Desinstalar Drivers**: Escanea el almacén de drivers de la imagen y lista los controladores de terceros (renombrados como `oemXX.inf`). Permite seleccionar y eliminar drivers problemáticos u obsoletos para reducir el tamaño de la imagen.
+* **2. Desinstalalar Drivers**: Escanea el almacén de drivers de la imagen y lista los controladores de terceros (renombrados como `oemXX.inf`). Permite seleccionar y eliminar drivers problemáticos u obsoletos.
 
 ### 4. Eliminar Bloatware (Apps)
 
@@ -114,10 +115,11 @@ Requiere una imagen montada. Ofrece un menú con las siguientes herramientas:
 * **4. Reparación SFC (Offline)**: Ejecuta `SFC /scannow` redirigiendo los directorios de boot y windows a la imagen montada.
 * **5. Analizar Almacen de Componentes**: `DISM /... /AnalyzeComponentStore`.
 * **6. Limpieza de Componentes**: `DISM /... /StartComponentCleanup /ResetBase`.
-* **7. Ejecutar TODO**: Secuencia automática de mantenimiento completo.
+* **7. Ejecutar TODO**: Secuencia automática de mantenimiento completo con lógica de decisión inteligente (salta pasos si la imagen está saludable).
 
 ## Notas Importantes
 
+* **IMÁGENES ESD:** El script detecta archivos `.esd` y advierte sobre su naturaleza de solo lectura/comprimida. Se recomienda convertirlos a WIM o usar la función "Guardar como Nuevo WIM" para evitar corrupción.
 * **COPIA DE SEGURIDAD:** Es **altamente recomendable** realizar una copia de seguridad de tu imagen de Windows antes de utilizar las funciones de cambio de edición o reparación.
 * **COMPATIBILIDAD:** El script traduce automáticamente las claves de registro para edición offline, protegiendo el sistema operativo del técnico.
 * **IDIOMA:** El script y sus mensajes en consola están en español.
