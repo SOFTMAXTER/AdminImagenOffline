@@ -513,9 +513,11 @@ function Mount-Image {
         Pause; return
     }
 
-    $path = Select-PathDialog -DialogType File -Title "Seleccione el archivo WIM a montar" -Filter "Archivos WIM (*.wim)|*.wim|Archivos ESD (*.esd)|*.esd|Todos (*.*)|*.*"
+    $path = Select-PathDialog -DialogType File -Title "Seleccione la imagen a montar" -Filter "Archivos Soportados (*.wim, *.esd, *.vhd, *.vhdx)|*.wim;*.esd;*.vhd;*.vhdx|Todos (*.*)|*.*"
     if ([string]::IsNullOrEmpty($path)) { Write-Warning "Operacion cancelada."; Pause; return }
     $Script:WIM_FILE_PATH = $path
+    
+    $extension = [System.IO.Path]::GetExtension($path).ToUpper()
 
     # --- [INICIO] BLOQUE DE SEGURIDAD ESD MEJORADO ---
     if ($Script:WIM_FILE_PATH -match '\.esd$') {
@@ -529,19 +531,67 @@ function Mount-Image {
         Write-Host "IMPORTANTE:" -ForegroundColor Cyan
         Write-Host "1. Si haces cambios, el 'Guardar Cambios (Commit)' FALLARA." -ForegroundColor Red
         Write-Host "2. Para salvar tu trabajo, tendras que usar OBLIGATORIAMENTE:" -ForegroundColor White
-        Write-Host "   -> Menú 'Guardar Cambios' > Opción [3] 'Guardar como Nuevo Archivo WIM'" -ForegroundColor Green
+        Write-Host "   -> Menu 'Guardar Cambios' > Opcion [3] 'Guardar como Nuevo Archivo WIM'" -ForegroundColor Green
         Write-Host ""
         Write-Host "RECOMENDACION IDEAL: Usa 'Convertir ESD a WIM' en el menu principal antes de montar." -ForegroundColor Gray
         Write-Host ""
         
-        $confirmEsd = Read-Host "Escribe 'SI' para montar de todos modos (bajo tu riesgo) o Enter para salir"
+        $confirmEsd = Read-Host "Escribe 'SI' para montar de todos modos o Enter para salir"
         if ($confirmEsd.ToUpper() -ne 'SI') {
             Write-Warning "Operacion cancelada. Convierte a WIM primero."
             $Script:WIM_FILE_PATH = $null
             Pause
             return
         }
-        Write-Host "Procediendo... Recuerda usar 'Guardar como Nuevo WIM' al finalizar." -ForegroundColor DarkGray
+        Write-Host "Procediendo... Recuerda usar 'Guardar como Nuevo WIM' al finalizar." -ForegroundColor Gray
+    }
+
+# --- BLOQUE B: SEGURIDAD Y LOGICA VHD/VHDX ---
+    if ($extension -eq ".VHD" -or $extension -eq ".VHDX") {
+        Clear-Host
+        Write-Warning "======================================================="
+        Write-Warning "         MODO DE MONTAJE DE DISCO VIRTUAL (VHD)        "
+        Write-Warning "======================================================="
+        Write-Host ""
+        Write-Host "Has seleccionado un disco virtual ($extension)." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "DIFERENCIAS CRITICAS:" -ForegroundColor Cyan
+        Write-Host "1. NO se usara la carpeta de montaje '$Script:MOUNT_DIR'." -ForegroundColor Gray
+        Write-Host "2. El VHD se montara como una NUEVA UNIDAD (Letra de disco)." -ForegroundColor Gray
+        Write-Host "3. Los cambios se guardan EN TIEMPO REAL al editar (No requiere Commit)." -ForegroundColor Red
+        Write-Host ""
+        
+        $confirmVhd = Read-Host "Escribe 'SI' para adjuntar el disco virtual"
+        if ($confirmVhd.ToUpper() -ne 'SI') {
+            Write-Warning "Operacion cancelada."; $Script:WIM_FILE_PATH = $null; Pause; return
+        }
+
+        try {
+            Write-Host "[+] Adjuntando VHD..." -ForegroundColor Yellow
+            $vhd = Mount-VHD -Path $Script:WIM_FILE_PATH -PassThru -ErrorAction Stop
+            
+            # Obtener la letra de unidad asignada (Detecta la partición más grande o la de Windows)
+            $diskInfo = $vhd | Get-Disk | Get-Partition | Where-Object { $_.DriveLetter -ne $null } | Select-Object -First 1
+            
+            if (-not $diskInfo) { throw "El VHD se monto pero no tiene letra de unidad asignada (¿Particion oculta?)." }
+            
+            $driveLetter = $diskInfo.DriveLetter + ":\"
+            
+            # --- CAMBIO CRITICO DE VARIABLES PARA QUE EL RESTO DEL SCRIPT FUNCIONE ---
+            $Script:MOUNT_DIR = $driveLetter  # Ahora MOUNT_DIR es "E:\" por ejemplo
+            $Script:IMAGE_MOUNTED = 2         # Usamos '2' para saber que es modo VHD
+            $Script:MOUNTED_INDEX = 1         # VHDs no suelen manejar índices como WIM, asumimos 1
+            
+            Write-Host "[OK] VHD Montado en: $Script:MOUNT_DIR" -ForegroundColor Green
+            Write-Log -LogLevel INFO -Message "VHD Montado: $Script:WIM_FILE_PATH en $Script:MOUNT_DIR"
+        }
+        catch {
+            Write-Error "Error al montar VHD: $_"
+            Write-Log -LogLevel ERROR -Message "Fallo montaje VHD: $_"
+            $Script:WIM_FILE_PATH = $null
+        }
+        Pause
+        return
     }
 
     Write-Host "[+] Obteniendo informacion del WIM..." -ForegroundColor Yellow
@@ -549,7 +599,6 @@ function Mount-Image {
 
     $INDEX = Read-Host "`nIngrese el numero de indice a montar"
     
-    # --- INICIO DE LA MEJORA ---
     # Verificar si el directorio de montaje está sucio antes de empezar
     if ((Get-ChildItem $Script:MOUNT_DIR -Force | Measure-Object).Count -gt 0) {
         Write-Warning "El directorio de montaje ($Script:MOUNT_DIR) NO esta vacio."
@@ -562,7 +611,6 @@ function Mount-Image {
             Remove-Item "$Script:MOUNT_DIR\*" -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
-    # --- FIN DE LA MEJORA ---
 
     Write-Host "[+] Montando imagen (Indice: $INDEX)... Esto puede tardar." -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "Montando imagen: '$Script:WIM_FILE_PATH' (Indice: $INDEX) en '$Script:MOUNT_DIR'"
@@ -599,11 +647,33 @@ function Unmount-Image {
     # --- CORRECCION: Descargar Hives antes de DISM ---
     # Si tenemos hives cargados (para tweaks o limpieza), hay que bajarlos OBLIGATORIAMENTE
     # de lo contrario DISM fallara porque los archivos estan bloqueados.
-    Unmount-Hives
-    
+    Unmount-Hives    
     # Pequeña pausa para asegurar que el sistema de archivos libere los handles
-    Start-Sleep -Seconds 2 
-    # -----------------------------------------------------------
+    Start-Sleep -Seconds 2
+
+	# --- DESMONTAJE VHD ---
+    if ($Script:IMAGE_MOUNTED -eq 2) {
+        Write-Host "Detectado montaje tipo VHD." -ForegroundColor Cyan
+        try {
+            Write-Host "[+] Desadjuntando disco virtual..." -ForegroundColor Yellow
+            Dismount-VHD -Path $Script:WIM_FILE_PATH -ErrorAction Stop
+            
+            Write-Host "[OK] VHD Desmontado correctamente." -ForegroundColor Green
+            Write-Log -LogLevel INFO -Message "VHD Desmontado exitosamente."
+            
+            # Restaurar variables
+            $Script:IMAGE_MOUNTED = 0
+            $Script:WIM_FILE_PATH = $null
+            # Restauramos el MOUNT_DIR original desde config si es necesario,
+            Load-Config 
+        }
+        catch {
+            Write-Error "[ERROR] No se pudo desmontar el VHD: $_"
+            Write-Warning "Asegurate de que no tengas carpetas abiertas dentro de la unidad."
+        }
+        Pause
+        return
+    }
 
     Write-Host "[+] Desmontando imagen (descartando cambios)..." -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "Desmontando imagen (descartando cambios) desde '$Script:MOUNT_DIR'."
@@ -685,74 +755,116 @@ function Reload-Image {
 function Save-Changes {
     param ([string]$Mode) # 'Commit', 'Append' o 'NewWim'
 
+    # 1. Validación de Montaje
     if ($Script:IMAGE_MOUNTED -eq 0) { Write-Warning "No hay imagen montada para guardar."; Pause; return }
 
+    # 2. BLOQUEO VHD (Como discutimos antes)
+    if ($Script:IMAGE_MOUNTED -eq 2) {
+        Clear-Host
+        Write-Warning "AVISO: Estas trabajando sobre un disco virtual (VHD/VHDX)."
+        Write-Host "Los cambios en VHD se guardan automáticamente en tiempo real al editar archivos." -ForegroundColor Cyan
+        Write-Host "No es necesario (ni posible) ejecutar operaciones de 'Commit' o 'Capture' aquí." -ForegroundColor Gray
+        Write-Host "Simplemente desmonta la imagen para finalizar." -ForegroundColor Yellow
+        Pause
+        return
+    }
+
+    # 3. BLOQUEO ESD
+    # Verificamos si la extensión original era .esd
+    $isEsd = ($Script:WIM_FILE_PATH -match '\.esd$')
+
+    if ($isEsd -and ($Mode -match 'Commit|Append')) {
+        Clear-Host
+        Write-Host "=======================================================" -ForegroundColor Yellow
+        Write-Host "      OPERACION NO PERMITIDA EN ARCHIVOS .ESD          " -ForegroundColor Yellow
+        Write-Host "=======================================================" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Has intentado hacer '$Mode' sobre una imagen ESD comprimida." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "EXPLICACION TECNICA:" -ForegroundColor Cyan
+        Write-Host "Los archivos ESD son de 'compresion solida' y no admiten escritura incremental." -ForegroundColor Gray
+        Write-Host "DISM fallara si intentas guardar cambios directamente sobre el archivo original." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "SOLUCION:" -ForegroundColor Green
+        Write-Host "Debes seleccionar la opcion [3] 'Guardar en un NUEVO archivo WIM'." -ForegroundColor White
+        Write-Host "Esto capturara tu trabajo en un archivo nuevo y funcional." -ForegroundColor Gray
+        Write-Host ""
+        Pause
+        return
+    }
+
+    # 4. Lógica Original (WIM o ESD con modo NewWim)
     if ($Mode -eq 'Commit') {
-		Clear-Host
+        Clear-Host
         Write-Host "[+] Guardando cambios en el indice $Script:MOUNTED_INDEX..." -ForegroundColor Yellow
         Write-Log -LogLevel ACTION -Message "Guardando cambios (Commit) en indice $Script:MOUNTED_INDEX."
         dism /commit-image /mountdir:"$Script:MOUNT_DIR"
     } 
     elseif ($Mode -eq 'Append') {
-		Clear-Host
+        Clear-Host
         Write-Host "[+] Guardando cambios en un nuevo indice (Append)..." -ForegroundColor Yellow
         Write-Log -LogLevel ACTION -Message "Guardando cambios (Append) en nuevo indice."
         dism /commit-image /mountdir:"$Script:MOUNT_DIR" /append
     } 
     elseif ($Mode -eq 'NewWim') {
-		Clear-Host
+        Clear-Host
         Write-Host "--- Guardar como Nuevo Archivo WIM (Exportar Estado Actual) ---" -ForegroundColor Cyan
-        Write-Host "Nota: Esto creara un nuevo archivo WIM basado en lo que hay en la carpeta de montaje actualmente." -ForegroundColor Gray
+        if ($isEsd) {
+            Write-Host "MODO ESD DETECTADO: Esta es la forma correcta de guardar tus cambios." -ForegroundColor Green
+        }
         
         # 1. Seleccionar destino
-        $wimFileObject = Get-Item -Path $Script:WIM_FILE_PATH
-        $DEFAULT_DEST_PATH = Join-Path $wimFileObject.DirectoryName "$($wimFileObject.BaseName)_MOD.wim"
+        if ($Script:WIM_FILE_PATH) {
+            $wimFileObject = Get-Item -Path $Script:WIM_FILE_PATH
+            $baseName = $wimFileObject.BaseName
+            $dirName = $wimFileObject.DirectoryName
+        } else {
+            $baseName = "Imagen"
+            $dirName = "C:\"
+        }
+        
+        $DEFAULT_DEST_PATH = Join-Path $dirName "${baseName}_MOD.wim"
         
         $DEST_WIM_PATH = Select-SavePathDialog -Title "Guardar copia como..." -Filter "Archivos WIM (*.wim)|*.wim" -DefaultFileName $DEFAULT_DEST_PATH
         if (-not $DEST_WIM_PATH) { Write-Warning "Operacion cancelada."; return }
 
-        # --- MEJORA: OBTENER NOMBRE DEL iNDICE ACTUAL ---
+        # Metadatos (Nombre)
         $defaultName = "Custom Image"
         try {
-            # Usamos el cmdlet nativo de DISM para leer el nombre del indice origen
             $info = Get-WindowsImage -ImagePath $Script:WIM_FILE_PATH -Index $Script:MOUNTED_INDEX -ErrorAction SilentlyContinue
-            if ($info -and $info.ImageName) {
-                $defaultName = $info.ImageName
-            }
-        } catch {
-            # Si falla, se mantiene "Custom Image" como fallback
-        }
-        # ------------------------------------------------
-
-        # 2. Metadatos (Con default dinámico)
+            if ($info -and $info.ImageName) { $defaultName = $info.ImageName }
+        } catch {}
+        
         $IMAGE_NAME = Read-Host "Ingrese el NOMBRE para la imagen interna (Enter = '$defaultName')"
         if ([string]::IsNullOrWhiteSpace($IMAGE_NAME)) { $IMAGE_NAME = $defaultName }
+
+        # --- Metadatos (Descripción) ---
+        $IMAGE_DESC = Read-Host "Ingrese la DESCRIPCION (Opcional)"
+        if ([string]::IsNullOrWhiteSpace($IMAGE_DESC)) { $IMAGE_DESC = "Imagen creada con AdminImagenOffline" }
         
         Write-Host "`n[+] Capturando estado actual a nuevo WIM..." -ForegroundColor Yellow
-        Write-Log -LogLevel ACTION -Message "Guardando copia en nuevo WIM: '$DEST_WIM_PATH' con nombre '$IMAGE_NAME'"
+        Write-Log -LogLevel ACTION -Message "Guardando copia en nuevo WIM: '$DEST_WIM_PATH' (Nombre: $IMAGE_NAME)"
         
-        dism /Capture-Image /ImageFile:"$DEST_WIM_PATH" /CaptureDir:"$Script:MOUNT_DIR" /Name:"$IMAGE_NAME" /Compress:max /CheckIntegrity
+        # Se agrega /Description:"$IMAGE_DESC" al comando
+        dism /Capture-Image /ImageFile:"$DEST_WIM_PATH" /CaptureDir:"$Script:MOUNT_DIR" /Name:"$IMAGE_NAME" /Description:"$IMAGE_DESC" /Compress:max /CheckIntegrity
 
         if ($LASTEXITCODE -eq 0) {
             Write-Host "[OK] Copia guardada exitosamente en:" -ForegroundColor Green
             Write-Host "     $DEST_WIM_PATH" -ForegroundColor Cyan
-            Write-Host "`nLa imagen original ($Script:WIM_FILE_PATH) sigue montada y sin cambios confirmados." -ForegroundColor Gray
+            Write-Host "`nNOTA: La imagen original sigue montada. Debes desmontarla (sin guardar) al salir." -ForegroundColor Gray
         } else {
             Write-Error "[ERROR] Fallo al capturar la nueva imagen (Codigo: $LASTEXITCODE)."
             Write-Log -LogLevel ERROR -Message "Fallo Save-As NewWim. Codigo: $LASTEXITCODE"
         }
         Pause
         return 
-    } 
-    else {
-        Write-Error "Modo de guardado '$Mode' no valido."
-        return
     }
 
-    # Bloque común para Commit/Append
+    # Bloque común para Commit/Append exitoso
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[OK] Cambios guardados." -ForegroundColor Green
     } else {
+        # Si llegamos aquí con un error, es un error legítimo de DISM (no por bloqueo de ESD)
         Write-Error "[ERROR] Fallo al guardar cambios (Codigo: $LASTEXITCODE)."
         Write-Log -LogLevel ERROR -Message "Fallo al guardar cambios ($Mode). Codigo: $LASTEXITCODE"
     }
