@@ -2773,18 +2773,29 @@ function Show-Services-Offline-GUI {
         return 
     }
 
+    # 3. Montar Hives
+    if (-not (Mount-Hives)) { return }
+
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
+    Add-Type -AssemblyName System.Collections
 
-    # 3. Configuracion del Formulario
+    # 4. Configuracion del Formulario
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Optimizador de Servicios Offline - $Script:MOUNT_DIR"
-    $form.Size = New-Object System.Drawing.Size(1000, 700)
+    $form.Size = New-Object System.Drawing.Size(1100, 750)
     $form.StartPosition = "CenterScreen"
     $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
     $form.ForeColor = [System.Drawing.Color]::White
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
+
+    # ToolTip
+    $toolTip = New-Object System.Windows.Forms.ToolTip
+    $toolTip.AutoPopDelay = 5000
+    $toolTip.InitialDelay = 500
+    $toolTip.ReshowDelay = 500
+    $toolTip.ShowAlways = $true
 
     # Titulo
     $lblTitle = New-Object System.Windows.Forms.Label
@@ -2794,65 +2805,79 @@ function Show-Services-Offline-GUI {
     $lblTitle.AutoSize = $true
     $form.Controls.Add($lblTitle)
 
-    # --- CONTROL DE PESTAÑAS ---
+    # --- CONTROL DE PESTANAS ---
     $tabControl = New-Object System.Windows.Forms.TabControl
     $tabControl.Location = New-Object System.Drawing.Point(20, 40)
-    $tabControl.Size = New-Object System.Drawing.Size(945, 520)
-    $tabControl.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $tabControl.Size = New-Object System.Drawing.Size(1045, 540)
+    $tabControl.Font = New-Object System.Drawing.Font("Segoe UI", 10)
     $form.Controls.Add($tabControl)
 
-    # Lista global para rastrear los ListViews de cada pestaña
-    $globalListViews = New-Object System.Collections.Generic.List[System.Windows.Forms.ListView]
+    # --- PANEL DE ACCIONES ---
+    $pnlActions = New-Object System.Windows.Forms.Panel
+    $pnlActions.Location = New-Object System.Drawing.Point(20, 600)
+    $pnlActions.Size = New-Object System.Drawing.Size(1045, 100)
+    $pnlActions.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 40)
+    $pnlActions.BorderStyle = "FixedSingle"
+    $form.Controls.Add($pnlActions)
 
     # Barra de Estado
     $lblStatus = New-Object System.Windows.Forms.Label
     $lblStatus.Text = "Cargando Hives... espera."
-    $lblStatus.Location = New-Object System.Drawing.Point(20, 570)
+    $lblStatus.Location = New-Object System.Drawing.Point(10, 10)
     $lblStatus.AutoSize = $true
     $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
-    $form.Controls.Add($lblStatus)
+    $pnlActions.Controls.Add($lblStatus)
 
-    # Botones
+    # Boton Marcar Todo
     $btnSelectAll = New-Object System.Windows.Forms.Button
-    $btnSelectAll.Text = "Marcar Activos (Pestana Actual)"
-    $btnSelectAll.Location = New-Object System.Drawing.Point(20, 600)
-    $btnSelectAll.Size = New-Object System.Drawing.Size(220, 35)
-    $btnSelectAll.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
+    $btnSelectAll.Text = "Marcar Todo"
+    $btnSelectAll.Location = New-Object System.Drawing.Point(10, 40)
+    $btnSelectAll.Size = New-Object System.Drawing.Size(140, 40)
+    $btnSelectAll.BackColor = [System.Drawing.Color]::Gray
     $btnSelectAll.FlatStyle = "Flat"
-    $form.Controls.Add($btnSelectAll)
+    $toolTip.SetToolTip($btnSelectAll, "Marca todos los servicios visibles en la pestana actual.")
+    $pnlActions.Controls.Add($btnSelectAll)
 
+    # Boton Restaurar (NUEVO)
+    $btnRestore = New-Object System.Windows.Forms.Button
+    $btnRestore.Text = "RESTAURAR ORIGINALES"
+    $btnRestore.Location = New-Object System.Drawing.Point(400, 40)
+    $btnRestore.Size = New-Object System.Drawing.Size(280, 40)
+    $btnRestore.BackColor = [System.Drawing.Color]::FromArgb(200, 100, 0) # Naranja
+    $btnRestore.ForeColor = [System.Drawing.Color]::White
+    $btnRestore.FlatStyle = "Flat"
+    $btnRestore.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+    $toolTip.SetToolTip($btnRestore, "Devuelve los servicios seleccionados a su estado por defecto (Manual/Automatico).")
+    $pnlActions.Controls.Add($btnRestore)
+
+    # Boton Deshabilitar
     $btnApply = New-Object System.Windows.Forms.Button
-    $btnApply.Text = "DESHABILITAR SELECCIONADOS (GLOBAL)"
-    $btnApply.Location = New-Object System.Drawing.Point(600, 600)
-    $btnApply.Size = New-Object System.Drawing.Size(360, 35)
+    $btnApply.Text = "DESHABILITAR SELECCION"
+    $btnApply.Location = New-Object System.Drawing.Point(700, 40)
+    $btnApply.Size = New-Object System.Drawing.Size(320, 40)
     $btnApply.BackColor = [System.Drawing.Color]::Crimson
     $btnApply.ForeColor = [System.Drawing.Color]::White
     $btnApply.FlatStyle = "Flat"
     $btnApply.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $form.Controls.Add($btnApply)
+    $toolTip.SetToolTip($btnApply, "Deshabilita los servicios seleccionados.")
+    $pnlActions.Controls.Add($btnApply)
+
+    # Lista global
+    $globalListViews = New-Object System.Collections.Generic.List[System.Windows.Forms.ListView]
 
     # 4. Logica de Carga Dinamica
     $form.Add_Shown({
         $form.Refresh()
         
-        if (-not (Mount-Hives)) {
-            $lblStatus.Text = "Error fatal al cargar Hives."
-            $lblStatus.ForeColor = [System.Drawing.Color]::Red
-            return
-        }
-
-        # Obtener categorias unicas del catalogo
+        # Obtener categorias unicas
         $categories = $script:ServiceCatalog | Select-Object -ExpandProperty Category -Unique | Sort-Object
-
         $tabControl.SuspendLayout()
 
         foreach ($cat in $categories) {
-            # A. Crear Pestaña
             $tabPage = New-Object System.Windows.Forms.TabPage
             $tabPage.Text = "  $cat  "
             $tabPage.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
 
-            # B. Crear ListView
             $lv = New-Object System.Windows.Forms.ListView
             $lv.Dock = [System.Windows.Forms.DockStyle]::Fill
             $lv.View = [System.Windows.Forms.View]::Details
@@ -2863,35 +2888,31 @@ function Show-Services-Offline-GUI {
             $lv.ForeColor = [System.Drawing.Color]::White
             $lv.BorderStyle = "None"
             
-            # Columnas
             $lv.Columns.Add("Servicio", 200) | Out-Null
             $lv.Columns.Add("Estado Actual", 120) | Out-Null
-            $lv.Columns.Add("Descripcion", 550) | Out-Null
+            $lv.Columns.Add("Config. Original", 120) | Out-Null
+            $lv.Columns.Add("Descripcion", 450) | Out-Null
             
-            # Identificador (Tag en el TabPage para facilitar busqueda si fuera necesario)
             $tabPage.Tag = $cat
-            
             $tabPage.Controls.Add($lv)
             $tabControl.TabPages.Add($tabPage)
             $globalListViews.Add($lv)
         }
 
-        # C. Llenar Datos
+        # Llenar Datos
         $totalServices = 0
 
         foreach ($svc in $script:ServiceCatalog) {
-            # 1. Encontrar el ListView correcto para la categoria del servicio
+            # Buscar el ListView correcto
             $targetLV = $null
-            # Iteramos los TabPages para encontrar el que coincida con la categoria
             foreach ($tab in $tabControl.TabPages) {
                 if ($tab.Tag -eq $svc.Category) {
-                    $targetLV = $tab.Controls[0] # El ListView es el primer control
+                    $targetLV = $tab.Controls[0] 
                     break
                 }
             }
 
             if ($targetLV) {
-                # 2. Leer Estado del Registro Offline
                 $regPath = "Registry::HKLM\OfflineSystem\ControlSet001\Services\$($svc.Name)"
                 $currentStart = "No Encontrado"
                 $isDisabled = $false
@@ -2908,21 +2929,29 @@ function Show-Services-Offline-GUI {
                     else { $currentStart = "Desconocido ($val)" }
                 }
 
-                # 3. Crear Item Visual
                 $item = New-Object System.Windows.Forms.ListViewItem($svc.Name)
                 $item.SubItems.Add($currentStart) | Out-Null
+                
+                # Traducir DefaultStartupType del ingles al espanol para mostrar
+                $defDisplay = $svc.DefaultStartupType
+                if ($defDisplay -eq "Automatic") { $defDisplay = "Automatico" }
+                
+                $item.SubItems.Add($defDisplay) | Out-Null
                 $item.SubItems.Add($svc.Description) | Out-Null
-                $item.Tag = $svc.Name # Guardamos el nombre tecnico para usarlo al aplicar
+                
+                # IMPORTANTE: Guardamos el OBJETO COMPLETO en el Tag para usarlo al restaurar
+                $item.Tag = $svc 
 
-                # Colores y Checkboxes
+                # Colores
                 if ($isDisabled) {
                     $item.ForeColor = [System.Drawing.Color]::LightGreen
-                    $item.Checked = $false # Ya esta deshabilitado
+                    $item.Checked = $false 
                 } elseif ($currentStart -eq "No Encontrado") {
                     $item.ForeColor = [System.Drawing.Color]::Gray
-                    $item.Checked = $false # No existe, no se puede tocar
+                    $item.Checked = $false 
                 } else {
-                    $item.Checked = $true # Existe y no esta deshabilitado -> Sugerir apagar
+                    $item.ForeColor = [System.Drawing.Color]::White
+                    $item.Checked = $true 
                 }
 
                 $targetLV.Items.Add($item) | Out-Null
@@ -2935,10 +2964,123 @@ function Show-Services-Offline-GUI {
         $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
     })
 
-    # 5. Evento Cierre
+    # 5. Logica de Procesamiento (Helper Interno)
+    $ProcessServices = {
+        param($Mode) # 'Disable' o 'Restore'
+
+        $allChecked = New-Object System.Collections.Generic.List[System.Windows.Forms.ListViewItem]
+        foreach ($lv in $globalListViews) {
+            foreach ($i in $lv.CheckedItems) { $allChecked.Add($i) }
+        }
+
+        if ($allChecked.Count -eq 0) { 
+            [System.Windows.Forms.MessageBox]::Show("No hay servicios seleccionados.", "Aviso", 'OK', 'Warning')
+            return 
+        }
+
+        $actionTxt = if ($Mode -eq 'Disable') { "DESHABILITAR" } else { "RESTAURAR" }
+        $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a $actionTxt $($allChecked.Count) servicios.`n¿Estas seguro?", "Confirmar", 'YesNo', 'Warning')
+        if ($confirm -eq 'No') { return }
+
+        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+        $successCount = 0
+        $errCount = 0
+
+        foreach ($item in $allChecked) {
+            $svcObj = $item.Tag # Recuperamos el objeto completo
+            $svcName = $svcObj.Name
+            $regPath = "Registry::HKLM\OfflineSystem\ControlSet001\Services\$svcName"
+            
+            $lblStatus.Text = "$actionTxt Servicio: $svcName..."
+            $form.Refresh()
+
+            # Determinar Valor
+            $targetVal = 3 # Manual por defecto
+            
+            if ($Mode -eq 'Disable') {
+                $targetVal = 4
+            } else {
+                # Modo RESTORE: Mapear texto a numero
+                switch ($svcObj.DefaultStartupType) {
+                    "Automatic" { $targetVal = 2 }
+                    "Manual"    { $targetVal = 3 }
+                    "Disabled"  { $targetVal = 4 }
+                    default     { $targetVal = 3 }
+                }
+            }
+
+            # Desbloqueo preventivo
+            Unlock-Single-Key -SubKeyPath ($regPath -replace "^Registry::HKLM\\", "")
+
+            try {
+                # Metodo PowerShell
+                if (-not (Test-Path $regPath)) { throw "Clave no existe" }
+                
+                Set-ItemProperty -Path $regPath -Name "Start" -Value $targetVal -Type DWord -Force -ErrorAction Stop
+                
+                # Actualizar UI
+                if ($Mode -eq 'Disable') {
+                    $item.SubItems[1].Text = "Deshabilitado"
+                    $item.ForeColor = [System.Drawing.Color]::LightGreen
+                } else {
+                    $restoredText = if ($targetVal -eq 2) { "Automatico" } else { "Manual" }
+                    $item.SubItems[1].Text = "$restoredText (Restaurado)"
+                    $item.ForeColor = [System.Drawing.Color]::Cyan
+                }
+                
+                $item.Checked = $false
+                $successCount++
+
+            } catch {
+                # Fallback REG.EXE
+                $cmdRegPath = $regPath -replace "^Registry::", ""
+                $proc = Start-Process reg.exe -ArgumentList "add `"$cmdRegPath`" /v Start /t REG_DWORD /d $targetVal /f" -PassThru -WindowStyle Hidden -Wait
+                
+                if ($proc.ExitCode -eq 0) {
+                    if ($Mode -eq 'Disable') {
+                        $item.SubItems[1].Text = "Deshabilitado"
+                        $item.ForeColor = [System.Drawing.Color]::LightGreen
+                    } else {
+                        $item.SubItems[1].Text = "Restaurado"
+                        $item.ForeColor = [System.Drawing.Color]::Cyan
+                    }
+                    $item.Checked = $false
+                    $successCount++
+                } else {
+                    $errCount++
+                    $item.ForeColor = [System.Drawing.Color]::Red
+                    $item.SubItems[1].Text = "ERROR ACCESO"
+                }
+            }
+            Restore-KeyOwner -KeyPath $regPath
+        }
+
+        $form.Cursor = [System.Windows.Forms.Cursors]::Default
+        $lblStatus.Text = "Proceso finalizado."
+        [System.Windows.Forms.MessageBox]::Show("Procesados: $successCount`nErrores: $errCount", "Informe", 'OK', 'Information')
+    }
+
+    # 6. Eventos de Botones
+    $btnSelectAll.Add_Click({
+        $currentTab = $tabControl.SelectedTab
+        if ($currentTab) {
+            $lv = $currentTab.Controls[0]
+            foreach ($item in $lv.Items) {
+                # Solo marcar si no esta ya deshabilitado/inexistente
+                if ($item.SubItems[1].Text -notmatch "Deshabilitado|No Encontrado") {
+                    $item.Checked = $true
+                }
+            }
+        }
+    })
+
+    $btnApply.Add_Click({ & $ProcessServices -Mode 'Disable' })
+    $btnRestore.Add_Click({ & $ProcessServices -Mode 'Restore' })
+
+    # Cierre Seguro
     $form.Add_FormClosing({ 
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "¿Estas seguro de que deseas salir? Los cambios se guardaran automáticamente.", 
+            "¿Estas seguro de que deseas salir?", 
             "Confirmar Salida", 
             [System.Windows.Forms.MessageBoxButtons]::YesNo, 
             [System.Windows.Forms.MessageBoxIcon]::Question
@@ -2946,112 +3088,19 @@ function Show-Services-Offline-GUI {
 
         if ($confirm -eq 'No') {
             $_.Cancel = $true
+        } else {
+            $lblStatus.Text = "Desmontando Hives..."
+            $form.Refresh()
+            Start-Sleep -Milliseconds 500
+            Unmount-Hives
         }
-    })
-
-    # 6. Botones
-    # "Marcar Todo" (Solo pestaña actual)
-    $btnSelectAll.Add_Click({
-        $currentTab = $tabControl.SelectedTab
-        if ($currentTab) {
-            $lv = $currentTab.Controls[0]
-            foreach ($item in $lv.Items) {
-                # Solo marcar si no esta ya deshabilitado ni es inexistente
-                if ($item.SubItems[1].Text -ne "Deshabilitado" -and $item.SubItems[1].Text -ne "No Encontrado") {
-                    $item.Checked = $true
-                }
-            }
-        }
-    })
-
-    # "Aplicar" (Global)
-    $btnApply.Add_Click({
-        # Contar seleccionados globales
-        $totalChecked = 0
-        foreach ($lv in $globalListViews) { $totalChecked += $lv.CheckedItems.Count }
-
-        if ($totalChecked -eq 0) { 
-            [System.Windows.Forms.MessageBox]::Show("No has seleccionado ningun servicio.", "Aviso", 'OK', 'Warning')
-            return 
-        }
-
-        $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a deshabilitar $totalChecked servicios en la imagen.`n¿Estas seguro?", "Confirmar Cambios", 'YesNo', 'Warning')
-        if ($confirm -eq 'No') { return }
-        
-        $btnApply.Enabled = $false
-        $tabControl.Enabled = $false
-        
-        $successCount = 0
-        $errCount = 0
-
-        # Recorrer todas las listas
-        foreach ($lv in $globalListViews) {
-            foreach ($item in $lv.CheckedItems) {
-                $svcName = $item.Tag
-                $regPath = "Registry::HKLM\OfflineSystem\ControlSet001\Services\$svcName"
-                
-                $lblStatus.Text = "Deshabilitando: $svcName..."
-                $form.Refresh()
-
-                # 1. Intento de desbloqueo preventivo
-                Unlock-Single-Key -SubKeyPath ($regPath -replace "^Registry::HKLM\\", "")
-
-                try {
-                    # INTENTO 1: Vía PowerShell (Estándar)
-                    Set-ItemProperty -Path $regPath -Name "Start" -Value 4 -Type DWord -Force -ErrorAction Stop
-                    
-                    # Si pasa sin error:
-                    $item.SubItems[1].Text = "Deshabilitado"
-                    $item.ForeColor = [System.Drawing.Color]::LightGreen
-                    $item.Checked = $false
-                    $successCount++
-                } catch {
-                    # INTENTO 2: Vía REG.EXE
-                    # Convertimos la ruta de PowerShell (Registry::HKLM\...) a ruta de CMD (HKLM\...)
-                    $cmdRegPath = $regPath -replace "^Registry::", ""
-                    
-                    Write-Log -LogLevel WARN -Message "PowerShell fallo en $svcName. Intentando con REG.EXE..."
-                    
-                    # Ejecutamos reg add con /f (force)
-                    $proc = Start-Process reg.exe -ArgumentList "add `"$cmdRegPath`" /v Start /t REG_DWORD /d 4 /f" -PassThru -WindowStyle Hidden -Wait
-                    
-                    if ($proc.ExitCode -eq 0) {
-                        # Éxito en el segundo intento
-                        $item.SubItems[1].Text = "Deshabilitado"
-                        $item.ForeColor = [System.Drawing.Color]::LightGreen
-                        $item.Checked = $false
-                        $successCount++
-                        Write-Log -LogLevel INFO -Message "Servicio $svcName deshabilitado exitosamente con REG.EXE."
-                    } else {
-                        # Fallo definitivo
-                        $errCount++
-                        Write-Log -LogLevel ERROR -Message "Fallo servicio $svcName incluso con REG.EXE. Codigo: $($proc.ExitCode)"
-                        $item.ForeColor = [System.Drawing.Color]::Red
-                        $item.SubItems[1].Text = "ERROR ACCESO"
-                    }
-                }
-				Restore-KeyOwner -KeyPath $regPath
-            }
-        }
-        
-        $btnApply.Enabled = $true
-        $tabControl.Enabled = $true
-        $lblStatus.Text = "Proceso finalizado."
-        
-        [System.Windows.Forms.MessageBox]::Show("Servicios Deshabilitados: $successCount`nErrores: $errCount", "Informe", 'OK', 'Information')
     })
 
     $form.ShowDialog() | Out-Null
     $form.Dispose()
-    $form = $null
-    $tabControl = $null
+    $globalListViews.Clear()
     $globalListViews = $null
-    $btnApply = $null
-    $btnSelectAll = $null
     [GC]::Collect()
-    [GC]::WaitForPendingFinalizers()
-    Start-Sleep -Seconds 1
-    Unmount-Hives
 }
 
 # =================================================================
@@ -3687,7 +3736,7 @@ function Show-Tweaks-Offline-GUI {
         return 
     }
 
-    # 2. Cargar Catálogo
+    # 2. Cargar Catalogo (Fallback inteligente)
     $tweaksFile = Join-Path $PSScriptRoot "Catalogos\Ajustes.ps1"
     if (-not (Test-Path $tweaksFile)) { $tweaksFile = Join-Path $PSScriptRoot "Ajustes.ps1" }
     if (Test-Path $tweaksFile) { . $tweaksFile } else { Write-Warning "Falta Ajustes.ps1"; return }
@@ -3695,20 +3744,28 @@ function Show-Tweaks-Offline-GUI {
     # 3. Montar Hives
     if (-not (Mount-Hives)) { return }
 
-    # --- INICIO DE CONSTRUCCIÓN GUI ---
+    # --- INICIO DE CONSTRUCCION GUI ---
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
+    Add-Type -AssemblyName System.Collections 
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Optimizacion de Registro Offline (WIM) - $Script:MOUNT_DIR"
-    $form.Size = New-Object System.Drawing.Size(1200, 750)
+    $form.Size = New-Object System.Drawing.Size(1200, 800) 
     $form.StartPosition = "CenterScreen"
     $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
     $form.ForeColor = [System.Drawing.Color]::White
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
 
-    # Título
+    # Inicializar el objeto ToolTip
+    $toolTip = New-Object System.Windows.Forms.ToolTip
+    $toolTip.AutoPopDelay = 5000
+    $toolTip.InitialDelay = 500
+    $toolTip.ReshowDelay = 500
+    $toolTip.ShowAlways = $true
+
+    # Titulo
     $lblTitle = New-Object System.Windows.Forms.Label
     $lblTitle.Text = "Gestor de Ajustes y Registro"
     $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
@@ -3716,7 +3773,7 @@ function Show-Tweaks-Offline-GUI {
     $lblTitle.AutoSize = $true
     $form.Controls.Add($lblTitle)
 
-    # Botón Importar .REG (Arriba a la derecha)
+    # Boton Importar .REG
     $btnImport = New-Object System.Windows.Forms.Button
     $btnImport.Text = "IMPORTAR ARCHIVO .REG..."
     $btnImport.Location = New-Object System.Drawing.Point(950, 10)
@@ -3725,23 +3782,8 @@ function Show-Tweaks-Offline-GUI {
     $btnImport.ForeColor = [System.Drawing.Color]::White
     $btnImport.FlatStyle = "Flat"
     $form.Controls.Add($btnImport)
-
-    # Control de Pestañas
-    $tabControl = New-Object System.Windows.Forms.TabControl
-    $tabControl.Location = New-Object System.Drawing.Point(20, 60)
-    $tabControl.Size = New-Object System.Drawing.Size(1140, 600)
-    $tabControl.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $form.Controls.Add($tabControl)
-
-    # Barra de Estado
-    $lblStatus = New-Object System.Windows.Forms.Label
-    $lblStatus.Text = "Listo. Selecciona ajustes para aplicar."
-    $lblStatus.Location = New-Object System.Drawing.Point(20, 670)
-    $lblStatus.AutoSize = $true
-    $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
-    $form.Controls.Add($lblStatus)
-
-    # --- LOGICA DE ANÁLISIS .REG (Interna para la GUI) ---
+    
+        # --- LOGICA DE ANÁLISIS .REG (Interna para la GUI) ---
     $Script:AnalyzeRegToString = {
         param($filePath)
         $report = "--- RESUMEN DE CAMBIOS ---`n"
@@ -3893,7 +3935,79 @@ function Show-Tweaks-Offline-GUI {
         }
     })
 
-    # --- GENERAR PESTAÑAS Y LISTAS ---
+    # Control de Pestanas
+    $tabControl = New-Object System.Windows.Forms.TabControl
+    $tabControl.Location = New-Object System.Drawing.Point(20, 60)
+    $tabControl.Size = New-Object System.Drawing.Size(1140, 580) 
+    $tabControl.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+    $form.Controls.Add($tabControl)
+
+    # --- PANEL DE ACCIONES GLOBALES ---
+    $pnlActions = New-Object System.Windows.Forms.Panel
+    $pnlActions.Location = New-Object System.Drawing.Point(20, 650)
+    $pnlActions.Size = New-Object System.Drawing.Size(1140, 100)
+    $pnlActions.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 40)
+    $pnlActions.BorderStyle = "FixedSingle"
+    $form.Controls.Add($pnlActions)
+
+    # Barra de Estado 
+    $lblStatus = New-Object System.Windows.Forms.Label
+    $lblStatus.Text = "Selecciona ajustes en varias pestanas y aplica todo al final."
+    $lblStatus.Location = New-Object System.Drawing.Point(10, 10)
+    $lblStatus.AutoSize = $true
+    $lblStatus.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+    $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
+    $pnlActions.Controls.Add($lblStatus)
+
+    # 1. Boton Marcar Todo
+    $btnSelectAllGlobal = New-Object System.Windows.Forms.Button
+    $btnSelectAllGlobal.Text = "Marcar Todo"
+    $btnSelectAllGlobal.Location = New-Object System.Drawing.Point(10, 40)
+    $btnSelectAllGlobal.Size = New-Object System.Drawing.Size(160, 40)
+    $btnSelectAllGlobal.BackColor = [System.Drawing.Color]::Gray
+    $btnSelectAllGlobal.FlatStyle = "Flat"
+    # ToolTip agregado
+    $toolTip.SetToolTip($btnSelectAllGlobal, "Solo se seleccionaran los elementos visibles en la PESTANA ACTUAL.")
+    $pnlActions.Controls.Add($btnSelectAllGlobal)
+
+    # 2. Boton Marcar Inactivos
+    $btnSelectInactive = New-Object System.Windows.Forms.Button
+    $btnSelectInactive.Text = "Marcar Inactivos"
+    $btnSelectInactive.Location = New-Object System.Drawing.Point(180, 40)
+    $btnSelectInactive.Size = New-Object System.Drawing.Size(160, 40)
+    $btnSelectInactive.BackColor = [System.Drawing.Color]::DimGray
+    $btnSelectInactive.ForeColor = [System.Drawing.Color]::White
+    $btnSelectInactive.FlatStyle = "Flat"
+    # ToolTip agregado
+    $toolTip.SetToolTip($btnSelectInactive, "Solo se seleccionaran los elementos visibles en la PESTANA ACTUAL.")
+    $pnlActions.Controls.Add($btnSelectInactive)
+
+    # 3. Boton Restaurar (Global)
+    $btnRestoreGlobal = New-Object System.Windows.Forms.Button
+    $btnRestoreGlobal.Text = "RESTAURAR VALORES"
+    $btnRestoreGlobal.Location = New-Object System.Drawing.Point(450, 40)
+    $btnRestoreGlobal.Size = New-Object System.Drawing.Size(320, 40)
+    $btnRestoreGlobal.BackColor = [System.Drawing.Color]::FromArgb(200, 100, 0) # Naranja
+    $btnRestoreGlobal.ForeColor = [System.Drawing.Color]::White
+    $btnRestoreGlobal.FlatStyle = "Flat"
+    $btnRestoreGlobal.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+    $pnlActions.Controls.Add($btnRestoreGlobal)
+
+    # 4. Boton Aplicar (Global)
+    $btnApplyGlobal = New-Object System.Windows.Forms.Button
+    $btnApplyGlobal.Text = "APLICAR SELECCION"
+    $btnApplyGlobal.Location = New-Object System.Drawing.Point(790, 40)
+    $btnApplyGlobal.Size = New-Object System.Drawing.Size(320, 40)
+    $btnApplyGlobal.BackColor = [System.Drawing.Color]::SeaGreen
+    $btnApplyGlobal.ForeColor = [System.Drawing.Color]::White
+    $btnApplyGlobal.FlatStyle = "Flat"
+    $btnApplyGlobal.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+    $pnlActions.Controls.Add($btnApplyGlobal)
+
+    # Lista Global para rastrear todos los ListViews
+    $globalListViews = New-Object System.Collections.Generic.List[System.Windows.Forms.ListView]
+
+    # --- GENERAR PESTANAS Y LISTAS ---
     $form.Add_Shown({
         $form.Refresh()
         $cats = $script:SystemTweaks | Where { $_.Method -eq "Registry" } | Select -Expand Category -Unique | Sort
@@ -3904,7 +4018,7 @@ function Show-Tweaks-Offline-GUI {
             $tp.Text = "  $cat  "
             $tp.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
 
-            # ListView
+            # ListView Especifico
             $lv = New-Object System.Windows.Forms.ListView
             $lv.Dock = "Fill"
             $lv.View = "Details"
@@ -3913,52 +4027,24 @@ function Show-Tweaks-Offline-GUI {
             $lv.GridLines = $true
             $lv.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
             $lv.ForeColor = [System.Drawing.Color]::White
-			
-			$imgList = New-Object System.Windows.Forms.ImageList
-            # El segundo número (35) es la ALTURA en píxeles. Cámbialo a tu gusto (ej. 40, 50).
-            $imgList.ImageSize = New-Object System.Drawing.Size(1, 25) 
+            
+            $imgList = New-Object System.Windows.Forms.ImageList
+            $imgList.ImageSize = New-Object System.Drawing.Size(1, 28) 
             $lv.SmallImageList = $imgList
             
             $lv.Columns.Add("Ajuste", 450) | Out-Null
             $lv.Columns.Add("Estado Actual", 120) | Out-Null
             $lv.Columns.Add("Descripcion", 500) | Out-Null
-
-            # Panel inferior
-            $pn = New-Object System.Windows.Forms.Panel; $pn.Dock = "Bottom"; $pn.Height = 50; $pn.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 40)
             
-            $btnApply = New-Object System.Windows.Forms.Button
-            $btnApply.Text = "APLICAR CAMBIOS SELECCIONADOS"
-            $btnApply.Location = New-Object System.Drawing.Point(800, 10)
-            $btnApply.Size = New-Object System.Drawing.Size(300, 30)
-            $btnApply.BackColor = [System.Drawing.Color]::SeaGreen
-            $btnApply.ForeColor = [System.Drawing.Color]::White
-            $btnApply.FlatStyle = "Flat"
-            $btnApply.Tag = $lv 
-            
-            $btnCheckAll = New-Object System.Windows.Forms.Button
-            $btnCheckAll.Text = "Marcar Inactivos"
-            $btnCheckAll.Location = New-Object System.Drawing.Point(20, 10)
-            $btnCheckAll.Size = New-Object System.Drawing.Size(150, 30)
-            $btnCheckAll.BackColor = [System.Drawing.Color]::Gray
-            $btnCheckAll.FlatStyle = "Flat"
-            $btnCheckAll.Tag = $lv
-
-            $pn.Controls.Add($btnApply)
-            $pn.Controls.Add($btnCheckAll)
-            $tp.Controls.Add($pn)
-            
-            # Llenar datos (Lectura Nativa Segura)
+            # Llenar datos
             $tweaks = $script:SystemTweaks | Where { $_.Category -eq $cat -and $_.Method -eq "Registry" }
             foreach ($tw in $tweaks) {
                 $pathRaw = Translate-OfflinePath -OnlinePath $tw.RegistryPath
                 if ($pathRaw) {
                     $item = New-Object System.Windows.Forms.ListViewItem($tw.Name)
                     
-                    # Lectura Nativa
                     $psPath = $pathRaw -replace "^HKLM\\", "HKLM:\"
                     $state = "INACTIVO"
-                    
-                    # CAMBIO: Color por defecto ahora es BLANCO para mejor lectura
                     $color = [System.Drawing.Color]::White 
                     
                     try {
@@ -3972,72 +4058,136 @@ function Show-Tweaks-Offline-GUI {
                     $item.SubItems.Add($state) | Out-Null
                     $item.SubItems.Add($tw.Description) | Out-Null
                     $item.ForeColor = $color
-                    $item.Tag = $tw
+                    $item.Tag = $tw 
                     $lv.Items.Add($item) | Out-Null
                 }
             }
+
             $tp.Controls.Add($lv)
             $tabControl.TabPages.Add($tp)
-
-            # EVENTOS DE BOTONES
-            $btnCheckAll.Add_Click({
-                $targetLv = $this.Tag 
-                foreach ($i in $targetLv.Items) { 
-                    if ($i.SubItems[1].Text -ne "ACTIVO") { $i.Checked = $true } 
-                }
-            })
-
-            $btnApply.Add_Click({
-                $targetLv = $this.Tag 
-                $sel = $targetLv.CheckedItems
-                
-                if ($sel.Count -eq 0) { return }
-                
-                $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-                $lblStatus.Text = "Aplicando cambios..."
-                $form.Refresh()
-
-                foreach ($it in $sel) {
-                    $t = $it.Tag
-                    $pathRaw = Translate-OfflinePath -OnlinePath $t.RegistryPath
-                    if ($pathRaw) {
-                        $psPath = $pathRaw -replace "^HKLM\\", "HKLM:\"
-                        try {
-                            if (-not (Test-Path $psPath)) { New-Item -Path $psPath -Force -ErrorAction Stop | Out-Null }
-                            
-                            $type = [Microsoft.Win32.RegistryValueKind]::DWord
-                            if ($t.RegistryType -eq "String") { $type = [Microsoft.Win32.RegistryValueKind]::String }
-
-                            Set-ItemProperty -Path $psPath -Name $t.RegistryKey -Value $t.EnabledValue -Type $type -Force -ErrorAction Stop
-							
-							# Solo intentamos restaurar si es una clave de sistema protegida (Policies, Defender, etc)
-                            Restore-KeyOwner -KeyPath $psPath
-                            
-                            # Verificación
-                            $check = (Get-ItemProperty -Path $psPath -Name $t.RegistryKey -ErrorAction SilentlyContinue).($t.RegistryKey)
-                            if ("$check" -eq "$($t.EnabledValue)") {
-                                $it.SubItems[1].Text = "ACTIVO"
-                                $it.ForeColor = [System.Drawing.Color]::Cyan
-                                $it.Checked = $false
-                            }
-                        } catch {
-                            $it.SubItems[1].Text = "ERROR"
-                            $it.ForeColor = [System.Drawing.Color]::Red
-                        }
-                    }
-                    $form.Refresh()
-                }
-                $form.Cursor = [System.Windows.Forms.Cursors]::Default
-                $lblStatus.Text = "Proceso finalizado."
-                [System.Windows.Forms.MessageBox]::Show("Ajustes aplicados correctamente.", "Listo", 'OK', 'Information')
-            })
+            $globalListViews.Add($lv)
         }
         $tabControl.ResumeLayout()
     })
 
-    # Cierre Seguro con Confirmación
+    # --- LOGICA DE EVENTOS ---
+
+    # A. Marcar Todo
+    $btnSelectAllGlobal.Add_Click({
+        $currentTab = $tabControl.SelectedTab
+        if ($currentTab) {
+            $lv = $currentTab.Controls[0] 
+            foreach ($item in $lv.Items) {
+                if ($item.Checked) { $item.Checked = $false } else { $item.Checked = $true }
+            }
+        }
+    })
+
+    # B. Marcar Inactivos
+    $btnSelectInactive.Add_Click({
+        $currentTab = $tabControl.SelectedTab
+        if ($currentTab) {
+            $lv = $currentTab.Controls[0]
+            foreach ($item in $lv.Items) {
+                # Solo marca si NO esta ACTIVO
+                if ($item.SubItems[1].Text -ne "ACTIVO") {
+                    $item.Checked = $true
+                }
+            }
+        }
+    })
+
+    # Helper de Procesamiento
+    $ProcessChanges = {
+        param($Mode) # 'Apply' o 'Restore'
+
+        $allCheckedItems = New-Object System.Collections.Generic.List[System.Windows.Forms.ListViewItem]
+        foreach ($lv in $globalListViews) {
+            foreach ($item in $lv.CheckedItems) {
+                $allCheckedItems.Add($item)
+            }
+        }
+
+        if ($allCheckedItems.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show("No hay ajustes seleccionados.", "Aviso", 'OK', 'Warning')
+            return
+        }
+
+        $msgTitle = if ($Mode -eq 'Apply') { "Aplicar Cambios" } else { "Restaurar Cambios" }
+        $confirm = [System.Windows.Forms.MessageBox]::Show("Se Aplicaran $($allCheckedItems.Count) ajustes en TOTAL.`n¿Deseas continuar?", $msgTitle, 'YesNo', 'Question')
+        if ($confirm -eq 'No') { return }
+
+        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+        $lblStatus.Text = "Procesando registro... ($Mode)"
+        $form.Refresh()
+
+        $errors = 0
+        $success = 0
+
+        foreach ($it in $allCheckedItems) {
+            $t = $it.Tag 
+            $pathRaw = Translate-OfflinePath -OnlinePath $t.RegistryPath
+            
+            if ($pathRaw) {
+                $psPath = $pathRaw -replace "^HKLM\\", "HKLM:\"
+                
+                $valToSet = $null
+                $isDelete = $false
+
+                if ($Mode -eq 'Apply') {
+                    $valToSet = $t.EnabledValue
+                } else {
+                    $valToSet = $t.DefaultValue
+                    if ($valToSet -eq "DeleteKey") { $isDelete = $true }
+                }
+
+                try {
+                    if ($Mode -eq 'Apply' -and -not (Test-Path $psPath)) {
+                        New-Item -Path $psPath -Force -ErrorAction Stop | Out-Null
+                    }
+
+                    if (Test-Path $psPath) {
+                        if ($isDelete) {
+                             Remove-ItemProperty -Path $psPath -Name $t.RegistryKey -ErrorAction SilentlyContinue
+                        } 
+                        else {
+                            $type = [Microsoft.Win32.RegistryValueKind]::DWord
+                            if ($t.RegistryType -eq "String") { $type = [Microsoft.Win32.RegistryValueKind]::String }
+                            Set-ItemProperty -Path $psPath -Name $t.RegistryKey -Value $valToSet -Type $type -Force -ErrorAction Stop
+                        }
+
+                        Restore-KeyOwner -KeyPath $psPath
+
+                        if ($Mode -eq 'Apply') {
+                             $it.SubItems[1].Text = "ACTIVO"
+                             $it.ForeColor = [System.Drawing.Color]::Cyan
+                        } else {
+                             $it.SubItems[1].Text = "RESTAURADO"
+                             $it.ForeColor = [System.Drawing.Color]::LightGray
+                        }
+                        $it.Checked = $false 
+                        $success++
+                    }
+                } catch {
+                    $errors++
+                    $it.SubItems[1].Text = "ERROR"
+                    $it.ForeColor = [System.Drawing.Color]::Red
+                    Write-Log -LogLevel ERROR -Message "Fallo Tweak ($Mode): $($t.Name) - $_"
+                }
+            }
+        }
+        
+        $form.Cursor = [System.Windows.Forms.Cursors]::Default
+        $lblStatus.Text = "Proceso finalizado."
+        [System.Windows.Forms.MessageBox]::Show("Proceso completado.`nExitos: $success`nErrores: $errors", "Informe", 'OK', 'Information')
+    }
+
+    # Eventos de Botones Globales
+    $btnApplyGlobal.Add_Click({ & $ProcessChanges -Mode 'Apply' })
+    $btnRestoreGlobal.Add_Click({ & $ProcessChanges -Mode 'Restore' })
+
+    # Cierre Seguro
     $form.Add_FormClosing({ 
-        # 1. Preguntar al usuario
         $confirm = [System.Windows.Forms.MessageBox]::Show(
             "¿Estas seguro de que deseas salir?`nSe guardaran y desmontaran los Hives del registro.", 
             "Confirmar Salida", 
@@ -4045,24 +4195,21 @@ function Show-Tweaks-Offline-GUI {
             [System.Windows.Forms.MessageBoxIcon]::Question
         )
 
-        # 2. Evaluar la respuesta
         if ($confirm -eq 'No') {
-            # Si dice NO, cancelamos el evento de cierre. La ventana se queda abierta.
             $_.Cancel = $true
         } else {
-            # Si dice SÍ, procedemos con el desmontaje seguro
             $lblStatus.Text = "Sincronizando y desmontando Hives... Por favor espere."
             $form.Refresh()
-            
-            # Pequeña pausa para asegurar que la UI se actualice antes de la carga pesada
             Start-Sleep -Milliseconds 500 
-            
             Unmount-Hives 
         }
     })
     
     $form.ShowDialog() | Out-Null
     $form.Dispose()
+    $globalListViews.Clear()
+    $globalListViews = $null
+    [GC]::Collect()
 }
 
 function Check-And-Repair-Mounts {
@@ -4087,7 +4234,7 @@ function Check-And-Repair-Mounts {
         
         # MENSAJE ESTILO DISM++ (Reparar sesión existente)
         $msgResult = [System.Windows.Forms.MessageBox]::Show(
-            "La imagen montada en '$($Script:MOUNT_DIR)' parece estar danada (posible cierre inesperado).`n`n¿Quieres intentar RECUPERAR la sesión (Remount-Image)?`n`n[Sí] = Intentar reconectar y salvar cambios.`n[No] = Eliminar punto de montaje (Cleanup-Wim).", 
+            "La imagen montada en '$($Script:MOUNT_DIR)' parece estar danada (posible cierre inesperado).`n`n¿Quieres intentar RECUPERAR la sesion (Remount-Image)?`n`n[Sí] = Intentar reconectar y salvar cambios.`n[No] = Eliminar punto de montaje (Cleanup-Wim).", 
             "Recuperacion de Imagen", 
             [System.Windows.Forms.MessageBoxButtons]::YesNoCancel, 
             [System.Windows.Forms.MessageBoxIcon]::Warning
