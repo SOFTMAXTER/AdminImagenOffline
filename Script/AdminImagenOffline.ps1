@@ -8,13 +8,13 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.4.2
+    1.4.3
 #>
 
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.4.2"
+$script:Version = "1.4.3"
 
 function Write-Log {
     [CmdletBinding()]
@@ -517,6 +517,33 @@ function Mount-Image {
     if ([string]::IsNullOrEmpty($path)) { Write-Warning "Operacion cancelada."; Pause; return }
     $Script:WIM_FILE_PATH = $path
 
+    # --- [INICIO] BLOQUE DE SEGURIDAD ESD MEJORADO ---
+    if ($Script:WIM_FILE_PATH -match '\.esd$') {
+        Clear-Host
+        Write-Warning "======================================================="
+        Write-Warning "         !!! ALERTA DE FORMATO ESD DETECTADA !!!       "
+        Write-Warning "======================================================="
+        Write-Host ""
+        Write-Host "Has seleccionado una imagen .ESD (Solo Lectura / Comprimida)." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "IMPORTANTE:" -ForegroundColor Cyan
+        Write-Host "1. Si haces cambios, el 'Guardar Cambios (Commit)' FALLARA." -ForegroundColor Red
+        Write-Host "2. Para salvar tu trabajo, tendras que usar OBLIGATORIAMENTE:" -ForegroundColor White
+        Write-Host "   -> Menú 'Guardar Cambios' > Opción [3] 'Guardar como Nuevo Archivo WIM'" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "RECOMENDACION IDEAL: Usa 'Convertir ESD a WIM' en el menu principal antes de montar." -ForegroundColor Gray
+        Write-Host ""
+        
+        $confirmEsd = Read-Host "Escribe 'SI' para montar de todos modos (bajo tu riesgo) o Enter para salir"
+        if ($confirmEsd.ToUpper() -ne 'SI') {
+            Write-Warning "Operacion cancelada. Convierte a WIM primero."
+            $Script:WIM_FILE_PATH = $null
+            Pause
+            return
+        }
+        Write-Host "Procediendo... Recuerda usar 'Guardar como Nuevo WIM' al finalizar." -ForegroundColor DarkGray
+    }
+
     Write-Host "[+] Obteniendo informacion del WIM..." -ForegroundColor Yellow
     dism /get-wiminfo /wimfile:"$Script:WIM_FILE_PATH"
 
@@ -548,7 +575,7 @@ function Mount-Image {
         Write-Host "[OK] Imagen montada exitosamente." -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "Montaje completado con exito."
     } else {
-        # Captura específica del error tras el intento
+        # Captura especifica del error tras el intento
         Write-Error "[ERROR] Fallo al montar la imagen (Codigo: $LASTEXITCODE)."
         if ($LASTEXITCODE.ToString("X") -match "C1420116|C1420117") {
             Write-Warning "CONSEJO: Este error indica que la carpeta de montaje tiene archivos bloqueados."
@@ -684,7 +711,7 @@ function Save-Changes {
         $DEST_WIM_PATH = Select-SavePathDialog -Title "Guardar copia como..." -Filter "Archivos WIM (*.wim)|*.wim" -DefaultFileName $DEFAULT_DEST_PATH
         if (-not $DEST_WIM_PATH) { Write-Warning "Operacion cancelada."; return }
 
-        # --- MEJORA: OBTENER NOMBRE DEL ÍNDICE ACTUAL ---
+        # --- MEJORA: OBTENER NOMBRE DEL iNDICE ACTUAL ---
         $defaultName = "Custom Image"
         try {
             # Usamos el cmdlet nativo de DISM para leer el nombre del indice origen
@@ -1514,12 +1541,12 @@ function Limpieza-Menu {
                 catch {
                     Write-Warning "Cmdlet nativo no disponible. Usando DISM clasico (Diagnostico ciego)..."
                     DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /ScanHealth
-                    # Si cae aquí, $imageState sigue siendo "Unknown", asi que intentaremos reparar por si acaso.
+                    # Si cae aqui, $imageState sigue siendo "Unknown", asi que intentaremos reparar por si acaso.
                 }
 
                 # --- LOGICA DE DECISION ---
                 if ($imageState -eq "NonRepairable") {
-                    # CASO CRÍTICO: ABORTAR
+                    # CASO CRiTICO: ABORTAR
                     Write-Host "`n[!] ALERTA DE SEGURIDAD" -ForegroundColor Red
                     Write-Warning "La imagen es IRREPARABLE. Deteniendo secuencia para evitar daños mayores."
                     Write-Log -LogLevel ERROR -Message "LIMPIEZA: Abortado. Estado NonRepairable."
@@ -2018,7 +2045,7 @@ function Show-Drivers-GUI {
     $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
     $form.ForeColor = [System.Drawing.Color]::White
 
-    # Título
+    # Titulo
     $lblTitle = New-Object System.Windows.Forms.Label
     $lblTitle.Text = "Gestion de Drivers"
     $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
@@ -2110,10 +2137,10 @@ function Show-Drivers-GUI {
         $statusText = "Nuevo"; $isInstalled = $false
 
         try {
-            # Leemos las primeras 300 líneas
+            # Leemos las primeras 300 lineas
             $content = Get-Content $fileObj.FullName -TotalCount 300 -ErrorAction SilentlyContinue
             
-            # --- CAMBIO IMPORTANTE: Iterar línea por línea para usar -match ---
+            # --- CAMBIO IMPORTANTE: Iterar linea por linea para usar -match ---
             foreach ($line in $content) {
                 # Buscar Clase
                 if ($line -match "^Class\s*=\s*(.*)") {
@@ -3354,20 +3381,20 @@ function Unlock-OfflineKey {
     $psPath = $KeyPath -replace "^(HKEY_LOCAL_MACHINE|HKLM|Registry::HKEY_LOCAL_MACHINE|Registry::HKLM)[:\\]*", ""
     # Ahora $psPath es algo como "OfflineUser\Software\Microsoft..."
     
-    # 3. IDENTIFICAR LA "RAÍZ MAESTRA" (La Colmena)
-    # Si estamos tocando OfflineUser, la raíz es "OfflineUser".
+    # 3. IDENTIFICAR LA "RAiZ MAESTRA" (La Colmena)
+    # Si estamos tocando OfflineUser, la raiz es "OfflineUser".
     $hiveName = $psPath.Split('\')[0] 
     
     # --- CORRECCIÓN: Agregados OfflineComponents y OfflineUserClasses ---
     if ($hiveName -in @("OfflineUser", "OfflineSoftware", "OfflineSystem", "OfflineComponents", "OfflineUserClasses")) {
         $rootHivePath = $hiveName
         
-        # DESBLOQUEAR LA RAÍZ PRIMERO
+        # DESBLOQUEAR LA RAiZ PRIMERO
         Unlock-Single-Key -SubKeyPath $rootHivePath
     }
 
     # 4. Ahora intentamos desbloquear el ancestro más cercano de la clave destino
-    # (Igual que antes, para casos específicos profundos)
+    # (Igual que antes, para casos especificos profundos)
     $finalSubKey = $psPath
     $rootHive = [Microsoft.Win32.Registry]::LocalMachine
     
@@ -3383,7 +3410,7 @@ function Unlock-OfflineKey {
         $finalSubKey = $finalSubKey.Substring(0, $lastSlash)
     }
 
-    # Desbloquear la clave específica encontrada
+    # Desbloquear la clave especifica encontrada
     Unlock-Single-Key -SubKeyPath $finalSubKey
 }
 
@@ -3420,10 +3447,10 @@ function Restore-KeyOwner {
                     $keyOwner.SetAccessControl($aclOnlyOwner)
                     $keyOwner.Close()
                     
-                    # LOG DE ÉXITO (Ahora sí debería verse)
+                    # LOG DE ÉXITO (Ahora si deberia verse)
                     Write-Log -LogLevel INFO -Message "Restaurado (Solo Dueno): $subKeyPath"
                 } else {
-                    # DIAGNÓSTICO: Si entra aquí, la clave existe pero no se pudo abrir ni para TakeOwnership
+                    # DIAGNÓSTICO: Si entra aqui, la clave existe pero no se pudo abrir ni para TakeOwnership
                     Write-Log -LogLevel WARN -Message "No se pudo abrir para TakeOwnership: $subKeyPath"
                 }
             } catch {
@@ -3470,7 +3497,7 @@ function Restore-KeyOwner {
 function Unlock-Single-Key {
     param([string]$SubKeyPath)
     
-    # Filtro de seguridad para raíces
+    # Filtro de seguridad para raices
     if ($SubKeyPath -match "^(OfflineSystem|OfflineSoftware|OfflineUser|OfflineUserClasses|OfflineComponents)$") { return }
     
 	Enable-Privileges
@@ -3490,7 +3517,7 @@ function Unlock-Single-Key {
         # Si falla el chequeo, continuamos con el desbloqueo...
     }
 
-    # ... (Aquí sigue la lógica de desbloqueo si falló lo anterior) ...
+    # ... (Aqui sigue la lógica de desbloqueo si falló lo anterior) ...
     
     $sidAdmin = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
     $success = $false
@@ -3520,7 +3547,7 @@ function Unlock-Single-Key {
     
     $rootKey.Close()
 
-    # INTENTO 2: MÉTODO REGINI.EXE (Solo si falló .NET y no teníamos acceso previo)
+    # INTENTO 2: MÉTODO REGINI.EXE (Solo si falló .NET y no teniamos acceso previo)
     if (-not $success) {
         try {
             $kernelPath = "\Registry\Machine\$SubKeyPath"
@@ -3674,7 +3701,7 @@ function Show-RegPreview-GUI {
                         $p = Get-ItemProperty -Path $currentKeyOffline -Name $valName -ErrorAction SilentlyContinue
                         if ($p) { 
                             $rawVal = $p.$valName 
-                            # Si existe pero es cadena vacía, lo mostramos explícitamente
+                            # Si existe pero es cadena vacia, lo mostramos explicitamente
                             if ($rawVal -eq "") { $currVal = "(Vacio)" } else { $currVal = $rawVal }
                         }
                     }
@@ -3852,7 +3879,7 @@ function Show-Tweaks-Offline-GUI {
                     $newContent = $newContent -replace "HKEY_LOCAL_MACHINE\\SYSTEM", "HKEY_LOCAL_MACHINE\OfflineSystem"
                     $newContent = $newContent -replace "HKLM\\SYSTEM", "HKEY_LOCAL_MACHINE\OfflineSystem"
 
-                    # 2. Clases de Usuario (CRÍTICO: ANTES de HKCU General)
+                    # 2. Clases de Usuario (CRiTICO: ANTES de HKCU General)
                     # Redirige HKCU\Software\Classes -> OfflineUserClasses (UsrClass.dat)
                     $newContent = $newContent -replace "HKEY_CURRENT_USER\\Software\\Classes", "HKEY_LOCAL_MACHINE\OfflineUserClasses"
                     $newContent = $newContent -replace "HKCU\\Software\\Classes", "HKEY_LOCAL_MACHINE\OfflineUserClasses"
@@ -4234,7 +4261,7 @@ function Check-And-Repair-Mounts {
         
         # MENSAJE ESTILO DISM++ (Reparar sesión existente)
         $msgResult = [System.Windows.Forms.MessageBox]::Show(
-            "La imagen montada en '$($Script:MOUNT_DIR)' parece estar danada (posible cierre inesperado).`n`n¿Quieres intentar RECUPERAR la sesion (Remount-Image)?`n`n[Sí] = Intentar reconectar y salvar cambios.`n[No] = Eliminar punto de montaje (Cleanup-Wim).", 
+            "La imagen montada en '$($Script:MOUNT_DIR)' parece estar danada (posible cierre inesperado).`n`n¿Quieres intentar RECUPERAR la sesion (Remount-Image)?`n`n[Si] = Intentar reconectar y salvar cambios.`n[No] = Eliminar punto de montaje (Cleanup-Wim).", 
             "Recuperacion de Imagen", 
             [System.Windows.Forms.MessageBoxButtons]::YesNoCancel, 
             [System.Windows.Forms.MessageBoxIcon]::Warning
@@ -4270,7 +4297,7 @@ function Check-And-Repair-Mounts {
             }
         }
         elseif ($msgResult -eq 'No') {
-            # Opción Nuclear (Lo que tenías antes)
+            # Opción Nuclear (Lo que tenias antes)
             Write-Host ">>> LIMPIANDO PUNTO DE MONTAJE (Cleanup-Wim)..." -ForegroundColor Red
             Unmount-Hives # Asegurar que el registro no estorbe
             dism /Cleanup-Wim
