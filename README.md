@@ -23,7 +23,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 * **Conversión de Formatos**: ESD a WIM y VHD/VHDX a WIM.
 * **Cambio de Edición de Windows**: Detección y cambio de edición (ej. Home a Pro) offline.
 * **Gestión Avanzada de Drivers**:
-    * **Inyector Flexible (v5.1)**: Interfaz que permite cargar carpetas recursivamente o agregar archivos `.inf` individuales "al vuelo". Incluye detección precisa por **Versión** y **Clase** para evitar duplicados.
+    * **Inyector Flexible**: Interfaz que permite cargar carpetas recursivamente o agregar archivos `.inf` individuales "al vuelo". Incluye detección precisa por **Versión** y **Clase** para evitar duplicados.
     * **Desinstalador de Drivers**: Lista los drivers de terceros (OEM) instalados en la imagen y permite su eliminación selectiva.
 * **Eliminación de Bloatware**: Interfaz gráfica con clasificación por colores (Verde=Seguro, Naranja=Recomendado, Blanco=Otros) para eliminar aplicaciones preinstaladas (Appx).
 * **Optimización de Servicios**: Permite deshabilitar servicios del sistema innecesarios organizados por categorías mediante una interfaz de pestañas.
@@ -145,3 +145,4 @@ Si deseas contribuir al desarrollo de este script:
 3.  Realiza tus cambios y haz commit (`git commit -am 'Añade nueva funcionalidad'`).
 4.  Haz Push a la rama (`git push origin feature/nueva-funcionalidad`).
 5.  Abre un Pull Request.
+
