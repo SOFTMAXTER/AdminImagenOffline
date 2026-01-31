@@ -8,13 +8,13 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.4.3
+    1.4.4
 #>
 
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.4.3"
+$script:Version = "1.4.4"
 
 function Write-Log {
     [CmdletBinding()]
@@ -274,7 +274,7 @@ function Save-Config {
         Write-Host "[OK] Configuracion guardada." -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "Configuracion guardada en $script:configFile"
     } catch {
-        Write-Error "[ERROR] No se pudo guardar el archivo de configuracion en '$($script:configFile)'."
+        Write-Host "[ERROR] No se pudo guardar el archivo de configuracion en '$($script:configFile)'."
         Write-Log -LogLevel ERROR -Message "Fallo al guardar config.json. Error: $($_.Exception.Message)"
         Pause
     }
@@ -303,7 +303,7 @@ function Ensure-WorkingDirectories {
                     Write-Host "[OK] Directorio creado." -ForegroundColor Green
                     Write-Log -LogLevel ACTION -Message "Directorio MOUNT_DIR '$($Script:MOUNT_DIR)' creado automaticamente."
                 } catch {
-                    Write-Error "[ERROR] No se pudo crear el directorio. Error: $($_.Exception.Message)"
+                    Write-Host "[ERROR] No se pudo crear el directorio. Error: $($_.Exception.Message)"
                     Write-Log -LogLevel ERROR -Message "Fallo al auto-crear MOUNT_DIR. Error: $($_.Exception.Message)"
                     Read-Host "Presiona Enter para salir."; exit
                 }
@@ -346,7 +346,7 @@ function Ensure-WorkingDirectories {
                     Write-Host "[OK] Directorio creado." -ForegroundColor Green
                     Write-Log -LogLevel ACTION -Message "Directorio Scratch_DIR '$($Script:Scratch_DIR)' creado automaticamente."
                 } catch {
-                    Write-Error "[ERROR] No se pudo crear el directorio. Error: $($_.Exception.Message)"
+                    Write-Host "[ERROR] No se pudo crear el directorio. Error: $($_.Exception.Message)"
                     Write-Log -LogLevel ERROR -Message "Fallo al auto-crear Scratch_DIR. Error: $($_.Exception.Message)"
                     Read-Host "Presiona Enter para salir."; exit
                 }
@@ -468,7 +468,7 @@ function Select-PathDialog {
             }
         }
     } catch {
-        Write-Error "No se pudo mostrar el dialogo de seleccion. Error: $($_.Exception.Message)"
+        Write-Host "No se pudo mostrar el dialogo de seleccion. Error: $($_.Exception.Message)"
         Write-Log -LogLevel ERROR -Message "Fallo al mostrar dialogo ABRIR: $($_.Exception.Message)"
     }
 
@@ -496,7 +496,7 @@ function Select-SavePathDialog {
             return $dialog.FileName
         }
     } catch {
-        Write-Error "No se pudo mostrar el dialogo de guardado. Error: $($_.Exception.Message)"
+        Write-Host "No se pudo mostrar el dialogo de guardado. Error: $($_.Exception.Message)"
         Write-Log -LogLevel ERROR -Message "Fallo al mostrar dialogo GUARDAR: $($_.Exception.Message)"
     }
 
@@ -522,9 +522,9 @@ function Mount-Image {
     # --- [INICIO] BLOQUE DE SEGURIDAD ESD MEJORADO ---
     if ($Script:WIM_FILE_PATH -match '\.esd$') {
         Clear-Host
-        Write-Warning "======================================================="
-        Write-Warning "         !!! ALERTA DE FORMATO ESD DETECTADA !!!       "
-        Write-Warning "======================================================="
+        Write-Host "=======================================================" -ForegroundColor Yellow
+        Write-Host "         !!! ALERTA DE FORMATO ESD DETECTADA !!!       " -ForegroundColor Yellow
+        Write-Host "=======================================================" -ForegroundColor Yellow
         Write-Host ""
         Write-Host "Has seleccionado una imagen .ESD (Solo Lectura / Comprimida)." -ForegroundColor Yellow
         Write-Host ""
@@ -546,12 +546,12 @@ function Mount-Image {
         Write-Host "Procediendo... Recuerda usar 'Guardar como Nuevo WIM' al finalizar." -ForegroundColor Gray
     }
 
-# --- BLOQUE B: SEGURIDAD Y LOGICA VHD/VHDX ---
+    # --- BLOQUE B: SEGURIDAD Y LOGICA VHD/VHDX ---
     if ($extension -eq ".VHD" -or $extension -eq ".VHDX") {
         Clear-Host
-        Write-Warning "======================================================="
-        Write-Warning "         MODO DE MONTAJE DE DISCO VIRTUAL (VHD)        "
-        Write-Warning "======================================================="
+        Write-Host "=======================================================" -ForegroundColor Yellow
+        Write-Host "         MODO DE MONTAJE DE DISCO VIRTUAL (VHD)        " -ForegroundColor Yellow
+        Write-Host "=======================================================" -ForegroundColor Yellow
         Write-Host ""
         Write-Host "Has seleccionado un disco virtual ($extension)." -ForegroundColor Yellow
         Write-Host ""
@@ -563,35 +563,73 @@ function Mount-Image {
         
         $confirmVhd = Read-Host "Escribe 'SI' para adjuntar el disco virtual"
         if ($confirmVhd.ToUpper() -ne 'SI') {
-            Write-Warning "Operacion cancelada."; $Script:WIM_FILE_PATH = $null; Pause; return
+            Write-Warning "Operacion cancelada."
+			$Script:WIM_FILE_PATH = $null
+			Pause
+			return
         }
 
         try {
             Write-Host "[+] Adjuntando VHD..." -ForegroundColor Yellow
-            $vhd = Mount-VHD -Path $Script:WIM_FILE_PATH -PassThru -ErrorAction Stop
+            # Montamos y obtenemos el objeto de disco
+            $vhdInfo = Mount-VHD -Path $Script:WIM_FILE_PATH -PassThru -ErrorAction Stop
             
-            # Obtener la letra de unidad asignada (Detecta la partición más grande o la de Windows)
-            $diskInfo = $vhd | Get-Disk | Get-Partition | Where-Object { $_.DriveLetter -ne $null } | Select-Object -First 1
+            # Obtenemos las particiones que tienen letra de unidad (ignoramos las ocultas/sin formato)
+            $partitions = Get-Partition -DiskNumber $vhdInfo.Number | Where-Object { $_.DriveLetter -ne $null }
             
-            if (-not $diskInfo) { throw "El VHD se monto pero no tiene letra de unidad asignada (¿Particion oculta?)." }
+            if ($partitions.Count -eq 0) {
+                throw "El VHD se monto (Disco $($vhdInfo.Number)), pero Windows no asigno letras de unidad a las particiones."
+            }
+
+            # --- SELECCION DE PARTICION (INDICE) ---
+            Write-Host "`n--- Particiones Detectadas ---" -ForegroundColor Cyan
+            $i = 1
+            $menuItems = @{}
             
-            $driveLetter = $diskInfo.DriveLetter + ":\"
+            foreach ($part in $partitions) {
+                # Calculamos tamaño legible
+                $sizeGB = [math]::Round($part.Size / 1GB, 2)
+                
+                Write-Host "   [$i] Unidad $($part.DriveLetter):  | Size: $sizeGB GB" -ForegroundColor White
+                $menuItems[$i] = $part
+                $i++
+            }
+            Write-Host ""
+
+            # Si solo hay una, la seleccionamos directo (comodidad), si hay mas, preguntamos.
+            if ($partitions.Count -eq 1) {
+                Write-Host "Solo se detecto una particion valida. Seleccionandola automaticamente..." -ForegroundColor Gray
+                $selectedPart = $partitions[0]
+            } else {
+                $choice = Read-Host "Seleccione el numero de la particion a gestionar (ej. Windows suele ser la mas grande)"
+                if ($menuItems.ContainsKey([int]$choice)) {
+                    $selectedPart = $menuItems[[int]$choice]
+                } else {
+                    Write-Host "Seleccion invalida. Desmontando..."
+                    Dismount-VHD -Path $Script:WIM_FILE_PATH
+                    Pause; return
+                }
+            }
+
+            $driveLetter = $selectedPart.DriveLetter + ":\"
             
-            # --- CAMBIO CRITICO DE VARIABLES PARA QUE EL RESTO DEL SCRIPT FUNCIONE ---
-            $Script:MOUNT_DIR = $driveLetter  # Ahora MOUNT_DIR es "E:\" por ejemplo
-            $Script:IMAGE_MOUNTED = 2         # Usamos '2' para saber que es modo VHD
-            $Script:MOUNTED_INDEX = 1         # VHDs no suelen manejar índices como WIM, asumimos 1
+            # --- CONFIGURACION DEL ENTORNO ---
+            $Script:MOUNT_DIR = $driveLetter
+            $Script:IMAGE_MOUNTED = 2         # Modo VHD
+            $Script:MOUNTED_INDEX = $selectedPart.PartitionNumber # Guardamos el numero real de particion como referencia
             
-            Write-Host "[OK] VHD Montado en: $Script:MOUNT_DIR" -ForegroundColor Green
-            Write-Log -LogLevel INFO -Message "VHD Montado: $Script:WIM_FILE_PATH en $Script:MOUNT_DIR"
+            Write-Host "[OK] VHD Montado. Trabajando sobre: $Script:MOUNT_DIR" -ForegroundColor Green
+            Write-Log -LogLevel INFO -Message "VHD Montado: $Script:WIM_FILE_PATH (Particion $($selectedPart.PartitionNumber)) en $Script:MOUNT_DIR"
         }
         catch {
-            Write-Error "Error al montar VHD: $_"
+            Write-Host "Error al montar VHD: $_"
             Write-Log -LogLevel ERROR -Message "Fallo montaje VHD: $_"
+            # Intento de limpieza por si quedo a medias
+            try { Dismount-VHD -Path $Script:WIM_FILE_PATH -ErrorAction SilentlyContinue } catch {}
             $Script:WIM_FILE_PATH = $null
         }
         Pause
-        return
+        return 
     }
 
     Write-Host "[+] Obteniendo informacion del WIM..." -ForegroundColor Yellow
@@ -624,7 +662,7 @@ function Mount-Image {
         Write-Log -LogLevel INFO -Message "Montaje completado con exito."
     } else {
         # Captura especifica del error tras el intento
-        Write-Error "[ERROR] Fallo al montar la imagen (Codigo: $LASTEXITCODE)."
+        Write-Host "[ERROR] Fallo al montar la imagen (Codigo: $LASTEXITCODE)."
         if ($LASTEXITCODE.ToString("X") -match "C1420116|C1420117") {
             Write-Warning "CONSEJO: Este error indica que la carpeta de montaje tiene archivos bloqueados."
             Write-Warning "Reinicia el PC y ejecuta la opción 'Limpieza' en el menú principal."
@@ -668,7 +706,7 @@ function Unmount-Image {
             Load-Config 
         }
         catch {
-            Write-Error "[ERROR] No se pudo desmontar el VHD: $_"
+            Write-Host "[ERROR] No se pudo desmontar el VHD: $_"
             Write-Warning "Asegurate de que no tengas carpetas abiertas dentro de la unidad."
         }
         Pause
@@ -690,7 +728,7 @@ function Unmount-Image {
         Write-Host "[OK] Imagen desmontada correctamente." -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "Desmontaje exitoso."
     } else {
-        Write-Error "[ERROR] Fallo el desmontaje (Codigo: $dismExitCode)."
+        Write-Host "[ERROR] Fallo el desmontaje (Codigo: $dismExitCode)."
         Write-Warning "La imagen sigue montada o bloqueada. Cierre carpetas/archivos abiertos e intente de nuevo."
         Write-Log -LogLevel ERROR -Message "Fallo el desmontaje. Codigo: $dismExitCode. Estado mantenido como MONTADO."
     }
@@ -703,8 +741,8 @@ function Reload-Image {
     Clear-Host
     # Seguridad anti-bucle: Maximo 3 intentos
     if ($RetryCount -ge 3) {
-        Write-Error "[ERROR FATAL] Se ha intentado recargar la imagen 3 veces sin exito."
-        Write-Error "Es posible que un archivo este bloqueado por un Antivirus o el Explorador."
+        Write-Host "[ERROR FATAL] Se ha intentado recargar la imagen 3 veces sin exito."
+        Write-Host "Es posible que un archivo este bloqueado por un Antivirus o el Explorador."
         Write-Log -LogLevel ERROR -Message "Reload-Image: Abortado tras 3 intentos fallidos."
         Pause
         return
@@ -721,7 +759,7 @@ function Reload-Image {
     dism /unmount-wim /mountdir:"$Script:MOUNT_DIR" /discard
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "[ERROR] Error al desmontar. Ejecutando limpieza profunda..."
+        Write-Host "[ERROR] Error al desmontar. Ejecutando limpieza profunda..."
         Write-Log -LogLevel ERROR -Message "Fallo el desmontaje en recarga. Ejecutando cleanup-wim."
         
         dism /cleanup-wim
@@ -743,7 +781,7 @@ function Reload-Image {
         Write-Host "[OK] Imagen recargada exitosamente." -ForegroundColor Green
         $Script:IMAGE_MOUNTED = 1
     } else {
-        Write-Error "[ERROR] Error al remontar la imagen."
+        Write-Host "[ERROR] Error al remontar la imagen."
         $Script:IMAGE_MOUNTED = 0
     }
     Pause
@@ -845,7 +883,6 @@ function Save-Changes {
         Write-Host "`n[+] Capturando estado actual a nuevo WIM..." -ForegroundColor Yellow
         Write-Log -LogLevel ACTION -Message "Guardando copia en nuevo WIM: '$DEST_WIM_PATH' (Nombre: $IMAGE_NAME)"
         
-        # Se agrega /Description:"$IMAGE_DESC" al comando
         dism /Capture-Image /ImageFile:"$DEST_WIM_PATH" /CaptureDir:"$Script:MOUNT_DIR" /Name:"$IMAGE_NAME" /Description:"$IMAGE_DESC" /Compress:max /CheckIntegrity
 
         if ($LASTEXITCODE -eq 0) {
@@ -853,7 +890,7 @@ function Save-Changes {
             Write-Host "     $DEST_WIM_PATH" -ForegroundColor Cyan
             Write-Host "`nNOTA: La imagen original sigue montada. Debes desmontarla (sin guardar) al salir." -ForegroundColor Gray
         } else {
-            Write-Error "[ERROR] Fallo al capturar la nueva imagen (Codigo: $LASTEXITCODE)."
+            Write-Host "[ERROR] Fallo al capturar la nueva imagen (Codigo: $LASTEXITCODE)."
             Write-Log -LogLevel ERROR -Message "Fallo Save-As NewWim. Codigo: $LASTEXITCODE"
         }
         Pause
@@ -865,7 +902,7 @@ function Save-Changes {
         Write-Host "[OK] Cambios guardados." -ForegroundColor Green
     } else {
         # Si llegamos aquí con un error, es un error legítimo de DISM (no por bloqueo de ESD)
-        Write-Error "[ERROR] Fallo al guardar cambios (Codigo: $LASTEXITCODE)."
+        Write-Host "[ERROR] Fallo al guardar cambios (Codigo: $LASTEXITCODE)."
         Write-Log -LogLevel ERROR -Message "Fallo al guardar cambios ($Mode). Codigo: $LASTEXITCODE"
     }
     Pause
@@ -905,7 +942,7 @@ function Export-Index {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[OK] Indice exportado exitosamente." -ForegroundColor Green
     } else {
-        Write-Error "[ERROR] Fallo al exportar el Indice (Codigo: $LASTEXITCODE)."
+        Write-Host "[ERROR] Fallo al exportar el Indice (Codigo: $LASTEXITCODE)."
         Write-Log -LogLevel ERROR -Message "Fallo la exportacion del indice. Codigo: $LASTEXITCODE"
     }
     Pause
@@ -933,7 +970,7 @@ function Delete-Index {
         if ($LASTEXITCODE -eq 0) {
             Write-Host "[OK] Indice eliminado exitosamente." -ForegroundColor Green
         } else {
-            Write-Error "[ERROR] Error al eliminar el Indice (Codigo: $LASTEXITCODE). Puede que este montado o en uso."
+            Write-Host "[ERROR] Error al eliminar el Indice (Codigo: $LASTEXITCODE). Puede que este montado o en uso."
             Write-Log -LogLevel ERROR -Message "Fallo la eliminacion del indice. Codigo: $LASTEXITCODE"
         }
     } else {
@@ -974,7 +1011,7 @@ function Convert-ESD {
         Write-Host "La ruta del nuevo WIM ha sido cargada en el script." -ForegroundColor Cyan
         Write-Log -LogLevel INFO -Message "Conversion de ESD a WIM completada."
     } else {
-        Write-Error "[ERROR] Error durante la conversion (Codigo: $LASTEXITCODE)."
+        Write-Host "[ERROR] Error durante la conversion (Codigo: $LASTEXITCODE)."
         Write-Log -LogLevel ERROR -Message "Fallo la conversion de ESD. Codigo: $LASTEXITCODE"
     }
     Pause
@@ -985,7 +1022,7 @@ function Convert-VHD {
 	Write-Host "--- Convertir VHD/VHDX a WIM ---" -ForegroundColor Yellow
 	
 	if (-not (Get-Command "Mount-Vhd" -ErrorAction SilentlyContinue)) {
-        Write-Error "[ERROR] El cmdlet 'Mount-Vhd' no esta disponible."
+        Write-Host "[ERROR] El cmdlet 'Mount-Vhd' no esta disponible."
         Write-Warning "Necesitas habilitar el modulo de Hyper-V o las herramientas de gestion de discos virtuales."
         Write-Warning "En Windows Pro/Ent: Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-Management-PowerShell"
         Pause; return
@@ -1002,9 +1039,27 @@ function Convert-VHD {
     if (-not $DEST_WIM_PATH) { Write-Warning "Operacion cancelada."; Pause; return }
 
     Write-Host "`n--- Ingrese los metadatos para la nueva imagen WIM ---" -ForegroundColor Yellow
-    $IMAGE_NAME = Read-Host "Ingrese el NOMBRE de la imagen (ej: Captured VHD)"
-    $IMAGE_DESC = Read-Host "Ingrese la DESCRIPCION de la imagen"
-    if ([string]::IsNullOrEmpty($IMAGE_NAME)) { $IMAGE_NAME = "Captured VHD" }
+    
+    # --- LECTURA DE DATOS ---
+    $inputName = Read-Host "Ingrese el NOMBRE de la imagen (ej: Captured VHD)"
+    $inputDesc = Read-Host "Ingrese la DESCRIPCION de la imagen (Enter = Auto)"
+    
+    # --- VALIDACIÓN ESTRICTA (FORZAR VALORES) ---
+    # Si está vacío, nulo o son solo espacios, usar valor por defecto.
+    if ([string]::IsNullOrWhiteSpace($inputName)) { 
+        $IMAGE_NAME = "Captured VHD" 
+    } else {
+        $IMAGE_NAME = $inputName
+    }
+
+    if ([string]::IsNullOrWhiteSpace($inputDesc)) { 
+        $IMAGE_DESC = "Imagen convertida desde VHD el $(Get-Date -Format 'yyyy-MM-dd')" 
+    } else {
+        $IMAGE_DESC = $inputDesc
+    }
+
+    # DEBUG: Mostrar valores finales para confirmar que no están vacíos
+    Write-Host "DEBUG: Nombre='$IMAGE_NAME' | Descripcion='$IMAGE_DESC'" -ForegroundColor Cyan
 
     Write-Host "`n[+] Montando el VHD..." -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "Montando VHD '$VHD_FILE_PATH' para captura."
@@ -1013,20 +1068,21 @@ function Convert-VHD {
         $vhdObject = Mount-Vhd -Path $VHD_FILE_PATH -PassThru -ErrorAction Stop
         $DRIVE_LETTER = ($vhdObject | Get-Disk | Get-Partition | Get-Volume).DriveLetter | Select-Object -First 1
     } catch {
-        Write-Error "Error al montar VHD: $($_.Exception.Message)"
+        Write-Host "Error al montar VHD: $($_.Exception.Message)"
         Write-Log -LogLevel ERROR -Message "Fallo el montaje del VHD: $($_.Exception.Message)"
     }
 
     if (-not $DRIVE_LETTER) {
-        Write-Error "[ERROR] No se pudo montar el VHD o no se encontro una letra de unidad."
+        Write-Host "[ERROR] No se pudo montar el VHD o no se encontro una letra de unidad."
         Pause; return
     }
 
     Write-Host "VHD montado en la unidad: $DRIVE_LETTER`:" -ForegroundColor Gray
     Write-Host "[+] Capturando la imagen a WIM... Esto puede tardar mucho tiempo." -ForegroundColor Yellow
+
     Write-Log -LogLevel ACTION -Message "Capturando VHD desde unidad $DRIVE_LETTER`: a '$DEST_WIM_PATH'."
 
-    dism /capture-image /imagefile:"$DEST_WIM_PATH" /capturedir:"$DRIVE_LETTER`:" /name:"$IMAGE_NAME" /description:"$IMAGE_DESC" /compress:max /checkintegrity
+    dism /capture-image /imagefile:"$DEST_WIM_PATH" /capturedir:"$DRIVE_LETTER`:\" /name:"$IMAGE_NAME" /description:"$IMAGE_DESC" /compress:max /checkintegrity
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[OK] Captura completada exitosamente." -ForegroundColor Green
@@ -1035,7 +1091,7 @@ function Convert-VHD {
         Write-Host "La ruta del nuevo WIM ha sido cargada en el script." -ForegroundColor Cyan
         Write-Log -LogLevel INFO -Message "Captura de VHD completada."
     } else {
-        Write-Error "[ERROR] Error durante la captura de la imagen (Codigo: $LASTEXITCODE)."
+        Write-Host "[ERROR] Error durante la captura de la imagen (Codigo: $LASTEXITCODE)."
         Write-Log -LogLevel ERROR -Message "Fallo la captura del VHD. Codigo: $LASTEXITCODE"
     }
 
@@ -1348,13 +1404,17 @@ function Cambio-Edicion-Menu {
 	Write-Warning "No se pudieron obtener las ediciones de destino."
 	}
 
-    if ($targetEditions.Count -lt 1)
-	{
-		Write-Host ""
-		Write-Warning "No se encontraron ediciones de destino validas."
-		Pause
-		return
-	}
+	# Validación: Si es null o tiene 0 elementos
+    if ($null -eq $targetEditions -or $targetEditions.Count -eq 0) {
+        Write-Host ""
+        Write-Warning "No se encontraron ediciones de destino compatibles para esta imagen."
+        Write-Host "Causas posibles:" -ForegroundColor Gray
+        Write-Host " 1. La imagen ya es la edición más alta (ej. Enterprise)." -ForegroundColor Gray
+        Write-Host " 2. La imagen no admite upgrades (ej. algunas versiones VL)." -ForegroundColor Gray
+        Write-Host " 3. Error interno de DISM al leer los metadatos." -ForegroundColor Gray
+        Pause
+        return
+    }
 
     # Calculamos cuantas filas necesitamos para 2 columnas
     # (Total dividido entre 2, redondeado hacia arriba)
@@ -1452,7 +1512,7 @@ function Cambio-Edicion-Menu {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[OK] Proceso de cambio de edicion finalizado." -ForegroundColor Green
     } else {
-        Write-Error "[ERROR] Fallo el cambio de edicion (Codigo: $LASTEXITCODE)."
+        Write-Host "[ERROR] Fallo el cambio de edicion (Codigo: $LASTEXITCODE)."
         Write-Log -LogLevel ERROR -Message "Fallo cambio edicion. Codigo: $LASTEXITCODE"
     }
     Pause
@@ -1605,6 +1665,11 @@ function Limpieza-Menu {
                 Write-Host "    WinDir : $sfcWin" -ForegroundColor Gray
 
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: SFC /Scannow Offline en '$sfcBoot' / '$sfcWin'..."
+				
+				if (-not (Test-Path $sfcWin)) {
+                     Write-Host "No se encuentra la carpeta Windows en $sfcWin. ¿Esta montada correctamente?"
+                     Pause; break
+                }
 
                 # Ejecucion corregida
                 SFC /scannow /offbootdir="$sfcBoot" /offwindir="$sfcWin"
@@ -3052,7 +3117,8 @@ function Show-Services-Offline-GUI {
             }
 
             if ($targetLV) {
-                $regPath = "Registry::HKLM\OfflineSystem\ControlSet001\Services\$($svc.Name)"
+                $ctrlSet = Get-OfflineControlSet # Llamamos a la nueva función
+                $regPath = "Registry::HKLM\OfflineSystem\$ctrlSet\Services\$($svc.Name)"
                 $currentStart = "No Encontrado"
                 $isDisabled = $false
                 
@@ -3322,7 +3388,7 @@ function Mount-Hives {
 
         return $true
     } catch {
-        Write-Error "`n[FATAL] $_"
+        Write-Host "`n[FATAL] $_"
         Write-Log -LogLevel ERROR -Message "Fallo Mount-Hives: $_"
         # Intento de limpieza de emergencia
         Unmount-Hives
@@ -3333,37 +3399,41 @@ function Mount-Hives {
 function Unmount-Hives {
     Write-Host "Guardando y descargando Hives..." -ForegroundColor Yellow
     
-    # Garbage Collection forzada antes de desmontar para soltar handles
+    # Garbage Collection forzada y limpieza de memoria para soltar handles de registro
     [GC]::Collect()
     [GC]::WaitForPendingFinalizers()
-    Start-Sleep -Seconds 1
+    
+    # --- Pausa de seguridad para permitir que el kernel libere los archivos físicos ---
+    Write-Host "Esperando a que el sistema libere los manejadores de archivos..." -ForegroundColor DarkGray
+    Start-Sleep -Seconds 2 
     
     # Lista ampliada de Hives a descargar
     $hives = @(
         "HKLM\OfflineSystem", 
         "HKLM\OfflineSoftware", 
-        "HKLM\OfflineComponents", # Agregado
+        "HKLM\OfflineComponents", 
         "HKLM\OfflineUser", 
         "HKLM\OfflineUserClasses"
     )
     
     foreach ($hive in $hives) {
-        # Solo intentamos descargar si la clave existe en el registro
         if (Test-Path "Registry::$hive") {
             $retries = 0; $done = $false
             while ($retries -lt 5 -and -not $done) {
+                # Intentamos el desmontaje nativo
                 reg unload $hive 2>$null | Out-Null
                 if ($LASTEXITCODE -eq 0) { 
                     $done = $true 
                 } else { 
                     $retries++
+                    # Pequeña espera incremental entre reintentos si hay bloqueo
                     Write-Host "." -NoNewline -ForegroundColor Yellow
-                    Start-Sleep -Milliseconds 500 
+                    Start-Sleep -Milliseconds (500 * $retries) 
                 }
             }
             if (-not $done) { 
-                Write-Warning "`n [!] No se pudo desmontar $hive. Puede estar en uso."
-                Write-Log -LogLevel WARN -Message "Fallo al desmontar $hive"
+                Write-Warning "`n [!] No se pudo desmontar $hive. Puede estar bloqueado por un proceso externo."
+                Write-Log -LogLevel WARN -Message "Fallo al desmontar $hive tras 5 intentos."
             }
         }
     }
@@ -3384,7 +3454,7 @@ function Translate-OfflinePath {
     $cleanPath = $cleanPath -replace "^HKCR\\", "HKEY_CLASSES_ROOT\"
     $cleanPath = $cleanPath.Trim()
 
-    # --- CORRECCION: Mapeo de Clases de Usuario (UsrClass.dat) ---
+    # --- Mapeo de Clases de Usuario (UsrClass.dat) ---
     # Debe ir ANTES de HKCU general, porque es mas especifico.
     if ($cleanPath -match "HKEY_CURRENT_USER\\Software\\Classes") {
         return $cleanPath -replace "HKEY_CURRENT_USER\\Software\\Classes", "HKLM\OfflineUserClasses"
@@ -3398,8 +3468,14 @@ function Translate-OfflinePath {
     # SYSTEM (HKEY_LOCAL_MACHINE\SYSTEM)
     if ($cleanPath -match "HKEY_LOCAL_MACHINE\\SYSTEM") {
         $newPath = $cleanPath -replace "HKEY_LOCAL_MACHINE\\SYSTEM", "HKLM\OfflineSystem"
-        # Offline suele ser ControlSet001, no CurrentControlSet
-        return $newPath -replace "CurrentControlSet", "ControlSet001"
+        
+        # --- Reemplazo inteligente de CurrentControlSet ---
+        if ($newPath -match "CurrentControlSet") {
+            $dynamicSet = Get-OfflineControlSet
+            return $newPath -replace "CurrentControlSet", $dynamicSet
+        }
+        # Fallback para ControlSet001 explícito si viniera en el .reg
+        return $newPath -replace "ControlSet001", (Get-OfflineControlSet)
     }
 
     # SOFTWARE (HKEY_LOCAL_MACHINE\SOFTWARE)
@@ -3530,78 +3606,72 @@ function Unlock-OfflineKey {
 function Restore-KeyOwner {
     param([string]$KeyPath)
     
+    # 1. Asegurar Privilegios
+    Enable-Privileges 
+
+    # 2. Limpieza de Ruta
     $cleanPath = $KeyPath -replace "^Registry::", ""
-    $subKeyPath = $cleanPath -replace "^(HKEY_LOCAL_MACHINE|HKLM|HKLM:|HKEY_LOCAL_MACHINE:)[:\\]+", ""
-
-    $targetSid = $null
-    $isUserHive = $subKeyPath -match "^(OfflineUser|OfflineUserClasses)"
-
-    if ($isUserHive) {
-        $targetSid = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
-    } else {
-        $targetSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")
+    $subPath = $cleanPath -replace "^(HKEY_LOCAL_MACHINE|HKLM|HKLM:|HKEY_LOCAL_MACHINE:)[:\\]+", ""
+    
+    # Mapeo a Hive .NET
+    $hive = [Microsoft.Win32.Registry]::LocalMachine
+    # Si es usuario, cambiamos lógica (aunque OfflineUser se monta en HKLM usualmente en este script)
+    if ($KeyPath -match "OfflineUser") { 
+        # Nota: En tu script, OfflineUser ESTÁ en HKLM, así que seguimos usando LocalMachine
     }
 
-    Enable-Privileges
+    $sidAdmin   = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
+    $sidTrusted = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")
+    
+    # Detectar si debemos devolverlo a Admin (Usuario) o TrustedInstaller (Sistema)
+    $isUserHive = $subPath -match "OfflineUser"
+    $targetOwner = if ($isUserHive) { $sidAdmin } else { $sidTrusted }
 
     try {
-        $rootHive = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Default)
-
-        # CASO A: SI ES USUARIO (OfflineUser)
-        if ($isUserHive) {
-            try {
-                # Intentamos abrir DIRECTAMENTE para tomar posesión
-                $keyOwner = $rootHive.OpenSubKey($subKeyPath, [System.Security.AccessControl.RegistryRights]::TakeOwnership)
-                
-                if ($keyOwner) {
-                    $aclOnlyOwner = New-Object System.Security.AccessControl.RegistrySecurity
-                    $aclOnlyOwner.SetOwner($targetSid)
-                    $keyOwner.SetAccessControl($aclOnlyOwner)
-                    $keyOwner.Close()
-                    
-                    # LOG DE ÉXITO (Ahora si deberia verse)
-                    Write-Log -LogLevel INFO -Message "Restaurado (Solo Dueno): $subKeyPath"
-                } else {
-                    # DIAGNÓSTICO: Si entra aqui, la clave existe pero no se pudo abrir ni para TakeOwnership
-                    Write-Log -LogLevel WARN -Message "No se pudo abrir para TakeOwnership: $subKeyPath"
-                }
-            } catch {
-                Write-Log -LogLevel ERROR -Message "Excepcion en Caso A (User) en ($subKeyPath): $_"
-            }
-        }
-        # CASO B: SI ES SISTEMA (System/Software)
-        else {
-            $key = $null
-            try {
-                $flagsFull = [System.Security.AccessControl.RegistryRights]::TakeOwnership -bor `
-                             [System.Security.AccessControl.RegistryRights]::ChangePermissions -bor `
-                             [System.Security.AccessControl.RegistryRights]::ReadPermissions
-                $key = $rootHive.OpenSubKey($subKeyPath, $flagsFull)
-            } catch {}
-
-            if ($key) {
-                try {
-                    $acl = $key.GetAccessControl()
-                    $acl.SetOwner($targetSid)
-                    $acl.SetAccessRuleProtection($false, $false) 
-                    $key.SetAccessControl($acl)
-                    
-                    # LOG DE ÉXITO CASO B
-                    # Write-Log -LogLevel INFO -Message "Restaurado (Full): $subKeyPath"
-                } catch {
-                    try {
-                        # Fallback silencioso
-                        $acl.SetAccessRuleProtection($true, $false)
-                        $key.SetAccessControl($acl)
-                    } catch {}
-                }
-                $key.Close()
-            }
-        }
+        # --- PASO 1: TOMAR POSESIÓN A LA FUERZA (ADMINISTRADORES) ---
+        # Abrimos la clave con derechos EXCLUSIVOS para cambiar el dueño.
+        # Esto soluciona el "Acceso Denegado" porque el privilegio SeTakeOwnership permite esto aunque la ACL diga "Deny".
+        $keyObj = $hive.OpenSubKey($subPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]::TakeOwnership)
         
-        $rootHive.Close()
+        if ($keyObj) {
+            $acl = $keyObj.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner)
+            $acl.SetOwner($sidAdmin) # Nos hacemos dueños primero para poder editar la ACL después
+            $keyObj.SetAccessControl($acl)
+            $keyObj.Close()
+        }
+
+        # --- PASO 2: RESTAURAR HERENCIA (RESET) ---
+        # Ahora que somos dueños (Admin), podemos cambiar los permisos (ChangePermissions)
+        $keyObj = $hive.OpenSubKey($subPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]::ChangePermissions)
+        
+        if ($keyObj) {
+            $acl = $keyObj.GetAccessControl()
+            # Habilitar herencia y limpiar reglas explícitas ($false, $false)
+            # EXCEPCIÓN: En claves de usuario a veces queremos mantener reglas, pero para limpieza general reset es mejor.
+            if (-not $isUserHive) {
+                $acl.SetAccessRuleProtection($false, $false)
+            }
+            $keyObj.SetAccessControl($acl)
+            $keyObj.Close()
+            Write-Log -LogLevel INFO -Message "Restaurado (Herencia): $subPath"
+        }
+
+        # --- PASO 3: DEVOLVER PROPIEDAD A TRUSTEDINSTALLER ---
+        # Solo si no es hive de usuario
+        if (-not $isUserHive) {
+            $keyObj = $hive.OpenSubKey($subPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]::TakeOwnership)
+            if ($keyObj) {
+                $acl = $keyObj.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner)
+                $acl.SetOwner($targetOwner)
+                $keyObj.SetAccessControl($acl)
+                $keyObj.Close()
+                # No logueamos esto para no saturar, asumimos éxito si paso el 2
+            }
+        }
+
     } catch {
-        Write-Log -LogLevel ERROR -Message "Error Estructural en Restore-KeyOwner: $_"
+        # Si falla, logueamos el error específico de .NET
+        Write-Log -LogLevel ERROR -Message "Fallo crítico en Restore-KeyOwner ($subPath): $($_.Exception.Message)"
     }
 }
 
@@ -3680,10 +3750,11 @@ function Unlock-Single-Key {
 function Show-RegPreview-GUI {
     param([string]$FilePath)
 
-    # Configuración de la Ventana
+    # 1. Configuración de la Ventana (Optimizada)
+    Add-Type -AssemblyName System.Windows.Forms
     $pForm = New-Object System.Windows.Forms.Form
-    $pForm.Text = "Vista Previa de Importacion - $([System.IO.Path]::GetFileName($FilePath))"
-    $pForm.Size = New-Object System.Drawing.Size(1200, 600) # Más ancha
+    $pForm.Text = "Vista Previa Rápida - $([System.IO.Path]::GetFileName($FilePath))"
+    $pForm.Size = New-Object System.Drawing.Size(1200, 600)
     $pForm.StartPosition = "CenterParent"
     $pForm.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
     $pForm.ForeColor = [System.Drawing.Color]::White
@@ -3691,7 +3762,7 @@ function Show-RegPreview-GUI {
     $pForm.MaximizeBox = $false
 
     $lbl = New-Object System.Windows.Forms.Label
-    $lbl.Text = "Analisis de cambios: Revisa los valores antes de aplicar"
+    $lbl.Text = "Analizando cambios... (Modo Turbo .NET)"
     $lbl.Location = New-Object System.Drawing.Point(15, 10)
     $lbl.AutoSize = $true
     $lbl.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
@@ -3705,11 +3776,8 @@ function Show-RegPreview-GUI {
     $lvP.GridLines = $true
     $lvP.BackColor = [System.Drawing.Color]::FromArgb(40, 40, 40)
     $lvP.ForeColor = [System.Drawing.Color]::White
-    
-    # Truco de altura de filas
-    $imgListP = New-Object System.Windows.Forms.ImageList
-    $imgListP.ImageSize = New-Object System.Drawing.Size(1, 30) 
-    $lvP.SmallImageList = $imgListP
+    # Doble buffer para evitar parpadeo
+    $lvP.GetType().GetProperty("DoubleBuffered", [System.Reflection.BindingFlags]"NonPublic,Instance").SetValue($lvP, $true, $null)
 
     $lvP.Columns.Add("Tipo", 80) | Out-Null
     $lvP.Columns.Add("Nombre / Ruta", 550) | Out-Null
@@ -3726,6 +3794,7 @@ function Show-RegPreview-GUI {
     $btnConfirm.ForeColor = [System.Drawing.Color]::White
     $btnConfirm.DialogResult = "OK"
     $btnConfirm.FlatStyle = "Flat"
+    $btnConfirm.Enabled = $false # Deshabilitado hasta terminar carga
 
     $btnCancel = New-Object System.Windows.Forms.Button
     $btnCancel.Text = "Cancelar"
@@ -3739,130 +3808,154 @@ function Show-RegPreview-GUI {
     $pForm.Controls.Add($btnConfirm)
     $pForm.Controls.Add($btnCancel)
 
+    # --- LÓGICA DE CARGA DE ALTO RENDIMIENTO ---
     $pForm.Add_Shown({
         $pForm.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
         $lvP.BeginUpdate()
         
-        $lines = Get-Content $FilePath
-        $currentKeyOffline = $null
-
-        foreach ($line in $lines) {
-            $line = $line.Trim()
+        try {
+            # 1. Lectura en bloque (IO rápido)
+            $lines = [System.IO.File]::ReadAllLines($FilePath)
             
-            # 1. Detectar Claves
-            if ($line -match "^\[(-?)(HKEY_.*|HKLM.*|HKCU.*|HKCR.*)\]$") {
-                $isDelete = $matches[1] -eq "-"
-                $keyRaw = $matches[2]
-                $keyOffline = $keyRaw # Copia inicial
+            # 2. Acceso directo al Registro .NET (Bypasseando la capa lenta de PowerShell)
+            $baseKey = [Microsoft.Win32.Registry]::LocalMachine
+            $currentSubKeyStr = $null
+            $currentSubKeyObj = $null
 
-                # --- LÓGICA DE TRADUCCIÓN ROBUSTA ---
-                # 1. Classes Root (Global) -> OfflineSoftware\Classes
-                if ($keyOffline -match "^HKEY_CLASSES_ROOT" -or $keyOffline -match "^HKCR") {
-                     $keyOffline = $keyOffline -replace "^HKEY_CLASSES_ROOT", "HKLM:\OfflineSoftware\Classes"
-                     $keyOffline = $keyOffline -replace "^HKCR", "HKLM:\OfflineSoftware\Classes"
-                }
-                # 2. Clases de Usuario (HKCU\Software\Classes) -> OfflineUserClasses
-                # IMPORTANTE: Este elseif captura las clases de usuario antes que el HKCU general
-                elseif ($keyOffline -match "HKEY_CURRENT_USER\\Software\\Classes" -or $keyOffline -match "HKCU\\Software\\Classes") {
-                     $keyOffline = $keyOffline -replace "HKEY_CURRENT_USER\\Software\\Classes", "HKLM:\OfflineUserClasses"
-                     $keyOffline = $keyOffline -replace "HKCU\\Software\\Classes", "HKLM:\OfflineUserClasses"
-                }
-                # 3. Rutas Estándar (System, Software y resto de Usuario)
-                else {
-                    $keyOffline = $keyOffline.Replace("HKEY_LOCAL_MACHINE\SOFTWARE", "HKLM:\OfflineSoftware")
-                    $keyOffline = $keyOffline.Replace("HKLM\SOFTWARE", "HKLM:\OfflineSoftware")
-                    $keyOffline = $keyOffline.Replace("HKEY_LOCAL_MACHINE\SYSTEM", "HKLM:\OfflineSystem")
-                    $keyOffline = $keyOffline.Replace("HKLM\SYSTEM", "HKLM:\OfflineSystem")
+            # Pre-compilación de Regex para velocidad (USANDO COMILLAS SIMPLES PARA EVITAR ERRORES)
+            $regKey = [regex]'^\[(-?)(HKEY_.*|HKLM.*|HKCU.*|HKCR.*)\]$'
+            $regVal = [regex]'"(.+?)"=(.*)'
+            $regDef = [regex]'^@=(.*)'
+
+            foreach ($line in $lines) {
+                if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                $line = $line.Trim()
+
+                # CASO A: CLAVE
+                if ($line -match $regKey) {
+                    $isDelete = $matches[1] -eq "-"
+                    $keyRaw = $matches[2]
                     
-                    # Al haber filtrado ya las Classes en el paso 2, esto captura solo el resto de NTUSER.DAT
-                    $keyOffline = $keyOffline.Replace("HKEY_CURRENT_USER", "HKLM:\OfflineUser")
-                    $keyOffline = $keyOffline.Replace("HKCU", "HKLM:\OfflineUser")
-                }
+                    # Cerrar clave anterior para liberar memoria
+                    if ($currentSubKeyObj) { $currentSubKeyObj.Close(); $currentSubKeyObj = $null }
 
-                # 4. Limpieza final para asegurar formato de unidad PowerShell
-                if (-not $keyOffline.StartsWith("HKLM:\")) { 
-                    $keyOffline = $keyOffline -replace "^HKLM\\", "HKLM:\" 
-                }
-                $currentKeyOffline = $keyOffline
+                    # --- Traducción de Rutas (Optimizado) ---
+                    # Convertimos todo a rutas relativas de HKLM para .NET OpenSubKey
+                    $relPath = $keyRaw -replace "^(HKEY_LOCAL_MACHINE|HKLM)\\SOFTWARE", "OfflineSoftware" `
+                                       -replace "^(HKEY_LOCAL_MACHINE|HKLM)\\SYSTEM", "OfflineSystem" `
+                                       -replace "^(HKEY_CURRENT_USER|HKCU)\\Software\\Classes", "OfflineUserClasses" `
+                                       -replace "^(HKEY_CURRENT_USER|HKCU)", "OfflineUser" `
+                                       -replace "^(HKEY_CLASSES_ROOT|HKCR)", "OfflineSoftware\Classes"
+                    
+                    # Limpieza final
+                    $relPath = $relPath -replace "^(HKEY_LOCAL_MACHINE|HKLM)\\", ""
+                    $currentSubKeyStr = $relPath
 
-                # Crear fila de CLAVE
-                $item = New-Object System.Windows.Forms.ListViewItem("CLAVE")
-                $item.SubItems.Add($keyRaw) | Out-Null
-                
-                if ($isDelete) {
-                    $item.SubItems.Add("EXISTE") | Out-Null
-                    $item.SubItems.Add(">>> ELIMINAR <<<") | Out-Null
-                    $item.ForeColor = [System.Drawing.Color]::Salmon
-                } else {
-                    $exists = Test-Path $currentKeyOffline
-                    $item.SubItems.Add( $(if($exists){"EXISTE"}else{"NUEVA"}) ) | Out-Null
-                    $item.SubItems.Add("-") | Out-Null
-                    $item.ForeColor = [System.Drawing.Color]::Yellow
+                    # Intentamos abrir la clave en modo SOLO LECTURA (Rápido)
+                    $exists = $false
+                    try {
+                        $currentSubKeyObj = $baseKey.OpenSubKey($relPath, $false) # $false = ReadOnly
+                        if ($currentSubKeyObj) { $exists = $true }
+                    } catch {}
+
+                    # UI
+                    $item = New-Object System.Windows.Forms.ListViewItem("CLAVE")
+                    $item.SubItems.Add($keyRaw) | Out-Null
+                    
+                    if ($isDelete) {
+                        $item.SubItems.Add("EXISTE") | Out-Null
+                        $item.SubItems.Add(">>> ELIMINAR <<<") | Out-Null
+                        $item.ForeColor = [System.Drawing.Color]::Salmon
+                    } else {
+                        $item.SubItems.Add( $(if($exists){"EXISTE"}else{"NUEVA"}) ) | Out-Null
+                        $item.SubItems.Add("-") | Out-Null
+                        $item.ForeColor = [System.Drawing.Color]::Yellow
+                    }
+                    $lvP.Items.Add($item) | Out-Null
                 }
-                $lvP.Items.Add($item) | Out-Null
-            }
-            # 2. Detectar Valores Nombrados ("Nombre"="Valor")
-            elseif ($currentKeyOffline -and $line -match '^"(.+?)"=(.*)') {
-                $valName = $matches[1]
-                $newVal = $matches[2]
-                $currVal = "No existe" # Valor por defecto si no se encuentra
                 
-                try {
-                    if (Test-Path $currentKeyOffline) {
-                        # Intentamos leer la propiedad
-                        $p = Get-ItemProperty -Path $currentKeyOffline -Name $valName -ErrorAction SilentlyContinue
-                        if ($p) { 
-                            $rawVal = $p.$valName 
-                            # Si existe pero es cadena vacia, lo mostramos explicitamente
-                            if ($rawVal -eq "") { $currVal = "(Vacio)" } else { $currVal = $rawVal }
+                # CASO B: VALOR NOMBRADO ("Nombre"="Valor")
+                elseif ($currentSubKeyStr -and $line -match $regVal) {
+                    $valName = $matches[1]
+                    $newVal = $matches[2]
+                    $currVal = "No existe"
+                    
+                    # Lectura Directa .NET (0ms latencia)
+                    if ($currentSubKeyObj) {
+                        $raw = $currentSubKeyObj.GetValue($valName, $null)
+                        if ($null -ne $raw) {
+                            $currVal = if ($raw -eq "") { "(Vacio)" } else { $raw.ToString() }
                         }
                     }
-                } catch {}
 
-                $item = New-Object System.Windows.Forms.ListViewItem("   Valor")
-                $item.SubItems.Add($valName) | Out-Null
-                $item.SubItems.Add("$currVal") | Out-Null
-                $item.SubItems.Add("$newVal") | Out-Null
+                    $item = New-Object System.Windows.Forms.ListViewItem("   Valor")
+                    $item.SubItems.Add($valName) | Out-Null
+                    $item.SubItems.Add("$currVal") | Out-Null
+                    $item.SubItems.Add("$newVal") | Out-Null
 
-                if ("$currVal" -eq "$newVal") {
-                    $item.ForeColor = [System.Drawing.Color]::Gray
-                } else {
+                    if ("$currVal" -eq "$newVal") {
+                        $item.ForeColor = [System.Drawing.Color]::Gray
+                    } else {
+                        $item.ForeColor = [System.Drawing.Color]::Cyan
+                    }
+                    $lvP.Items.Add($item) | Out-Null
+                }
+
+                # CASO C: VALOR POR DEFECTO (@="Valor")
+                elseif ($currentSubKeyStr -and $line -match $regDef) {
+                    $valName = "(Predeterminado)"
+                    $newVal = $matches[1]
+                    $currVal = "No existe"
+
+                    if ($currentSubKeyObj) {
+                        $raw = $currentSubKeyObj.GetValue("", $null) # "" accede al Default
+                        if ($null -ne $raw) {
+                            $currVal = if ($raw -eq "") { "(Vacio)" } else { $raw.ToString() }
+                        }
+                    }
+
+                    $item = New-Object System.Windows.Forms.ListViewItem("   Valor")
+                    $item.SubItems.Add($valName) | Out-Null
+                    $item.SubItems.Add("$currVal") | Out-Null
+                    $item.SubItems.Add("$newVal") | Out-Null
                     $item.ForeColor = [System.Drawing.Color]::Cyan
-                    $item.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+                    $lvP.Items.Add($item) | Out-Null
                 }
-                $lvP.Items.Add($item) | Out-Null
             }
-            # 3. Detectar Valor por Defecto (@="Valor")
-            elseif ($currentKeyOffline -and $line -match '^@=(.*)') {
-                $valName = "(Predeterminado)"
-                $newVal = $matches[1]
-                $currVal = "No existe"
-                
-                try {
-                    if (Test-Path $currentKeyOffline) {
-                        $p = Get-ItemProperty -Path $currentKeyOffline -Name "(default)" -ErrorAction SilentlyContinue
-                        if ($p) { 
-                            $rawVal = $p.'(default)' 
-                            if ([string]::IsNullOrEmpty($rawVal)) { $currVal = "(Vacio)" } else { $currVal = $rawVal }
-                        }
-                    }
-                } catch {}
 
-                $item = New-Object System.Windows.Forms.ListViewItem("   Valor")
-                $item.SubItems.Add($valName) | Out-Null
-                $item.SubItems.Add("$currVal") | Out-Null
-                $item.SubItems.Add("$newVal") | Out-Null
-                $item.ForeColor = [System.Drawing.Color]::Cyan
-                $item.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-                
-                $lvP.Items.Add($item) | Out-Null
-            }
+            # Limpieza final de handles
+            if ($currentSubKeyObj) { $currentSubKeyObj.Close() }
+            
+        } catch {
+            [System.Windows.Forms.MessageBox]::Show("Error leyendo vista previa: $_", "Error", 'OK', 'Error')
+        } finally {
+            $lvP.EndUpdate()
+            $pForm.Cursor = [System.Windows.Forms.Cursors]::Default
+            $lbl.Text = "Analisis completado."
+            $btnConfirm.Enabled = $true
         }
-        $lvP.EndUpdate()
-        $pForm.Cursor = [System.Windows.Forms.Cursors]::Default
     })
 
     return ($pForm.ShowDialog() -eq 'OK')
+}
+
+function Get-OfflineControlSet { 
+    $SystemHivePath = "HKLM\OfflineSystem"
+    $currentSet = 1 # Fallback seguro (ControlSet001)
+    
+    if (Test-Path "$SystemHivePath\Select") {
+        try {
+            $props = Get-ItemProperty -Path "$SystemHivePath\Select" -ErrorAction SilentlyContinue
+            if ($props -and $props.Current) {
+                $currentSet = $props.Current
+            }
+        } catch {
+            Write-Log -LogLevel WARN -Message "No se pudo determinar el ControlSet activo. Usando Default (001)."
+        }
+    }
+    
+    # Retorna formato string (ej. "ControlSet001")
+    return "ControlSet{0:d3}" -f $currentSet
 }
 
 # =================================================================
@@ -3977,98 +4070,110 @@ function Show-Tweaks-Offline-GUI {
             $userConfirmed = Show-RegPreview-GUI -FilePath $file
             
             if ($userConfirmed) {
+                # Definimos las variables fuera del try para usarlas en finally
+                $tempReg = Join-Path $env:TEMP "gui_import_offline_$PID.reg"
+                $keysToProcess = New-Object System.Collections.Generic.HashSet[string]
+                $totalKeys = 0
+
                 try {
                     $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-                    $lblStatus.Text = "Aplicando parches de seguridad..."
+                    $lblStatus.Text = "Procesando archivo..."
                     $form.Refresh()
 
-                    $content = Get-Content -Path $file -Raw
+                    # 1. Lectura
+                    $content = [System.IO.File]::ReadAllText($file, [System.Text.Encoding]::Default)
                     
-                    # --- A. TRADUCCIÓN DE RUTAS ---
-                    # 1. HKLM (Software y System)
-                    $newContent = $content -replace "HKEY_LOCAL_MACHINE\\SOFTWARE", "HKEY_LOCAL_MACHINE\OfflineSoftware"
-                    $newContent = $newContent -replace "HKLM\\SOFTWARE", "HKEY_LOCAL_MACHINE\OfflineSoftware"
-                    $newContent = $newContent -replace "HKEY_LOCAL_MACHINE\\SYSTEM", "HKEY_LOCAL_MACHINE\OfflineSystem"
-                    $newContent = $newContent -replace "HKLM\\SYSTEM", "HKEY_LOCAL_MACHINE\OfflineSystem"
+                    # 2. Traducción de Rutas (Regex optimizado)
+                    $newContent = $content -replace "(?i)HKEY_LOCAL_MACHINE\\SOFTWARE", "HKEY_LOCAL_MACHINE\OfflineSoftware" `
+                                           -replace "(?i)HKLM\\SOFTWARE", "HKEY_LOCAL_MACHINE\OfflineSoftware" `
+                                           -replace "(?i)HKEY_LOCAL_MACHINE\\SYSTEM", "HKEY_LOCAL_MACHINE\OfflineSystem" `
+                                           -replace "(?i)HKLM\\SYSTEM", "HKEY_LOCAL_MACHINE\OfflineSystem" `
+                                           -replace "(?i)HKEY_CURRENT_USER\\Software\\Classes", "HKEY_LOCAL_MACHINE\OfflineUserClasses" `
+                                           -replace "(?i)HKCU\\Software\\Classes", "HKEY_LOCAL_MACHINE\OfflineUserClasses" `
+                                           -replace "(?i)HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE\OfflineUser" `
+                                           -replace "(?i)HKCU", "HKEY_LOCAL_MACHINE\OfflineUser" `
+                                           -replace "(?i)HKEY_CLASSES_ROOT", "HKEY_LOCAL_MACHINE\OfflineSoftware\Classes" `
+                                           -replace "(?i)HKCR", "HKEY_LOCAL_MACHINE\OfflineSoftware\Classes"
 
-                    # 2. Clases de Usuario (CRiTICO: ANTES de HKCU General)
-                    # Redirige HKCU\Software\Classes -> OfflineUserClasses (UsrClass.dat)
-                    $newContent = $newContent -replace "HKEY_CURRENT_USER\\Software\\Classes", "HKEY_LOCAL_MACHINE\OfflineUserClasses"
-                    $newContent = $newContent -replace "HKCU\\Software\\Classes", "HKEY_LOCAL_MACHINE\OfflineUserClasses"
+                    # 3. Análisis de Claves (Llenado de HashSet)
+                    $lblStatus.Text = "Analizando claves..."
+                    $form.Refresh()
 
-                    # 3. Usuario General (El resto de HKCU -> OfflineUser / NTUSER.DAT)
-                    $newContent = $newContent -replace "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE\OfflineUser"
-                    $newContent = $newContent -replace "HKCU", "HKEY_LOCAL_MACHINE\OfflineUser"
+                    # Regex robusto con comillas simples
+                    $pattern = '\[-?(HKEY_LOCAL_MACHINE\\(OfflineSoftware|OfflineSystem|OfflineUser|OfflineUserClasses|OfflineComponents)[^\]]*)\]'
+                    $matches = [regex]::Matches($newContent, $pattern)
                     
-                    # 4. Classes Root (Global) -> OfflineSoftware\Classes
-                    $newContent = $newContent -replace "HKEY_CLASSES_ROOT", "HKEY_LOCAL_MACHINE\OfflineSoftware\Classes"
-                    $newContent = $newContent -replace "HKCR", "HKEY_LOCAL_MACHINE\OfflineSoftware\Classes"
+                    foreach ($m in $matches) {
+                        # .Trim() es vital para quitar espacios fantasmas que rompen Test-Path
+                        $keyPath = $m.Groups[1].Value.Trim()
+                        if ($keyPath.StartsWith("-")) { $keyPath = $keyPath.Substring(1) }
+                        $null = $keysToProcess.Add($keyPath)
+                    }
+                    $totalKeys = $keysToProcess.Count
 
-                    # --- B. DESBLOQUEO INTELIGENTE (Recursivo) ---
-                    $lines = $newContent -split "`r`n"
-                    foreach ($line in $lines) {
-                        # Captura rutas de claves en el archivo .REG
-                        if ($line -match "^\[HKEY_LOCAL_MACHINE\\(OfflineSoftware|OfflineSystem|OfflineUser)(.*)\]") {
-                            $targetKey = $line.Trim().TrimStart('[').TrimEnd(']')
-                            if ($targetKey.StartsWith("-")) { $targetKey = $targetKey.Substring(1) }
-                            
-                            # La nueva función se encargará de buscar el padre si la clave no existe
-                            Unlock-OfflineKey -KeyPath $targetKey
+                    # 4. Desbloqueo
+                    $currentKey = 0
+                    foreach ($targetKey in $keysToProcess) {
+                        $currentKey++
+                        if ($currentKey % 5 -eq 0) { 
+                            $lblStatus.Text = "Desbloqueando ($currentKey / $totalKeys)..."
+                            $form.Refresh()
                         }
+                        Unlock-OfflineKey -KeyPath $targetKey
                     }
 
-                    # --- C. EJECUCIÓN ---
-                    $tempReg = Join-Path $env:TEMP "gui_import_offline.reg"
-                    $newContent | Set-Content -Path $tempReg -Encoding Unicode -Force
+                    # 5. Importación
+                    $lblStatus.Text = "Importando al registro..."
+                    $form.Refresh()
+                    [System.IO.File]::WriteAllText($tempReg, $newContent, [System.Text.Encoding]::Unicode)
 
                     $pInfo = New-Object System.Diagnostics.ProcessStartInfo
                     $pInfo.FileName = "reg.exe"
                     $pInfo.Arguments = "import `"$tempReg`""
                     $pInfo.UseShellExecute = $false
                     $pInfo.CreateNoWindow = $true
-                    $pInfo.RedirectStandardError = $true
-                    $pInfo.RedirectStandardOutput = $true
-                    
                     $process = [System.Diagnostics.Process]::Start($pInfo)
                     $process.WaitForExit()
-                    $exitCode = $process.ExitCode
+                    
+                    # Guardamos el resultado pero NO detenemos la restauración si falla
+                    $importExitCode = $process.ExitCode 
 
-					# RESTAURACION: "LIMPIAR LA ESCENA DEL CRIMEN"
-                    if ($exitCode -eq 0) {
-                        $lblStatus.Text = "Restaurando permisos de seguridad (TrustedInstaller)..."
-                        $form.Refresh()
-
-                        # Reutilizamos el contenido ya traducido ($newContent) para saber qué claves se tocaron
-                        $linesToRestore = $newContent -split "`r`n"
+                } catch {
+                    [System.Windows.Forms.MessageBox]::Show("Error durante la preparación: $_", "Error", 'OK', 'Error')
+                } finally {
+                    
+                    # --- FASE CRÍTICA: RESTAURACIÓN DE PERMISOS ---
+                    # Esto ahora está en 'finally', se ejecuta SIEMPRE, incluso si la importación falla.
+                    
+                    $lblStatus.Text = "Asegurando permisos (Restaurando)..."
+                    $form.Refresh()
+                    
+                    $restoredCount = 0
+                    foreach ($targetKey in $keysToProcess) {
+                        # Convertimos a ruta PowerShell para validar existencia
+                        # (HKEY_LOCAL_MACHINE\Offline... -> HKLM:\Offline...)
+                        $psCheckPath = $targetKey -replace "^HKEY_LOCAL_MACHINE", "HKLM:"
                         
-                        foreach ($line in $linesToRestore) {
-                            # Buscacmos las mismas claves que desbloqueamos antes
-                            if ($line -match "^\[HKEY_LOCAL_MACHINE\\(OfflineSoftware|OfflineSystem|OfflineUser)(.*)\]") {
-                                $targetKey = $line.Trim().TrimStart('[').TrimEnd(']')
-                                
-                                # Si es una clave de borrado (empieza con -), no hay nada que restaurar porque ya no existe
-                                if (-not $targetKey.StartsWith("-")) {
-                                    # Restaurar propietario
-                                    Restore-KeyOwner -KeyPath $targetKey
-                                }
-                            }
+                        if (Test-Path $psCheckPath) {
+                            Restore-KeyOwner -KeyPath $targetKey
+                            $restoredCount++
+                        } else {
+                            # Logueamos si no encontramos la clave para saber por qué no se restauró
+                            Write-Log -LogLevel WARN -Message "No se pudo restaurar (no existe): $targetKey"
                         }
                     }
 
                     $form.Cursor = [System.Windows.Forms.Cursors]::Default
-
-                    if ($exitCode -eq 0 -or $exitCode -eq 1) {
-                        [System.Windows.Forms.MessageBox]::Show("Importacion exitosa.", "Listo", 'OK', 'Information')
-                    } else {
-                        $stdErr = $process.StandardError.ReadToEnd()
-                        [System.Windows.Forms.MessageBox]::Show("El proceso reporto un codigo $exitCode, pero se aplicaron los permisos.`nVerifica si los cambios aparecen.`n`nError tecnico: $stdErr", "Aviso de Importacion", 'OK', 'Warning')
-                    }
-                    
                     Remove-Item $tempReg -Force -ErrorAction SilentlyContinue
 
-                } catch {
-                    $form.Cursor = [System.Windows.Forms.Cursors]::Default
-                    [System.Windows.Forms.MessageBox]::Show("Error critico: $_", "Error", 'OK', 'Error')
+                    # Informe Final
+                    if ($importExitCode -eq 0) {
+                        $lblStatus.Text = "Finalizado Correctamente."
+                        [System.Windows.Forms.MessageBox]::Show("Importacion completada.`nClaves procesadas/restauradas: $restoredCount", "Exito", 'OK', 'Information')
+                    } else {
+                        $lblStatus.Text = "Finalizado con Advertencias."
+                        [System.Windows.Forms.MessageBox]::Show("La importacion reporto un codigo de salida ($importExitCode), pero se intentaron restaurar los permisos.`nRevise el log si faltan datos.", "Advertencia", 'OK', 'Warning')
+                    }
                 }
             }
         }
@@ -4404,14 +4509,13 @@ function Check-And-Repair-Mounts {
                 
                 [System.Windows.Forms.MessageBox]::Show("Imagen recuperada correctamente.", "Exito", 'OK', 'Information')
             } else {
-                Write-Error "Fallo la recuperacion (Codigo: $LASTEXITCODE)."
+                Write-Host "Fallo la recuperacion (Codigo: $LASTEXITCODE)."
                 [System.Windows.Forms.MessageBox]::Show("No se pudo recuperar la sesion. Se recomienda limpiar.", "Error", 'OK', 'Error')
             }
         }
         elseif ($msgResult -eq 'No') {
-            # Opción Nuclear (Lo que tenias antes)
             Write-Host ">>> LIMPIANDO PUNTO DE MONTAJE (Cleanup-Wim)..." -ForegroundColor Red
-            Unmount-Hives # Asegurar que el registro no estorbe
+            Unmount-Hives
             dism /Cleanup-Wim
             $Script:IMAGE_MOUNTED = 0
             [System.Windows.Forms.MessageBox]::Show("Limpieza completada. Debes montar la imagen de nuevo.", "Limpieza", 'OK', 'Information')
@@ -4481,53 +4585,105 @@ function Main-Menu {
 # =================================================================
 $Script:IMAGE_MOUNTED = 0; $Script:WIM_FILE_PATH = $null; $Script:MOUNTED_INDEX = $null
 $TEMP_DISM_OUT = Join-Path $env:TEMP "dism_check_$($RANDOM).tmp"
+
 Write-Host "Verificando imagenes montadas..." -ForegroundColor Gray
 
+# --- PASO 1: DETECCION WIM/ESD (DISM) ---
 try {
-    # Capturamos la salida en un archivo temporal para evitar problemas de codificacion en consola
+    # Capturamos salida a archivo para evitar problemas de codificación
     dism /get-mountedimageinfo 2>$null | Out-File -FilePath $TEMP_DISM_OUT -Encoding utf8
     $mountInfo = Get-Content -Path $TEMP_DISM_OUT -Encoding utf8 -ErrorAction SilentlyContinue
     
-    # --- REGEX PARA SOPORTE MULTI-IDIOMA (EN/ES) ---
     # Busca "Mount Dir :" O "Directorio de montaje :"
     $mountDirLine = $mountInfo | Select-String -Pattern "(Mount Dir|Directorio de montaje)\s*:" | Select-Object -First 1
     
     if ($mountDirLine) {
-        Write-Log -LogLevel INFO -Message "Detectada imagen previamente montada."
-        $Script:IMAGE_MOUNTED = 1
+        $foundPath = ($mountDirLine.Line -split ':', 2)[1].Trim()
         
-        # Extraer valor limpiamente sin importar el idioma del label
-        $Script:MOUNT_DIR = ($mountDirLine.Line -split ':', 2)[1].Trim()
-        
-        # Busca "Image File :" O "Archivo de imagen :"
-        $wimPathLine = $mountInfo | Select-String -Pattern "(Image File|Archivo de imagen)\s*:" | Select-Object -First 1
-        if ($wimPathLine) {
-            $Script:WIM_FILE_PATH = ($wimPathLine.Line -split ':', 2)[1].Trim()
-            # Limpiar prefijo de ruta larga de Windows si existe
-            if ($Script:WIM_FILE_PATH.StartsWith("\\?\")) { $Script:WIM_FILE_PATH = $Script:WIM_FILE_PATH.Substring(4) }
+        # Validación extra: DISM a veces reporta carpetas que ya no existen
+        if (Test-Path $foundPath) {
+            $Script:IMAGE_MOUNTED = 1
+            $Script:MOUNT_DIR = $foundPath
+            
+            # Buscar Ruta del Archivo de Imagen
+            $wimPathLine = $mountInfo | Select-String -Pattern "(Image File|Archivo de imagen)\s*:" | Select-Object -First 1
+            if ($wimPathLine) {
+                $Script:WIM_FILE_PATH = ($wimPathLine.Line -split ':', 2)[1].Trim()
+                if ($Script:WIM_FILE_PATH.StartsWith("\\?\")) { $Script:WIM_FILE_PATH = $Script:WIM_FILE_PATH.Substring(4) }
+            }
+            
+            # Buscar Indice
+            $indexLine = $mountInfo | Select-String -Pattern "(Image Index|ndice de imagen)\s*:" | Select-Object -First 1
+            if ($indexLine) { $Script:MOUNTED_INDEX = ($indexLine.Line -split ':', 2)[1].Trim() }
+            
+            Write-Log -LogLevel INFO -Message "WIM Detectado: $Script:WIM_FILE_PATH en $Script:MOUNT_DIR"
         }
-        
-        # Busca "Image Index :" O "Indice de imagen :" (El punto en Indice acepta i/I y acentos)
-        $indexLine = $mountInfo | Select-String -Pattern "(Image Index|ndice de imagen)\s*:" | Select-Object -First 1
-        if ($indexLine) { $Script:MOUNTED_INDEX = ($indexLine.Line -split ':', 2)[1].Trim() }
-		
-		Write-Host "Imagen encontrada: $($Script:WIM_FILE_PATH)" -ForegroundColor Yellow
-        Write-Host "Indice: $($Script:MOUNTED_INDEX) | Montada en: $($Script:MOUNT_DIR)" -ForegroundColor Yellow
-        Write-Log -LogLevel INFO -Message "Info recuperada: WIM='$($Script:WIM_FILE_PATH)', Index='$($Script:MOUNTED_INDEX)', MountDir='$($Script:MOUNT_DIR)'."
-		
-        if ($Script:IMAGE_MOUNTED -eq 1) {
-            # Write-Host "Saneando estado del Registro (Hives)..." -ForegroundColor DarkGray
-            Unmount-Hives
-			[GC]::Collect()
-        }
-    } else {
-        Write-Log -LogLevel INFO -Message "No se encontraron imagenes montadas previamente."
     }
 } catch {
-    Write-Warning "Error al verificar imagenes montadas: $($_.Exception.Message)"
-    Write-Log -LogLevel WARN -Message "Error verificando montaje previo: $($_.Exception.Message)"
+    Write-Log -LogLevel WARN -Message "Error verificando DISM: $($_.Exception.Message)"
 } finally {
     if (Test-Path $TEMP_DISM_OUT) { Remove-Item -Path $TEMP_DISM_OUT -Force -ErrorAction SilentlyContinue }
+}
+
+# --- PASO 2: DETECCION VHD/VHDX (Powershell Storage) ---
+# Solo buscamos VHD si no encontramos un WIM montado
+if ($Script:IMAGE_MOUNTED -eq 0) {
+    try {
+        # Obtener discos que sean virtuales (BusType 'FileBackedVirtual' o similar)
+        # Filtramos para evitar discos duros reales
+        $vDisks = Get-Disk | Where-Object { $_.BusType -eq 'FileBackedVirtual' -or $_.Model -match "Virtual Disk" }
+        
+        foreach ($disk in $vDisks) {
+            # Buscamos particiones con letra asignada en este disco
+            $part = Get-Partition -DiskNumber $disk.Number -ErrorAction SilentlyContinue | Where-Object { $_.DriveLetter -ne 0 } | Select-Object -First 1
+            
+            if ($part) {
+                $rootPath = "$($part.DriveLetter):\"
+                
+                # HEURISTICA: ¿Es una imagen de Windows válida?
+                # Buscamos si existe la carpeta \Windows\System32\config (indicador de SO montado)
+                if (Test-Path "$rootPath\Windows\System32\config\SYSTEM") {
+                    
+                    $Script:IMAGE_MOUNTED = 2 # Estado 2 = VHD
+                    $Script:MOUNT_DIR = $rootPath
+                    $Script:MOUNTED_INDEX = $part.PartitionNumber
+                    
+                    # Intentamos obtener la ruta del archivo .vhdx real
+                    # (Requiere módulo Hyper-V o permisos elevados WMI, intentamos ser tolerantes a fallos)
+                    try {
+                        if (Get-Command Get-VHD -ErrorAction SilentlyContinue) {
+                            $vhdData = Get-VHD -DiskNumber $disk.Number -ErrorAction Stop
+                            $Script:WIM_FILE_PATH = $vhdData.Path
+                        } else {
+                            # Fallback cosmético si no hay herramientas Hyper-V
+                            $Script:WIM_FILE_PATH = "Disco Virtual (Disk $($disk.Number))" 
+                        }
+                    } catch {
+                        $Script:WIM_FILE_PATH = "Disco Virtual Desconocido"
+                    }
+
+                    Write-Host "VHD Detectado: $Script:WIM_FILE_PATH" -ForegroundColor Yellow
+                    Write-Host "Montado en: $Script:MOUNT_DIR" -ForegroundColor Yellow
+                    Write-Log -LogLevel INFO -Message "VHD Recuperado: $Script:WIM_FILE_PATH en $Script:MOUNT_DIR"
+                    break # Detenemos al encontrar el primero válido
+                }
+            }
+        }
+    } catch {
+        Write-Log -LogLevel WARN -Message "Error verificando VHDs: $($_.Exception.Message)"
+    }
+}
+
+# --- REPORTE FINAL ---
+if ($Script:IMAGE_MOUNTED -eq 0) {
+    Write-Log -LogLevel INFO -Message "No se encontraron imagenes montadas previamente."
+} elseif ($Script:IMAGE_MOUNTED -eq 1) {
+    Write-Host "Imagen WIM encontrada: $($Script:WIM_FILE_PATH)" -ForegroundColor Yellow
+    Write-Host "Indice: $($Script:MOUNTED_INDEX) | Montada en: $($Script:MOUNT_DIR)" -ForegroundColor Yellow
+    
+    # Limpieza preventiva de hives huérfanos si se detectó un montaje previo
+    Unmount-Hives 
+    [GC]::Collect()
 }
 
 Ensure-WorkingDirectories
@@ -4537,4 +4693,39 @@ Check-And-Repair-Mounts
 # =============================================
 #  Punto de Entrada: Iniciar el Menu Principal
 # =============================================
-Main-Menu
+# REGISTRO DE EVENTO DE SALIDA (Para capturar cierre de ventana "X")
+$OnExitScript = {
+    # Solo intentamos desmontar si detectamos que se quedaron montados
+    if (Test-Path "Registry::HKLM\OfflineSystem") {
+        Write-Host "`n[EVENTO SALIDA] Detectado cierre inesperado. Limpiando Hives..." -ForegroundColor Red
+        # Invocamos la lógica de desmontaje directamente (sin llamar a la función para evitar conflictos de scope)
+        $hives = @("HKLM\OfflineSystem", "HKLM\OfflineSoftware", "HKLM\OfflineComponents", "HKLM\OfflineUser", "HKLM\OfflineUserClasses")
+        foreach ($h in $hives) { 
+            if (Test-Path "Registry::$h") { reg unload $h 2>$null }
+        }
+    }
+}
+Register-EngineEvent -SourceIdentifier PowerShell.Exiting -SupportEvent -Action $OnExitScript | Out-Null
+
+# BLOQUE PRINCIPAL BLINDADO
+try {
+    # Ejecutamos el bucle principal
+    Main-Menu
+}
+catch {
+    Write-Host "[CRITICAL ERROR] El script ha fallado inesperadamente: $_"
+    Write-Log -LogLevel ERROR -Message "CRASH DETECTADO: $_"
+    Pause
+}
+finally {
+    # ESTO SE EJECUTA SIEMPRE: Ya sea que salgas bien, por error, o con CTRL+C
+    Write-Host "`n[SISTEMA] Finalizando y asegurando limpieza..." -ForegroundColor DarkGray
+    
+    # 1. Asegurar descarga de Hives
+    Unmount-Hives
+    
+    # 2. Desregistrar el evento para no dejar basura en la sesión de PS
+    Unregister-Event -SourceIdentifier PowerShell.Exiting -ErrorAction SilentlyContinue
+    
+    Write-Log -LogLevel INFO -Message "Cierre de sesión completado."
+}
