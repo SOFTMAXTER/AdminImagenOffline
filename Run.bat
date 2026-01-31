@@ -30,7 +30,7 @@ echo Privilegios de Administrador obtenidos. Ejecutando AdminImagenOffline..
 echo.
 
 :: Establecer el titulo de la ventana
-title AdminImagenOffline v1.4.3 by SOFTMAXTER
+title AdminImagenOffline v1.4.4 by SOFTMAXTER
 
 mode con: cols=110 lines=35
 
