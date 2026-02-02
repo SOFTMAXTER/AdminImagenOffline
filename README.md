@@ -16,7 +16,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
     * **Tooltips Informativos**: Ayuda contextual visual al pasar el cursor sobre opciones complejas en las interfaces gráficas.
 * **Detección Automática**: Verifica al inicio si ya existe una imagen montada en el sistema (WIM o VHD) y carga su información dinámicamente.
 * **Gestión de Imágenes**: Montaje, desmontaje (con descartes), guardado de cambios (commit/append) y recarga rápida. Soporte completo para montar y editar archivos **VHD/VHDX** directamente.
-* **Despliegue a VHD (Native Boot)**: Nueva herramienta para crear discos virtuales arrancables desde un WIM, configurando particiones (GPT/UEFI o MBR/BIOS) automáticamente.
+* **Despliegue a VHD**: Nueva herramienta para crear discos virtuales arrancables desde un WIM, configurando particiones (GPT/UEFI o MBR/BIOS) automáticamente.
 * **Edición de Índices WIM**: Exportación y eliminación de índices específicos.
 * **Conversión de Formatos**: ESD a WIM y VHD/VHDX a WIM.
 * **Cambio de Edición de Windows**: Detección y cambio de edición (ej. Home a Pro) offline.
@@ -45,7 +45,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ## Modo de Uso
 
-1.  Descarga los archivos. El script es flexible con la estructura de carpetas, pero se recomienda mantener `Run.bat` junto a `AdminImagenOffline.ps1` o con el script dentro de una subcarpeta `Script`.
+1.  Descarga los archivos. El script es flexible con la estructura de carpetas, pero se recomienda mantener `Run.bat` junto a `AdminImagenOffline.ps1` con el script dentro de una subcarpeta `Script`.
 2.  Haz clic derecho sobre el archivo `Run.bat` y selecciona **"Ejecutar como administrador"**.
 3.  Sigue las instrucciones en pantalla.
 4.  Si es la primera ejecución, ve al menú **[9] Configurar Rutas de Trabajo** para definir tus directorios.
@@ -97,7 +97,7 @@ Un potente gestor de registro en modo nativo.
 * **Botones Globales**: Permite "Aplicar Selección" o "Restaurar Valores" para revertir cambios.
 * **Importador .REG**: Analiza, traduce rutas y muestra vista previa antes de importar claves externas.
 
-### 8. Despliegue: WIM a VHD/VHDX (Native Boot)
+### 8. Despliegue: WIM a VHD/VHDX
 
 Interfaz gráfica diseñada para crear entornos "Windows to Go" o discos virtuales para máquinas virtuales.
 * **Origen**: Selecciona tu WIM y el índice deseado.
@@ -107,7 +107,6 @@ Interfaz gráfica diseñada para crear entornos "Windows to Go" o discos virtual
     * Esquema de particiones: **GPT (UEFI)** o **MBR (Legacy BIOS)**.
     * Creación automática de particiones de sistema (EFI/System Reserved) y formateo.
     * Aplicación de la imagen y configuración del arranque (`BCDBOOT`).
-* Incluye **Tooltips** explicativos para cada opción.
 
 ### 7. Herramientas de Limpieza
 
@@ -148,3 +147,4 @@ Si deseas contribuir al desarrollo de este script:
 3.  Realiza tus cambios y haz commit (`git commit -am 'Añade nueva funcionalidad'`).
 4.  Haz Push a la rama (`git push origin feature/nueva-funcionalidad`).
 5.  Abre un Pull Request.
+
