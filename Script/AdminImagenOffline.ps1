@@ -8,13 +8,13 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.4.4
+    1.4.5
 #>
 
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.4.4"
+$script:Version = "1.4.5"
 
 function Write-Log {
     [CmdletBinding()]
@@ -375,6 +375,40 @@ function Ensure-WorkingDirectories {
     Start-Sleep -Seconds 1
 }
 
+function Initialize-ScratchSpace {
+    Write-Log -LogLevel INFO -Message "MANTENIMIENTO: Inicializando espacio Scratch..."
+    
+    if (Test-Path $Script:Scratch_DIR) {
+        # Intentamos limpiar contenido anterior
+        try {
+            $junkFiles = Get-ChildItem -Path $Script:Scratch_DIR -Recurse -Force -ErrorAction SilentlyContinue
+            if ($junkFiles) {
+                Write-Host "Limpiando archivos temporales antiguos en Scratch..." -ForegroundColor DarkGray
+                
+                # Usamos Remove-Item con Force y Recurse. 
+                # SilentlyContinue es vital porque algunos archivos pueden estar bloqueados por el sistema (inofensivo).
+                $junkFiles | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+                
+                Write-Log -LogLevel ACTION -Message "Scratch_DIR limpiado preventivamente."
+            }
+        }
+        catch {
+            Write-Log -LogLevel WARN -Message "No se pudo realizar limpieza profunda del Scratch. (Puede estar en uso)"
+        }
+    }
+    else {
+        # Si no existe, la creamos (Lógica original mejorada)
+        try {
+            New-Item -Path $Script:Scratch_DIR -ItemType Directory -Force | Out-Null
+            Write-Log -LogLevel INFO -Message "Scratch_DIR creado: $Script:Scratch_DIR"
+        }
+        catch {
+            Write-Error "No se pudo crear el directorio Scratch. Verifica permisos."
+            Write-Log -LogLevel ERROR -Message "Fallo al crear Scratch_DIR: $_"
+        }
+    }
+}
+
 # =================================================================
 #  Verificacion de Permisos de Administrador
 # =================================================================
@@ -513,161 +547,127 @@ function Mount-Image {
         Pause; return
     }
 
-    $path = Select-PathDialog -DialogType File -Title "Seleccione la imagen a montar" -Filter "Archivos Soportados (*.wim, *.esd, *.vhd, *.vhdx)|*.wim;*.esd;*.vhd;*.vhdx|Todos (*.*)|*.*"
+    $path = Select-PathDialog -DialogType File -Title "Seleccione la imagen a montar" -Filter "Archivos Soportados (*.wim,  *.vhd, *.vhdx)|*.wim;*.vhd;*.vhdx|Todos (*.*)|*.*"
     if ([string]::IsNullOrEmpty($path)) { Write-Warning "Operacion cancelada."; Pause; return }
     $Script:WIM_FILE_PATH = $path
     
     $extension = [System.IO.Path]::GetExtension($path).ToUpper()
 
-    # --- [INICIO] BLOQUE DE SEGURIDAD ESD MEJORADO ---
-    if ($Script:WIM_FILE_PATH -match '\.esd$') {
-        Clear-Host
-        Write-Host "=======================================================" -ForegroundColor Yellow
-        Write-Host "         !!! ALERTA DE FORMATO ESD DETECTADA !!!       " -ForegroundColor Yellow
-        Write-Host "=======================================================" -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "Has seleccionado una imagen .ESD (Solo Lectura / Comprimida)." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "IMPORTANTE:" -ForegroundColor Cyan
-        Write-Host "1. Si haces cambios, el 'Guardar Cambios (Commit)' FALLARA." -ForegroundColor Red
-        Write-Host "2. Para salvar tu trabajo, tendras que usar OBLIGATORIAMENTE:" -ForegroundColor White
-        Write-Host "   -> Menu 'Guardar Cambios' > Opcion [3] 'Guardar como Nuevo Archivo WIM'" -ForegroundColor Green
-        Write-Host ""
-        Write-Host "RECOMENDACION IDEAL: Usa 'Convertir ESD a WIM' en el menu principal antes de montar." -ForegroundColor Gray
-        Write-Host ""
-        
-        $confirmEsd = Read-Host "Escribe 'SI' para montar de todos modos o Enter para salir"
-        if ($confirmEsd.ToUpper() -ne 'SI') {
-            Write-Warning "Operacion cancelada. Convierte a WIM primero."
-            $Script:WIM_FILE_PATH = $null
-            Pause
-            return
-        }
-        Write-Host "Procediendo... Recuerda usar 'Guardar como Nuevo WIM' al finalizar." -ForegroundColor Gray
-    }
-
-    # --- BLOQUE B: SEGURIDAD Y LOGICA VHD/VHDX ---
+    # =======================================================
+    #  MODO VHD / VHDX (LOGICA ROBUSTA)
+    # =======================================================
     if ($extension -eq ".VHD" -or $extension -eq ".VHDX") {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Yellow
         Write-Host "         MODO DE MONTAJE DE DISCO VIRTUAL (VHD)        " -ForegroundColor Yellow
         Write-Host "=======================================================" -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "Has seleccionado un disco virtual ($extension)." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "DIFERENCIAS CRITICAS:" -ForegroundColor Cyan
-        Write-Host "1. NO se usara la carpeta de montaje '$Script:MOUNT_DIR'." -ForegroundColor Gray
-        Write-Host "2. El VHD se montara como una NUEVA UNIDAD (Letra de disco)." -ForegroundColor Gray
-        Write-Host "3. Los cambios se guardan EN TIEMPO REAL al editar (No requiere Commit)." -ForegroundColor Red
+        Write-Host "1. NO se usa la carpeta de montaje temporal."
+        Write-Host "2. El VHD se monta como unidad nativa (Letra)."
+        Write-Host "3. Los cambios son EN TIEMPO REAL." -ForegroundColor Red
         Write-Host ""
         
-        $confirmVhd = Read-Host "Escribe 'SI' para adjuntar el disco virtual"
-        if ($confirmVhd.ToUpper() -ne 'SI') {
-            Write-Warning "Operacion cancelada."
-			$Script:WIM_FILE_PATH = $null
-			Pause
-			return
+        if ((Read-Host "Escribe 'SI' para adjuntar").ToUpper() -ne 'SI') {
+            $Script:WIM_FILE_PATH = $null; return
         }
 
         try {
-            Write-Host "[+] Adjuntando VHD..." -ForegroundColor Yellow
-            # Montamos y obtenemos el objeto de disco
+            Write-Host "[+] Montando VHD..." -ForegroundColor Yellow
             $vhdInfo = Mount-VHD -Path $Script:WIM_FILE_PATH -PassThru -ErrorAction Stop
             
-            # Obtenemos las particiones que tienen letra de unidad (ignoramos las ocultas/sin formato)
-            $partitions = Get-Partition -DiskNumber $vhdInfo.Number | Where-Object { $_.DriveLetter -ne $null }
-            
-            if ($partitions.Count -eq 0) {
-                throw "El VHD se monto (Disco $($vhdInfo.Number)), pero Windows no asigno letras de unidad a las particiones."
-            }
+            # 1. Escaneo Inteligente de Particiones
+            $targetPart = $null
+            $partitions = Get-Partition -DiskNumber $vhdInfo.Number | Where-Object { $_.Size -gt 1GB } # Filtramos EFI/MSR
 
-            # --- SELECCION DE PARTICION (INDICE) ---
-            Write-Host "`n--- Particiones Detectadas ---" -ForegroundColor Cyan
-            $i = 1
-            $menuItems = @{}
-            
             foreach ($part in $partitions) {
-                # Calculamos tamaño legible
-                $sizeGB = [math]::Round($part.Size / 1GB, 2)
+                # Auto-Asignar letra si falta
+                if (-not $part.DriveLetter) {
+                    $freeLet = Get-UnusedDriveLetter
+                    Set-Partition -InputObject $part -NewDriveLetter $freeLet -ErrorAction SilentlyContinue
+                    $part.DriveLetter = $freeLet # Actualizamos objeto en memoria
+                }
                 
-                Write-Host "   [$i] Unidad $($part.DriveLetter):  | Size: $sizeGB GB" -ForegroundColor White
-                $menuItems[$i] = $part
-                $i++
-            }
-            Write-Host ""
-
-            # Si solo hay una, la seleccionamos directo (comodidad), si hay mas, preguntamos.
-            if ($partitions.Count -eq 1) {
-                Write-Host "Solo se detecto una particion valida. Seleccionandola automaticamente..." -ForegroundColor Gray
-                $selectedPart = $partitions[0]
-            } else {
-                $choice = Read-Host "Seleccione el numero de la particion a gestionar (ej. Windows suele ser la mas grande)"
-                if ($menuItems.ContainsKey([int]$choice)) {
-                    $selectedPart = $menuItems[[int]$choice]
-                } else {
-                    Write-Host "Seleccion invalida. Desmontando..."
-                    Dismount-VHD -Path $Script:WIM_FILE_PATH
-                    Pause; return
+                # Verificar si es Windows
+                if (Test-Path "$($part.DriveLetter):\Windows\System32\config\SYSTEM") {
+                    $targetPart = $part
+                    break 
                 }
             }
 
-            $driveLetter = $selectedPart.DriveLetter + ":\"
-            
-            # --- CONFIGURACION DEL ENTORNO ---
+            # 2. Seleccion (Automática o Manual)
+            if ($targetPart) {
+                Write-Host "[AUTO] Windows detectado en particion $($targetPart.DriveLetter):" -ForegroundColor Green
+                $selectedPart = $targetPart
+            } else {
+                # Fallback: Menú manual si no detectamos Windows
+                Write-Warning "No se detecto una instalacion de Windows obvia."
+                Write-Host "Seleccione la particion manualmente:" -ForegroundColor Cyan
+                
+                $menuItems = @{}
+                $i = 1
+                $allParts = Get-Partition -DiskNumber $vhdInfo.Number | Where-Object { $_.DriveLetter }
+                
+                foreach ($p in $allParts) {
+                    $gb = [math]::Round($p.Size / 1GB, 2)
+                    Write-Host "   [$i] Unidad $($p.DriveLetter): ($gb GB)"
+                    $menuItems[$i] = $p
+                    $i++
+                }
+                
+                $choice = Read-Host "Numero de particion"
+                if ($menuItems[$choice]) { $selectedPart = $menuItems[$choice] }
+                else { throw "Seleccion inválida." }
+            }
+
+            # 3. Configurar Entorno Global
+            $driveLetter = "$($selectedPart.DriveLetter):\"
             $Script:MOUNT_DIR = $driveLetter
-            $Script:IMAGE_MOUNTED = 2         # Modo VHD
-            $Script:MOUNTED_INDEX = $selectedPart.PartitionNumber # Guardamos el numero real de particion como referencia
+            $Script:IMAGE_MOUNTED = 2         # Estado 2 = VHD
+            $Script:MOUNTED_INDEX = $selectedPart.PartitionNumber
             
-            Write-Host "[OK] VHD Montado. Trabajando sobre: $Script:MOUNT_DIR" -ForegroundColor Green
-            Write-Log -LogLevel INFO -Message "VHD Montado: $Script:WIM_FILE_PATH (Particion $($selectedPart.PartitionNumber)) en $Script:MOUNT_DIR"
-        }
-        catch {
-            Write-Host "Error al montar VHD: $_"
+            Write-Host "[OK] VHD Montado en: $Script:MOUNT_DIR" -ForegroundColor Green
+            Write-Log -LogLevel INFO -Message "VHD Montado: $Script:WIM_FILE_PATH en $Script:MOUNT_DIR"
+
+        } catch {
+            Write-Error "Error VHD: $_"
             Write-Log -LogLevel ERROR -Message "Fallo montaje VHD: $_"
-            # Intento de limpieza por si quedo a medias
             try { Dismount-VHD -Path $Script:WIM_FILE_PATH -ErrorAction SilentlyContinue } catch {}
             $Script:WIM_FILE_PATH = $null
         }
-        Pause
-        return 
+        Pause; return
     }
 
-    Write-Host "[+] Obteniendo informacion del WIM..." -ForegroundColor Yellow
+    # =======================================================
+    #  MODO WIM (DISM)
+    # =======================================================
+    Write-Host "[+] Leyendo WIM..." -ForegroundColor Yellow
     dism /get-wiminfo /wimfile:"$Script:WIM_FILE_PATH"
 
-    $INDEX = Read-Host "`nIngrese el numero de indice a montar"
+    $INDEX = Read-Host "`nNumero de indice a montar"
     
-    # Verificar si el directorio de montaje está sucio antes de empezar
-    if ((Get-ChildItem $Script:MOUNT_DIR -Force | Measure-Object).Count -gt 0) {
-        Write-Warning "El directorio de montaje ($Script:MOUNT_DIR) NO esta vacio."
-        Write-Warning "Esto suele causar el error 0xc1420116 o 0xc1420117."
-        $cleanParams = Read-Host "¿Deseas intentar limpiarlo y desmontar residuos previos? (S/N)"
-        if ($cleanParams -match 'S') {
-            Write-Host "Ejecutando limpieza (DISM /Cleanup-Wim)..." -ForegroundColor Cyan
+    # Limpieza proactiva de carpeta corrupta
+    if ((Get-ChildItem $Script:MOUNT_DIR -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0) {
+        Write-Warning "El directorio de montaje no esta vacio ($Script:MOUNT_DIR)."
+        if ((Read-Host "¿Limpiar carpeta? (S/N)") -match 'S') {
             dism /cleanup-wim
-            Write-Host "Forzando eliminacion de archivos basura..." -ForegroundColor Cyan
             Remove-Item "$Script:MOUNT_DIR\*" -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
-    Write-Host "[+] Montando imagen (Indice: $INDEX)... Esto puede tardar." -ForegroundColor Yellow
-    Write-Log -LogLevel ACTION -Message "Montando imagen: '$Script:WIM_FILE_PATH' (Indice: $INDEX) en '$Script:MOUNT_DIR'"
+    Write-Host "[+] Montando (Indice: $INDEX)..." -ForegroundColor Yellow
+    Write-Log -LogLevel ACTION -Message "Montando WIM: '$Script:WIM_FILE_PATH' (Idx: $INDEX)"
     
     dism /mount-wim /wimfile:"$Script:WIM_FILE_PATH" /index:$INDEX /mountdir:"$Script:MOUNT_DIR"
 
     if ($LASTEXITCODE -eq 0) {
         $Script:IMAGE_MOUNTED = 1
         $Script:MOUNTED_INDEX = $INDEX
-        Write-Host "[OK] Imagen montada exitosamente." -ForegroundColor Green
-        Write-Log -LogLevel INFO -Message "Montaje completado con exito."
+        Write-Host "[OK] Imagen montada." -ForegroundColor Green
     } else {
-        # Captura especifica del error tras el intento
-        Write-Host "[ERROR] Fallo al montar la imagen (Codigo: $LASTEXITCODE)."
+        Write-Error "[ERROR] Fallo montaje (Code: $LASTEXITCODE)."
         if ($LASTEXITCODE.ToString("X") -match "C1420116|C1420117") {
-            Write-Warning "CONSEJO: Este error indica que la carpeta de montaje tiene archivos bloqueados."
-            Write-Warning "Reinicia el PC y ejecuta la opción 'Limpieza' en el menú principal."
+            Write-Warning "Posible bloqueo de archivos. Reinicia o ejecuta Limpieza."
         }
-        Write-Log -LogLevel ERROR -Message "Fallo al montar la imagen. Codigo de salida: $LASTEXITCODE"
+        Write-Log -LogLevel ERROR -Message "Fallo montaje WIM. Code: $LASTEXITCODE"
     }
     Pause
 }
@@ -793,7 +793,7 @@ function Reload-Image {
 function Save-Changes {
     param ([string]$Mode) # 'Commit', 'Append' o 'NewWim'
 
-    # 1. Validación de Montaje
+    # 1. Validacion de Montaje
     if ($Script:IMAGE_MOUNTED -eq 0) { Write-Warning "No hay imagen montada para guardar."; Pause; return }
 
     # 2. BLOQUEO VHD (Como discutimos antes)
@@ -801,17 +801,17 @@ function Save-Changes {
         Clear-Host
         Write-Warning "AVISO: Estas trabajando sobre un disco virtual (VHD/VHDX)."
         Write-Host "Los cambios en VHD se guardan automáticamente en tiempo real al editar archivos." -ForegroundColor Cyan
-        Write-Host "No es necesario (ni posible) ejecutar operaciones de 'Commit' o 'Capture' aquí." -ForegroundColor Gray
+        Write-Host "No es necesario (ni posible) ejecutar operaciones de 'Commit' o 'Capture' aqui." -ForegroundColor Gray
         Write-Host "Simplemente desmonta la imagen para finalizar." -ForegroundColor Yellow
         Pause
         return
     }
 
     # 3. BLOQUEO ESD
-    # Verificamos si la extensión original era .esd
+    # Verificamos si la extension original era .esd
     $isEsd = ($Script:WIM_FILE_PATH -match '\.esd$')
 
-    if ($isEsd -and ($Mode -match 'Commit|Append')) {
+    if ($isEsd -and ($Mode -match 'Commit|Append|NewWim')) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Yellow
         Write-Host "      OPERACION NO PERMITIDA EN ARCHIVOS .ESD          " -ForegroundColor Yellow
@@ -823,15 +823,11 @@ function Save-Changes {
         Write-Host "Los archivos ESD son de 'compresion solida' y no admiten escritura incremental." -ForegroundColor Gray
         Write-Host "DISM fallara si intentas guardar cambios directamente sobre el archivo original." -ForegroundColor Gray
         Write-Host ""
-        Write-Host "SOLUCION:" -ForegroundColor Green
-        Write-Host "Debes seleccionar la opcion [3] 'Guardar en un NUEVO archivo WIM'." -ForegroundColor White
-        Write-Host "Esto capturara tu trabajo en un archivo nuevo y funcional." -ForegroundColor Gray
-        Write-Host ""
         Pause
         return
     }
 
-    # 4. Lógica Original (WIM o ESD con modo NewWim)
+    # 4. Logica Original (WIM con modo NewWim)
     if ($Mode -eq 'Commit') {
         Clear-Host
         Write-Host "[+] Guardando cambios en el indice $Script:MOUNTED_INDEX..." -ForegroundColor Yellow
@@ -847,9 +843,6 @@ function Save-Changes {
     elseif ($Mode -eq 'NewWim') {
         Clear-Host
         Write-Host "--- Guardar como Nuevo Archivo WIM (Exportar Estado Actual) ---" -ForegroundColor Cyan
-        if ($isEsd) {
-            Write-Host "MODO ESD DETECTADO: Esta es la forma correcta de guardar tus cambios." -ForegroundColor Green
-        }
         
         # 1. Seleccionar destino
         if ($Script:WIM_FILE_PATH) {
@@ -876,7 +869,7 @@ function Save-Changes {
         $IMAGE_NAME = Read-Host "Ingrese el NOMBRE para la imagen interna (Enter = '$defaultName')"
         if ([string]::IsNullOrWhiteSpace($IMAGE_NAME)) { $IMAGE_NAME = $defaultName }
 
-        # --- Metadatos (Descripción) ---
+        # --- Metadatos (Descripcion) ---
         $IMAGE_DESC = Read-Host "Ingrese la DESCRIPCION (Opcional)"
         if ([string]::IsNullOrWhiteSpace($IMAGE_DESC)) { $IMAGE_DESC = "Imagen creada con AdminImagenOffline" }
         
@@ -901,7 +894,7 @@ function Save-Changes {
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[OK] Cambios guardados." -ForegroundColor Green
     } else {
-        # Si llegamos aquí con un error, es un error legítimo de DISM (no por bloqueo de ESD)
+        # Si llegamos aqui con un error, es un error legitimo de DISM (no por bloqueo de ESD)
         Write-Host "[ERROR] Fallo al guardar cambios (Codigo: $LASTEXITCODE)."
         Write-Log -LogLevel ERROR -Message "Fallo al guardar cambios ($Mode). Codigo: $LASTEXITCODE"
     }
@@ -1019,86 +1012,110 @@ function Convert-ESD {
 
 function Convert-VHD {
     Clear-Host
-	Write-Host "--- Convertir VHD/VHDX a WIM ---" -ForegroundColor Yellow
-	
-	if (-not (Get-Command "Mount-Vhd" -ErrorAction SilentlyContinue)) {
-        Write-Host "[ERROR] El cmdlet 'Mount-Vhd' no esta disponible."
+    Write-Host "--- Convertir VHD/VHDX a WIM (Auto-Mount) ---" -ForegroundColor Yellow
+    
+    # 1. Verificar modulo Hyper-V
+    if (-not (Get-Command "Mount-Vhd" -ErrorAction SilentlyContinue)) {
+        Write-Error "[ERROR] El cmdlet 'Mount-Vhd' no esta disponible."
         Write-Warning "Necesitas habilitar el modulo de Hyper-V o las herramientas de gestion de discos virtuales."
-        Write-Warning "En Windows Pro/Ent: Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-Management-PowerShell"
         Pause; return
     }
 
+    # 2. Seleccion de Archivo
     $path = Select-PathDialog -DialogType File -Title "Seleccione el archivo VHD o VHDX a convertir" -Filter "Archivos VHD (*.vhd, *.vhdx)|*.vhd;*.vhdx|Todos (*.*)|*.*"
     if (-not $path) { Write-Warning "Operacion cancelada."; Pause; return }
     $VHD_FILE_PATH = $path
 
+    # 3. Seleccion de Destino
     $vhdFileObject = Get-Item -Path $VHD_FILE_PATH
     $DEFAULT_DEST_PATH = Join-Path $vhdFileObject.DirectoryName "$($vhdFileObject.BaseName).wim"
 
     $DEST_WIM_PATH = Select-SavePathDialog -Title "Capturar VHD como WIM..." -Filter "Archivos WIM (*.wim)|*.wim" -DefaultFileName $DEFAULT_DEST_PATH
     if (-not $DEST_WIM_PATH) { Write-Warning "Operacion cancelada."; Pause; return }
 
+    # 4. Metadatos
     Write-Host "`n--- Ingrese los metadatos para la nueva imagen WIM ---" -ForegroundColor Yellow
-    
-    # --- LECTURA DE DATOS ---
     $inputName = Read-Host "Ingrese el NOMBRE de la imagen (ej: Captured VHD)"
     $inputDesc = Read-Host "Ingrese la DESCRIPCION de la imagen (Enter = Auto)"
     
-    # --- VALIDACIÓN ESTRICTA (FORZAR VALORES) ---
-    # Si está vacío, nulo o son solo espacios, usar valor por defecto.
-    if ([string]::IsNullOrWhiteSpace($inputName)) { 
-        $IMAGE_NAME = "Captured VHD" 
-    } else {
-        $IMAGE_NAME = $inputName
-    }
+    if ([string]::IsNullOrWhiteSpace($inputName)) { $IMAGE_NAME = "Captured VHD" } else { $IMAGE_NAME = $inputName }
+    if ([string]::IsNullOrWhiteSpace($inputDesc)) { $IMAGE_DESC = "Convertido desde VHD el $(Get-Date -Format 'yyyy-MM-dd')" } else { $IMAGE_DESC = $inputDesc }
 
-    if ([string]::IsNullOrWhiteSpace($inputDesc)) { 
-        $IMAGE_DESC = "Imagen convertida desde VHD el $(Get-Date -Format 'yyyy-MM-dd')" 
-    } else {
-        $IMAGE_DESC = $inputDesc
-    }
+    Write-Host "`n[+] Montando y analizando estructura del VHD..." -ForegroundColor Yellow
+    Write-Log -LogLevel ACTION -Message "Iniciando conversion inteligente de '$VHD_FILE_PATH'."
 
-    # DEBUG: Mostrar valores finales para confirmar que no están vacíos
-    Write-Host "DEBUG: Nombre='$IMAGE_NAME' | Descripcion='$IMAGE_DESC'" -ForegroundColor Cyan
-
-    Write-Host "`n[+] Montando el VHD..." -ForegroundColor Yellow
-    Write-Log -LogLevel ACTION -Message "Montando VHD '$VHD_FILE_PATH' para captura."
     $DRIVE_LETTER = $null
+    $mountedDisk = $null
+
     try {
-        $vhdObject = Mount-Vhd -Path $VHD_FILE_PATH -PassThru -ErrorAction Stop
-        $DRIVE_LETTER = ($vhdObject | Get-Disk | Get-Partition | Get-Volume).DriveLetter | Select-Object -First 1
+        # A. Montar VHD sin letra inicial
+        $mountedDisk = Mount-Vhd -Path $VHD_FILE_PATH -PassThru -ErrorAction Stop
+        
+        # B. Obtener todas las particiones de DATOS (Ignoramos pequeñas tipo EFI/MSR < 2GB para ir rápido)
+        #    Esto filtra basura y acelera el proceso.
+        $partitions = Get-Partition -DiskNumber $mountedDisk.Number | Where-Object { $_.Size -gt 3GB }
+
+        foreach ($part in $partitions) {
+            $currentLet = $part.DriveLetter
+            
+            # --- LOGICA DE AUTO-ASIGNACIoN ---
+            if (-not $currentLet) {
+                # Buscar letra libre (Z hacia A)
+                $usedLetters = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Name
+                $alphabet = [char[]](90..65) # Z..A
+                $freeLet = $null
+                foreach ($l in $alphabet) { if ($usedLetters -notcontains $l) { $freeLet = $l; break } }
+
+                if ($freeLet) {
+                    Write-Host "   > Particion sin montar detectada. Asignando letra temporal $freeLet`:..." -ForegroundColor DarkGray
+                    Set-Partition -InputObject $part -NewDriveLetter $freeLet -ErrorAction SilentlyContinue
+                    $currentLet = $freeLet # Usamos esta letra para verificar
+                }
+            }
+
+            # --- VERIFICACIoN DE WINDOWS ---
+            if ($currentLet) {
+                $winPath = "$currentLet`:\Windows\System32\config\SYSTEM"
+                if (Test-Path $winPath) {
+                    $DRIVE_LETTER = $currentLet
+                    Write-Host "   [OK] Windows detectado en particion $DRIVE_LETTER`:" -ForegroundColor Green
+                    break # ¡Encontrado! Dejamos de buscar.
+                } else {
+                    Write-Host "   [-] Particion $currentLet`: no contiene Windows. Ignorando." -ForegroundColor DarkGray
+                }
+            }
+        }
+
+        if (-not $DRIVE_LETTER) {
+            throw "No se encontro ninguna instalacion de Windows válida en el VHD (se escanearon todas las particiones >3GB)."
+        }
+
+        # 5. Captura (DISM)
+        Write-Host "`n[+] Capturando volumen $DRIVE_LETTER`: a WIM..." -ForegroundColor Yellow
+        Write-Log -LogLevel ACTION -Message "Capturando desde $DRIVE_LETTER`: a '$DEST_WIM_PATH'."
+
+        dism /capture-image /imagefile:"$DEST_WIM_PATH" /capturedir:"$DRIVE_LETTER`:\" /name:"$IMAGE_NAME" /description:"$IMAGE_DESC" /compress:max /checkintegrity
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "[OK] Captura completada exitosamente." -ForegroundColor Green
+            $Script:WIM_FILE_PATH = $DEST_WIM_PATH
+            Write-Log -LogLevel INFO -Message "Captura VHD->WIM finalizada OK."
+        } else {
+            Write-Error "[ERROR] Fallo DISM (Codigo: $LASTEXITCODE)."
+            Write-Log -LogLevel ERROR -Message "Fallo captura DISM: $LASTEXITCODE"
+        }
+
     } catch {
-        Write-Host "Error al montar VHD: $($_.Exception.Message)"
-        Write-Log -LogLevel ERROR -Message "Fallo el montaje del VHD: $($_.Exception.Message)"
+        Write-Error "Error critico durante la conversion: $($_.Exception.Message)"
+        Write-Log -LogLevel ERROR -Message "Excepcion en Convert-VHD: $($_.Exception.Message)"
+    } finally {
+        # 6. Limpieza Final (Importante)
+        if ($mountedDisk) {
+            Write-Host "[+] Desmontando VHD..." -ForegroundColor Yellow
+            Dismount-Vhd -Path $VHD_FILE_PATH -ErrorAction SilentlyContinue
+        }
+        Pause
     }
-
-    if (-not $DRIVE_LETTER) {
-        Write-Host "[ERROR] No se pudo montar el VHD o no se encontro una letra de unidad."
-        Pause; return
-    }
-
-    Write-Host "VHD montado en la unidad: $DRIVE_LETTER`:" -ForegroundColor Gray
-    Write-Host "[+] Capturando la imagen a WIM... Esto puede tardar mucho tiempo." -ForegroundColor Yellow
-
-    Write-Log -LogLevel ACTION -Message "Capturando VHD desde unidad $DRIVE_LETTER`: a '$DEST_WIM_PATH'."
-
-    dism /capture-image /imagefile:"$DEST_WIM_PATH" /capturedir:"$DRIVE_LETTER`:\" /name:"$IMAGE_NAME" /description:"$IMAGE_DESC" /compress:max /checkintegrity
-
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[OK] Captura completada exitosamente." -ForegroundColor Green
-        Write-Host "Nuevo archivo WIM creado en: `"$DEST_WIM_PATH`"" -ForegroundColor Gray
-        $Script:WIM_FILE_PATH = $DEST_WIM_PATH
-        Write-Host "La ruta del nuevo WIM ha sido cargada en el script." -ForegroundColor Cyan
-        Write-Log -LogLevel INFO -Message "Captura de VHD completada."
-    } else {
-        Write-Host "[ERROR] Error durante la captura de la imagen (Codigo: $LASTEXITCODE)."
-        Write-Log -LogLevel ERROR -Message "Fallo la captura del VHD. Codigo: $LASTEXITCODE"
-    }
-
-    Write-Host "`n[+] Desmontando el VHD..." -ForegroundColor Yellow
-    Write-Log -LogLevel ACTION -Message "Desmontando VHD '$VHD_FILE_PATH'."
-    Dismount-Vhd -Path $VHD_FILE_PATH 2>$null
-    Write-Host "VHD desmontado." -ForegroundColor Gray; Pause
 }
 
 # =============================================
@@ -1404,12 +1421,12 @@ function Cambio-Edicion-Menu {
 	Write-Warning "No se pudieron obtener las ediciones de destino."
 	}
 
-	# Validación: Si es null o tiene 0 elementos
+	# Validacion: Si es null o tiene 0 elementos
     if ($null -eq $targetEditions -or $targetEditions.Count -eq 0) {
         Write-Host ""
         Write-Warning "No se encontraron ediciones de destino compatibles para esta imagen."
         Write-Host "Causas posibles:" -ForegroundColor Gray
-        Write-Host " 1. La imagen ya es la edición más alta (ej. Enterprise)." -ForegroundColor Gray
+        Write-Host " 1. La imagen ya es la edicion mas alta (ej. Enterprise)." -ForegroundColor Gray
         Write-Host " 2. La imagen no admite upgrades (ej. algunas versiones VL)." -ForegroundColor Gray
         Write-Host " 3. Error interno de DISM al leer los metadatos." -ForegroundColor Gray
         Pause
@@ -1731,7 +1748,7 @@ function Limpieza-Menu {
                     Pause; return
                 }
                 elseif ($imageState -eq "Healthy") {
-                    # CASO OPTIMO: SALTAR REPARACIÓN
+                    # CASO OPTIMO: SALTAR REPARACIoN
                     Write-Host "`n[3/5] Reparando imagen..." -ForegroundColor DarkGray
                     Write-Host "   >>> OMITIDO: La imagen ya esta saludable." -ForegroundColor Green
                     Write-Log -LogLevel INFO -Message "LIMPIEZA: (3/5) RestoreHealth omitido (Imagen Saludable)."
@@ -1947,7 +1964,7 @@ public class WimMasterEngine
 }
 "@
 
-    # 3. Compilación
+    # 3. Compilacion
     try {
         if (-not ([System.Management.Automation.PSTypeName]'WimMasterEngine').Type) {
             $refs = @("System.Xml", "System.Xml.Linq", "System.Core")
@@ -1997,7 +2014,7 @@ public class WimMasterEngine
 	$cmbIndex.ForeColor=[System.Drawing.Color]::White
 	$form.Controls.Add($cmbIndex)
 
-    # Aumentamos tamaño del Grid
+    # Aumentamos Size del Grid
     $dgv = New-Object System.Windows.Forms.DataGridView
 	$dgv.Location = "20, 100"
 	$dgv.Size = "790, 380"
@@ -2062,7 +2079,7 @@ public class WimMasterEngine
         }
     })
 
-    # --- EVENTO SELECCIÓN (Muestra Metadatos Extendidos) ---
+    # --- EVENTO SELECCIoN (Muestra Metadatos Extendidos) ---
     $cmbIndex.Add_SelectedIndexChanged({
         if ($txtPath.Text) {
             $idx = $cmbIndex.SelectedIndex + 1; $dgv.Rows.Clear()
@@ -2070,7 +2087,7 @@ public class WimMasterEngine
                 $xml = [System.Xml.Linq.XDocument]::Parse([WimMasterEngine]::GetImageXml($txtPath.Text, $idx))
                 $img = $xml.Root
                 
-                # --- Función Helper Interna ---
+                # --- Funcion Helper Interna ---
                 function Get-NodeVal($el, $name) { 
                     $x = $el.Element($name)
                     if ($null -ne $x) { return $x.Value } else { return "" }
@@ -2095,7 +2112,7 @@ public class WimMasterEngine
                 $archStr = switch ($archVal) { "0" {"x86"} "9" {"x64"} "12" {"ARM64"} default {$archVal} }
                 $rowArch = $dgv.Rows.Add("Arquitectura", $archStr)
 
-                # B) Versión
+                # B) Version
                 $verStr = ""
                 if ($null -ne $winNode) {
                     $vNode = $winNode.Element("VERSION")
@@ -2109,7 +2126,7 @@ public class WimMasterEngine
                 }
                 $rowVer = $dgv.Rows.Add("Version", $verStr)
 
-                # C) Tamaño (Bytes -> GB)
+                # C) Size (Bytes -> GB)
                 $bytesStr = Get-NodeVal $img "TOTALBYTES"
                 $sizeDisplay = ""
                 if ($bytesStr -match "^\d+$") {
@@ -2118,7 +2135,7 @@ public class WimMasterEngine
                 }
                 $rowSize = $dgv.Rows.Add("Size", $sizeDisplay)
 
-                # D) Fecha Creación
+                # D) Fecha Creacion
                 $dateStr = ""
                 $cTime = $img.Element("CREATIONTIME")
                 if ($null -ne $cTime) {
@@ -2214,7 +2231,7 @@ function Show-Drivers-GUI {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
-    # 2. Configuración del Formulario
+    # 2. Configuracion del Formulario
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Inyector de Drivers - (Offline)"
     $form.Size = New-Object System.Drawing.Size(1000, 650)
@@ -2323,24 +2340,24 @@ function Show-Drivers-GUI {
                 if ($line -match "^Class\s*=\s*(.*)") {
                     $classType = $matches[1].Trim()
                 }
-                # Buscar Versión (DriverVer = fecha, version)
+                # Buscar Version (DriverVer = fecha, version)
                 if ($line -match "DriverVer\s*=\s*.*?,([0-9\.\s]+)") {
                     $localVersion = $matches[1].Trim()
                 }
 
-                # Optimización: Si ya encontramos ambos, salimos del bucle
+                # Optimizacion: Si ya encontramos ambos, salimos del bucle
                 if ($classType -ne "Desconocido" -and $localVersion -ne "---") { break }
             }
         } catch {}
 
-        # Lógica de Comparación
+        # Logica de Comparacion
         $foundByName = $script:cachedInstalledDrivers | Where-Object { [System.IO.Path]::GetFileName($_.OriginalFileName) -eq $fileObj.Name }
         
         if ($foundByName) {
             $isInstalled = $true; $statusText = "INSTALADO"
         } 
         elseif ($localVersion -ne "---") {
-            # Comparar versión exacta + clase
+            # Comparar version exacta + clase
             $foundByVer = $script:cachedInstalledDrivers | Where-Object { $_.Version -eq $localVersion -and $_.ClassName -eq $classType }
             if ($foundByVer) { $isInstalled = $true; $statusText = "INSTALADO" }
         }
@@ -2413,7 +2430,7 @@ function Show-Drivers-GUI {
         }
     })
 
-    # Resto de lógica
+    # Resto de logica
     $btnSelectNew.Add_Click({
         foreach ($item in $listView.Items) {
             if ($item.Text -match "Nuevo") { $item.Checked = $true } else { $item.Checked = $false }
@@ -2437,7 +2454,7 @@ function Show-Drivers-GUI {
                 $form.Refresh()
                 
                 try {
-                    # Comando de inyección
+                    # Comando de inyeccion
                     dism /Image:$Script:MOUNT_DIR /Add-Driver /Driver:"$($item.Tag)" /ForceUnsigned | Out-Null
                     
                     if ($LASTEXITCODE -eq 0) {
@@ -2461,11 +2478,11 @@ function Show-Drivers-GUI {
             $form.Refresh()
             
             try {
-                # Forzamos la relectura de lo que realmente quedó instalado en la imagen
+                # Forzamos la relectura de lo que realmente quedo instalado en la imagen
                 $dismDrivers = Get-WindowsDriver -Path $Script:MOUNT_DIR -ErrorAction SilentlyContinue
                 if ($dismDrivers) { 
                     $script:cachedInstalledDrivers = $dismDrivers 
-                    Write-Log -LogLevel INFO -Message "Drivers GUI: Cache actualizada tras instalación."
+                    Write-Log -LogLevel INFO -Message "Drivers GUI: Cache actualizada tras instalacion."
                 }
             } catch {
                 Write-Warning "No se pudo actualizar la cache de drivers."
@@ -3117,7 +3134,7 @@ function Show-Services-Offline-GUI {
             }
 
             if ($targetLV) {
-                $ctrlSet = Get-OfflineControlSet # Llamamos a la nueva función
+                $ctrlSet = Get-OfflineControlSet # Llamamos a la nueva funcion
                 $regPath = "Registry::HKLM\OfflineSystem\$ctrlSet\Services\$($svc.Name)"
                 $currentStart = "No Encontrado"
                 $isDisabled = $false
@@ -3403,7 +3420,7 @@ function Unmount-Hives {
     [GC]::Collect()
     [GC]::WaitForPendingFinalizers()
     
-    # --- Pausa de seguridad para permitir que el kernel libere los archivos físicos ---
+    # --- Pausa de seguridad para permitir que el kernel libere los archivos fisicos ---
     Write-Host "Esperando a que el sistema libere los manejadores de archivos..." -ForegroundColor DarkGray
     Start-Sleep -Seconds 2 
     
@@ -3443,7 +3460,7 @@ function Unmount-Hives {
 function Translate-OfflinePath {
     param([string]$OnlinePath)
     
-    # 1. Limpieza inicial y normalización
+    # 1. Limpieza inicial y normalizacion
     # Quitamos "Registry::" y convertimos abreviaturas a nombres completos para estandarizar
     $cleanPath = $OnlinePath -replace "^Registry::", "" 
     $cleanPath = $cleanPath -replace "^HKLM:", "HKEY_LOCAL_MACHINE"
@@ -3474,7 +3491,7 @@ function Translate-OfflinePath {
             $dynamicSet = Get-OfflineControlSet
             return $newPath -replace "CurrentControlSet", $dynamicSet
         }
-        # Fallback para ControlSet001 explícito si viniera en el .reg
+        # Fallback para ControlSet001 explicito si viniera en el .reg
         return $newPath -replace "ControlSet001", (Get-OfflineControlSet)
     }
 
@@ -3573,7 +3590,6 @@ function Unlock-OfflineKey {
     # Si estamos tocando OfflineUser, la raiz es "OfflineUser".
     $hiveName = $psPath.Split('\')[0] 
     
-    # --- CORRECCIÓN: Agregados OfflineComponents y OfflineUserClasses ---
     if ($hiveName -in @("OfflineUser", "OfflineSoftware", "OfflineSystem", "OfflineComponents", "OfflineUserClasses")) {
         $rootHivePath = $hiveName
         
@@ -3615,9 +3631,9 @@ function Restore-KeyOwner {
     
     # Mapeo a Hive .NET
     $hive = [Microsoft.Win32.Registry]::LocalMachine
-    # Si es usuario, cambiamos lógica (aunque OfflineUser se monta en HKLM usualmente en este script)
+    # Si es usuario, cambiamos logica (aunque OfflineUser se monta en HKLM usualmente en este script)
     if ($KeyPath -match "OfflineUser") { 
-        # Nota: En tu script, OfflineUser ESTÁ en HKLM, así que seguimos usando LocalMachine
+        # Nota: En tu script, OfflineUser ESTÁ en HKLM, asi que seguimos usando LocalMachine
     }
 
     $sidAdmin   = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
@@ -3628,7 +3644,7 @@ function Restore-KeyOwner {
     $targetOwner = if ($isUserHive) { $sidAdmin } else { $sidTrusted }
 
     try {
-        # --- PASO 1: TOMAR POSESIÓN A LA FUERZA (ADMINISTRADORES) ---
+        # --- PASO 1: TOMAR POSESIoN A LA FUERZA (ADMINISTRADORES) ---
         # Abrimos la clave con derechos EXCLUSIVOS para cambiar el dueño.
         # Esto soluciona el "Acceso Denegado" porque el privilegio SeTakeOwnership permite esto aunque la ACL diga "Deny".
         $keyObj = $hive.OpenSubKey($subPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]::TakeOwnership)
@@ -3646,8 +3662,8 @@ function Restore-KeyOwner {
         
         if ($keyObj) {
             $acl = $keyObj.GetAccessControl()
-            # Habilitar herencia y limpiar reglas explícitas ($false, $false)
-            # EXCEPCIÓN: En claves de usuario a veces queremos mantener reglas, pero para limpieza general reset es mejor.
+            # Habilitar herencia y limpiar reglas explicitas ($false, $false)
+            # EXCEPCIoN: En claves de usuario a veces queremos mantener reglas, pero para limpieza general reset es mejor.
             if (-not $isUserHive) {
                 $acl.SetAccessRuleProtection($false, $false)
             }
@@ -3670,12 +3686,12 @@ function Restore-KeyOwner {
         }
 
     } catch {
-        # Si falla, logueamos el error específico de .NET
-        Write-Log -LogLevel ERROR -Message "Fallo crítico en Restore-KeyOwner ($subPath): $($_.Exception.Message)"
+        # Si falla, logueamos el error especifico de .NET
+        Write-Log -LogLevel ERROR -Message "Fallo critico en Restore-KeyOwner ($subPath): $($_.Exception.Message)"
     }
 }
 
-# --- LA FUNCIÓN DE DESBLOQUEO ---
+# --- LA FUNCIoN DE DESBLOQUEO ---
 function Unlock-Single-Key {
     param([string]$SubKeyPath)
     
@@ -3685,7 +3701,7 @@ function Unlock-Single-Key {
 	Enable-Privileges
     $rootKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Default)
 
-    # --- VERIFICACIÓN PREVIA ---
+    # --- VERIFICACIoN PREVIA ---
     # Antes de disparar REGINI, comprobamos si ya tenemos permiso de escritura.
     # Si podemos abrirla con 'WriteKey', no hace falta desbloquear nada.
     try {
@@ -3699,7 +3715,7 @@ function Unlock-Single-Key {
         # Si falla el chequeo, continuamos con el desbloqueo...
     }
 
-    # ... (Aqui sigue la lógica de desbloqueo si falló lo anterior) ...
+    # ... (Aqui sigue la logica de desbloqueo si fallo lo anterior) ...
     
     $sidAdmin = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
     $success = $false
@@ -3729,7 +3745,7 @@ function Unlock-Single-Key {
     
     $rootKey.Close()
 
-    # INTENTO 2: MÉTODO REGINI.EXE (Solo si falló .NET y no teniamos acceso previo)
+    # INTENTO 2: MÉTODO REGINI.EXE (Solo si fallo .NET y no teniamos acceso previo)
     if (-not $success) {
         try {
             $kernelPath = "\Registry\Machine\$SubKeyPath"
@@ -3750,7 +3766,7 @@ function Unlock-Single-Key {
 function Show-RegPreview-GUI {
     param([string]$FilePath)
 
-    # 1. Configuración de la Ventana (Optimizada)
+    # 1. Configuracion de la Ventana (Optimizada)
     Add-Type -AssemblyName System.Windows.Forms
     $pForm = New-Object System.Windows.Forms.Form
     $pForm.Text = "Vista Previa Rápida - $([System.IO.Path]::GetFileName($FilePath))"
@@ -3808,7 +3824,7 @@ function Show-RegPreview-GUI {
     $pForm.Controls.Add($btnConfirm)
     $pForm.Controls.Add($btnCancel)
 
-    # --- LÓGICA DE CARGA DE ALTO RENDIMIENTO ---
+    # --- LoGICA DE CARGA DE ALTO RENDIMIENTO ---
     $pForm.Add_Shown({
         $pForm.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
         $lvP.BeginUpdate()
@@ -3822,7 +3838,7 @@ function Show-RegPreview-GUI {
             $currentSubKeyStr = $null
             $currentSubKeyObj = $null
 
-            # Pre-compilación de Regex para velocidad (USANDO COMILLAS SIMPLES PARA EVITAR ERRORES)
+            # Pre-compilacion de Regex para velocidad (USANDO COMILLAS SIMPLES PARA EVITAR ERRORES)
             $regKey = [regex]'^\[(-?)(HKEY_.*|HKLM.*|HKCU.*|HKCR.*)\]$'
             $regVal = [regex]'"(.+?)"=(.*)'
             $regDef = [regex]'^@=(.*)'
@@ -3839,7 +3855,7 @@ function Show-RegPreview-GUI {
                     # Cerrar clave anterior para liberar memoria
                     if ($currentSubKeyObj) { $currentSubKeyObj.Close(); $currentSubKeyObj = $null }
 
-                    # --- Traducción de Rutas (Optimizado) ---
+                    # --- Traduccion de Rutas (Optimizado) ---
                     # Convertimos todo a rutas relativas de HKLM para .NET OpenSubKey
                     $relPath = $keyRaw -replace "^(HKEY_LOCAL_MACHINE|HKLM)\\SOFTWARE", "OfflineSoftware" `
                                        -replace "^(HKEY_LOCAL_MACHINE|HKLM)\\SYSTEM", "OfflineSystem" `
@@ -4028,7 +4044,7 @@ function Show-Tweaks-Offline-GUI {
                 $isDelete = $matches[1] -eq "-"
                 $keyRaw = $matches[2]
                 
-                # Traducción Secuencial (La que arreglamos)
+                # Traduccion Secuencial (La que arreglamos)
                 $keyOffline = $keyRaw.Replace("HKEY_LOCAL_MACHINE\SOFTWARE", "HKLM:\OfflineSoftware")
                 $keyOffline = $keyOffline.Replace("HKLM\SOFTWARE", "HKLM:\OfflineSoftware")
                 $keyOffline = $keyOffline.Replace("HKEY_LOCAL_MACHINE\SYSTEM", "HKLM:\OfflineSystem")
@@ -4083,7 +4099,7 @@ function Show-Tweaks-Offline-GUI {
                     # 1. Lectura
                     $content = [System.IO.File]::ReadAllText($file, [System.Text.Encoding]::Default)
                     
-                    # 2. Traducción de Rutas (Regex optimizado)
+                    # 2. Traduccion de Rutas (Regex optimizado)
                     $newContent = $content -replace "(?i)HKEY_LOCAL_MACHINE\\SOFTWARE", "HKEY_LOCAL_MACHINE\OfflineSoftware" `
                                            -replace "(?i)HKLM\\SOFTWARE", "HKEY_LOCAL_MACHINE\OfflineSoftware" `
                                            -replace "(?i)HKEY_LOCAL_MACHINE\\SYSTEM", "HKEY_LOCAL_MACHINE\OfflineSystem" `
@@ -4122,7 +4138,7 @@ function Show-Tweaks-Offline-GUI {
                         Unlock-OfflineKey -KeyPath $targetKey
                     }
 
-                    # 5. Importación
+                    # 5. Importacion
                     $lblStatus.Text = "Importando al registro..."
                     $form.Refresh()
                     [System.IO.File]::WriteAllText($tempReg, $newContent, [System.Text.Encoding]::Unicode)
@@ -4135,15 +4151,15 @@ function Show-Tweaks-Offline-GUI {
                     $process = [System.Diagnostics.Process]::Start($pInfo)
                     $process.WaitForExit()
                     
-                    # Guardamos el resultado pero NO detenemos la restauración si falla
+                    # Guardamos el resultado pero NO detenemos la restauracion si falla
                     $importExitCode = $process.ExitCode 
 
                 } catch {
-                    [System.Windows.Forms.MessageBox]::Show("Error durante la preparación: $_", "Error", 'OK', 'Error')
+                    [System.Windows.Forms.MessageBox]::Show("Error durante la preparacion: $_", "Error", 'OK', 'Error')
                 } finally {
                     
-                    # --- FASE CRÍTICA: RESTAURACIÓN DE PERMISOS ---
-                    # Esto ahora está en 'finally', se ejecuta SIEMPRE, incluso si la importación falla.
+                    # --- FASE CRiTICA: RESTAURACIoN DE PERMISOS ---
+                    # Esto ahora está en 'finally', se ejecuta SIEMPRE, incluso si la importacion falla.
                     
                     $lblStatus.Text = "Asegurando permisos (Restaurando)..."
                     $form.Refresh()
@@ -4158,7 +4174,7 @@ function Show-Tweaks-Offline-GUI {
                             Restore-KeyOwner -KeyPath $targetKey
                             $restoredCount++
                         } else {
-                            # Logueamos si no encontramos la clave para saber por qué no se restauró
+                            # Logueamos si no encontramos la clave para saber por qué no se restauro
                             Write-Log -LogLevel WARN -Message "No se pudo restaurar (no existe): $targetKey"
                         }
                     }
@@ -4456,10 +4472,386 @@ function Show-Tweaks-Offline-GUI {
     [GC]::Collect()
 }
 
+# =================================================================
+#  Modulo GUI de Despliegue (WIM -> VHD/VHDX Bootable)
+# =================================================================
+# --- HELPER PRIVADO: Obtener letra de unidad libre (Z -> A) ---
+function Get-UnusedDriveLetter {
+    # Obtenemos las letras usadas actualmente
+    $used = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Name
+    # Alfabeto invertido (preferimos usar Z, Y, X para montajes temporales)
+    $alphabet = [char[]](90..65) 
+    
+    foreach ($letter in $alphabet) {
+        if ($used -notcontains $letter) {
+            return $letter
+        }
+    }
+    throw "No hay letras de unidad disponibles para montar las particiones temporales."
+}
+
+function Show-Deploy-To-VHD-GUI {
+    # 1. Verificacion de Requisitos
+    if (-not (Get-Command "New-VHD" -ErrorAction SilentlyContinue)) {
+        [System.Windows.Forms.MessageBox]::Show("Este modulo requiere Hyper-V o PowerShell Storage module.", "Error", 'OK', 'Error')
+        return
+    }
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Despliegue WIM a VHDX"
+    $form.Size = New-Object System.Drawing.Size(720, 600)
+    $form.StartPosition = "CenterScreen"
+    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
+    $form.ForeColor = [System.Drawing.Color]::White
+    $form.FormBorderStyle = "FixedDialog"
+    $form.MaximizeBox = $false
+
+    # --- UI SECTIONS ---
+    $grpSource = New-Object System.Windows.Forms.GroupBox
+    $grpSource.Text = " 1. Imagen de Origen "
+    $grpSource.Location = New-Object System.Drawing.Point(20, 15)
+	$grpSource.Size = New-Object System.Drawing.Size(660, 120)
+	$grpSource.ForeColor = [System.Drawing.Color]::Cyan
+    $form.Controls.Add($grpSource)
+
+    $txtWim = New-Object System.Windows.Forms.TextBox
+    $txtWim.Location = "20, 25"
+	$txtWim.Size = "540, 23"
+	$txtWim.ReadOnly = $true
+	$txtWim.BackColor = [System.Drawing.Color]::FromArgb(50,50,50)
+	$txtWim.ForeColor = [System.Drawing.Color]::White
+    $grpSource.Controls.Add($txtWim)
+
+    $btnBrowseWim = New-Object System.Windows.Forms.Button
+    $btnBrowseWim.Text = "..."
+	$btnBrowseWim.Location = "570, 24"
+	$btnBrowseWim.Size = "70, 25"
+	$btnBrowseWim.BackColor = [System.Drawing.Color]::Silver
+	$btnBrowseWim.FlatStyle = "Flat"
+    $grpSource.Controls.Add($btnBrowseWim)
+
+    $lblIdx = New-Object System.Windows.Forms.Label
+    $lblIdx.Text = "Indice:"
+	$lblIdx.Location = "20, 60"
+	$lblIdx.AutoSize = $true
+	$lblIdx.ForeColor = [System.Drawing.Color]::Silver
+    $grpSource.Controls.Add($lblIdx)
+
+    $cmbIndex = New-Object System.Windows.Forms.ComboBox
+    $cmbIndex.Location = "20, 80"
+	$cmbIndex.Size = "620, 25"
+	$cmbIndex.DropDownStyle = "DropDownList"
+	$cmbIndex.BackColor = [System.Drawing.Color]::FromArgb(50,50,50)
+	$cmbIndex.ForeColor = [System.Drawing.Color]::White
+    $grpSource.Controls.Add($cmbIndex)
+
+    $grpDest = New-Object System.Windows.Forms.GroupBox
+    $grpDest.Text = " 2. Configuracion de Disco y Particiones "
+    $grpDest.Location = New-Object System.Drawing.Point(20, 150)
+	$grpDest.Size = New-Object System.Drawing.Size(660, 220)
+	$grpDest.ForeColor = [System.Drawing.Color]::Orange
+    $form.Controls.Add($grpDest)
+
+    $lblVhdPath = New-Object System.Windows.Forms.Label
+    $lblVhdPath.Text = "Ruta VHDX:"
+	$lblVhdPath.Location = "20, 25"
+	$lblVhdPath.AutoSize = $true
+	$lblVhdPath.ForeColor = [System.Drawing.Color]::Silver
+    $grpDest.Controls.Add($lblVhdPath)
+
+    $txtVhd = New-Object System.Windows.Forms.TextBox
+    $txtVhd.Location = "20, 45"
+	$txtVhd.Size = "540, 23"
+	$txtVhd.ReadOnly = $true
+	$txtVhd.BackColor = [System.Drawing.Color]::FromArgb(50,50,50)
+	$txtVhd.ForeColor = [System.Drawing.Color]::White
+    $grpDest.Controls.Add($txtVhd)
+
+    $btnBrowseVhd = New-Object System.Windows.Forms.Button
+    $btnBrowseVhd.Text = "Guardar"
+	$btnBrowseVhd.Location = "570, 44"
+	$btnBrowseVhd.Size = "70, 25"
+	$btnBrowseVhd.BackColor = [System.Drawing.Color]::Silver
+	$btnBrowseVhd.FlatStyle = "Flat"
+    $grpDest.Controls.Add($btnBrowseVhd)
+
+    $lblSize = New-Object System.Windows.Forms.Label
+    $lblSize.Text = "Size Total (GB):"
+	$lblSize.Location = "20, 85"
+	$lblSize.AutoSize = $true
+    $grpDest.Controls.Add($lblSize)
+
+    $numSize = New-Object System.Windows.Forms.NumericUpDown
+    $numSize.Location = "140, 83"
+	$numSize.Size = "80, 25"
+	$numSize.Minimum = 10
+	$numSize.Maximum = 10000
+	$numSize.Value = 60
+    $grpDest.Controls.Add($numSize)
+
+    $chkDynamic = New-Object System.Windows.Forms.CheckBox
+    $chkDynamic.Text = "Expansion Dinamica"
+	$chkDynamic.Location = "250, 85"
+	$chkDynamic.AutoSize = $true
+	$chkDynamic.Checked = $true
+    $grpDest.Controls.Add($chkDynamic)
+
+    $chkUEFI = New-Object System.Windows.Forms.CheckBox
+    $chkUEFI.Text = "Esquema GPT (UEFI)"
+	$chkUEFI.Location = "420, 85"
+	$chkUEFI.AutoSize = $true
+	$chkUEFI.Checked = $true
+	$chkUEFI.ForeColor = [System.Drawing.Color]::LightGreen
+    $grpDest.Controls.Add($chkUEFI)
+
+    $lblPartInfo = New-Object System.Windows.Forms.Label
+    $lblPartInfo.Text = "--- Size de Particiones de Sistema ---"
+    $lblPartInfo.Location = "20, 125"
+	$lblPartInfo.AutoSize = $true
+	$lblPartInfo.ForeColor = [System.Drawing.Color]::Silver
+    $grpDest.Controls.Add($lblPartInfo)
+
+    $lblEfiSize = New-Object System.Windows.Forms.Label
+    $lblEfiSize.Text = "EFI (MB):"
+	$lblEfiSize.Location = "20, 155"
+	$lblEfiSize.AutoSize = $true
+    $grpDest.Controls.Add($lblEfiSize)
+
+    $numEfiSize = New-Object System.Windows.Forms.NumericUpDown
+    $numEfiSize.Location = "140, 153"
+	$numEfiSize.Size = "80, 25"
+	$numEfiSize.Minimum = 50
+	$numEfiSize.Maximum = 2000
+	$numEfiSize.Value = 100
+    $grpDest.Controls.Add($numEfiSize)
+
+    $lblMsrSize = New-Object System.Windows.Forms.Label
+    $lblMsrSize.Text = "MSR (MB):"
+	$lblMsrSize.Location = "250, 155"
+	$lblMsrSize.AutoSize = $true
+    $grpDest.Controls.Add($lblMsrSize)
+
+    $numMsrSize = New-Object System.Windows.Forms.NumericUpDown
+    $numMsrSize.Location = "330, 153"
+	$numMsrSize.Size = "80, 25"
+	$numMsrSize.Minimum = 0
+	$numMsrSize.Maximum = 500
+	$numMsrSize.Value = 16
+    $grpDest.Controls.Add($numMsrSize)
+
+    $chkUEFI.Add_CheckedChanged({
+        if ($chkUEFI.Checked) {
+            $numEfiSize.Value = 100
+            $lblMsrSize.Visible = $true; $numMsrSize.Visible = $true
+            $lblEfiSize.Text = "EFI (MB):"
+        } else {
+            $numEfiSize.Value = 500
+            $lblMsrSize.Visible = $false; $numMsrSize.Visible = $false
+            $lblEfiSize.Text = "Sys. Rsvd (MB):"
+        }
+    })
+
+    $lblStatus = New-Object System.Windows.Forms.Label
+    $lblStatus.Text = "Esperando configuracion..."
+	$lblStatus.Location = "20, 520"
+	$lblStatus.AutoSize = $true
+	$lblStatus.ForeColor = [System.Drawing.Color]::Yellow
+    $form.Controls.Add($lblStatus)
+
+    $btnDeploy = New-Object System.Windows.Forms.Button
+    $btnDeploy.Text = "CREAR VHDX Y DESPLEGAR"
+    $btnDeploy.Location = New-Object System.Drawing.Point(380, 440)
+	$btnDeploy.Size = New-Object System.Drawing.Size(300, 50)
+	$btnDeploy.BackColor = [System.Drawing.Color]::SeaGreen
+	$btnDeploy.ForeColor = [System.Drawing.Color]::White
+	$btnDeploy.FlatStyle = "Flat"
+	$btnDeploy.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+    $form.Controls.Add($btnDeploy)
+
+    $btnBrowseWim.Add_Click({
+        $ofd = New-Object System.Windows.Forms.OpenFileDialog; $ofd.Filter = "Imagenes (*.wim, *.esd)|*.wim;*.esd"
+        if ($ofd.ShowDialog() -eq 'OK') {
+            $txtWim.Text = $ofd.FileName
+            $cmbIndex.Items.Clear()
+            $lblStatus.Text = "Leyendo..."; $form.Refresh()
+            try {
+                $info = Get-WindowsImage -ImagePath $ofd.FileName
+                foreach ($img in $info) { $cmbIndex.Items.Add("[$($img.ImageIndex)] $($img.ImageName)") }
+                if ($cmbIndex.Items.Count -gt 0) { $cmbIndex.SelectedIndex = 0 }
+                $lblStatus.Text = "WIM Cargado."
+            } catch { $lblStatus.Text = "Error leyendo WIM." }
+        }
+    })
+
+    $btnBrowseVhd.Add_Click({
+        $sfd = New-Object System.Windows.Forms.SaveFileDialog; $sfd.Filter = "VHDX (*.vhdx)|*.vhdx|VHD (*.vhd)|*.vhd"
+        if ($sfd.ShowDialog() -eq 'OK') { $txtVhd.Text = $sfd.FileName }
+    })
+
+    # --- LOGICA CORE CORREGIDA ---
+    $btnDeploy.Add_Click({
+        if (-not $txtWim.Text -or -not $txtVhd.Text) { [System.Windows.Forms.MessageBox]::Show("Rutas vacias.", "Error", 'OK', 'Error'); return }
+        
+        $vhdPath = $txtVhd.Text
+        $wimPath = $txtWim.Text
+        $idx = $cmbIndex.SelectedIndex + 1
+        $totalSize = [long]$numSize.Value * 1GB
+        $isDynamic = $chkDynamic.Checked
+        $isGPT = $chkUEFI.Checked
+        $sizeBootMB = [int]$numEfiSize.Value
+        $sizeMsrMB  = [int]$numMsrSize.Value
+
+        if (Test-Path $vhdPath) {
+            if ([System.Windows.Forms.MessageBox]::Show("El VHD existe. Se borrara todo su contenido.`n¿Continuar?", "Confirmar", 'YesNo', 'Warning') -eq 'No') { return }
+            try { Remove-Item $vhdPath -Force -ErrorAction Stop } catch { [System.Windows.Forms.MessageBox]::Show("No se pudo borrar el archivo. ¿Esta en uso?", "Error", 'OK', 'Error'); return }
+        }
+
+        $btnDeploy.Enabled = $false
+        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+
+        try {
+            $lblStatus.Text = "Creando VHD..."
+            $form.Refresh()
+            if ($isDynamic) { New-VHD -Path $vhdPath -SizeBytes $totalSize -Dynamic -ErrorAction Stop | Out-Null }
+            else { New-VHD -Path $vhdPath -SizeBytes $totalSize -Fixed -ErrorAction Stop | Out-Null }
+
+            $disk = Mount-VHD -Path $vhdPath -Passthru -ErrorAction Stop
+            $diskNum = $disk.Number
+
+            $partStyle = if ($isGPT) { "GPT" } else { "MBR" }
+            Initialize-Disk -Number $diskNum -PartitionStyle $partStyle -ErrorAction Stop
+
+            $driveLetterSystem = $null
+            $driveLetterBoot = $null
+
+            # --- PARTICIONADO ROBUSTO ---
+            if ($isGPT) {
+                # GPT: EFI + MSR + WINDOWS
+                $lblStatus.Text = "Particionando GPT..."
+                
+                # 1. EFI
+                $pEFI = New-Partition -DiskNumber $diskNum -Size ($sizeBootMB * 1MB) -GptType "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}" -ErrorAction Stop
+                Format-Volume -Partition $pEFI -FileSystem FAT32 -NewFileSystemLabel "System" -Confirm:$false | Out-Null
+                # Asignacion de Letra Segura
+                if (-not $pEFI.DriveLetter) {
+                    $freeLet = Get-UnusedDriveLetter
+                    Set-Partition -InputObject $pEFI -NewDriveLetter $freeLet -ErrorAction Stop
+                    $driveLetterBoot = "$($freeLet):"
+                } else { $driveLetterBoot = "$($pEFI.DriveLetter):" }
+
+                # 2. MSR
+                if ($sizeMsrMB -gt 0) {
+                    New-Partition -DiskNumber $diskNum -Size ($sizeMsrMB * 1MB) -GptType "{e3c9e316-0b5c-4db8-817d-f92df00215ae}" -ErrorAction Stop | Out-Null
+                }
+
+                # 3. Windows
+                $pWin = New-Partition -DiskNumber $diskNum -UseMaximumSize -ErrorAction Stop
+                Format-Volume -Partition $pWin -FileSystem NTFS -NewFileSystemLabel "Windows" -Confirm:$false | Out-Null
+                # Asignacion de Letra Segura (CRiTICO: AQUI FALLABA ANTES)
+                if (-not $pWin.DriveLetter) {
+                    $freeLet = Get-UnusedDriveLetter
+                    Set-Partition -InputObject $pWin -NewDriveLetter $freeLet -ErrorAction Stop
+                    $driveLetterSystem = "$($freeLet):"
+                } else { $driveLetterSystem = "$($pWin.DriveLetter):" }
+
+            } else {
+                # MBR: SYSTEM RESERVED + WINDOWS
+                $lblStatus.Text = "Particionando MBR..."
+                
+                # 1. System Reserved
+                $pBoot = New-Partition -DiskNumber $diskNum -Size ($sizeBootMB * 1MB) -IsActive -ErrorAction Stop
+                Format-Volume -Partition $pBoot -FileSystem NTFS -NewFileSystemLabel "System Reserved" -Confirm:$false | Out-Null
+                # Asignacion de Letra Segura
+                if (-not $pBoot.DriveLetter) {
+                    $freeLet = Get-UnusedDriveLetter
+                    Set-Partition -InputObject $pBoot -NewDriveLetter $freeLet -ErrorAction Stop
+                    $driveLetterBoot = "$($freeLet):"
+                } else { $driveLetterBoot = "$($pBoot.DriveLetter):" }
+
+                # 2. Windows
+                $pWin = New-Partition -DiskNumber $diskNum -UseMaximumSize -ErrorAction Stop
+                Format-Volume -Partition $pWin -FileSystem NTFS -NewFileSystemLabel "Windows" -Confirm:$false | Out-Null
+                # Asignacion de Letra Segura
+                if (-not $pWin.DriveLetter) {
+                    $freeLet = Get-UnusedDriveLetter
+                    Set-Partition -InputObject $pWin -NewDriveLetter $freeLet -ErrorAction Stop
+                    $driveLetterSystem = "$($freeLet):"
+                } else { $driveLetterSystem = "$($pWin.DriveLetter):" }
+            }
+
+            # 4. APLICACION IMAGEN
+            $lblStatus.Text = "Desplegando imagen a $driveLetterSystem..."
+            $form.Refresh()
+            # Ahora driveLetterSystem está garantizado que tiene letra
+            Expand-WindowsImage -ImagePath $wimPath -Index $idx -ApplyPath $driveLetterSystem -ErrorAction Stop
+
+            # 5. BOOT
+            $lblStatus.Text = "Configurando arranque..."
+            $fw = if ($isGPT) { "UEFI" } else { "BIOS" }
+            $proc = Start-Process "bcdboot.exe" -ArgumentList "$driveLetterSystem\Windows /s $driveLetterBoot /f $fw" -Wait -NoNewWindow -PassThru
+            if ($proc.ExitCode -ne 0) { throw "BCDBOOT fallo (Code: $($proc.ExitCode))" }
+
+            # 6. FIN
+            $lblStatus.Text = "Desmontando..."
+            $form.Refresh()
+            Dismount-VHD -Path $vhdPath -ErrorAction Stop
+            
+            $lblStatus.Text = "Listo."
+            [System.Windows.Forms.MessageBox]::Show("Despliegue completado con exito.", "Exito", 'OK', 'Information')
+
+        } catch {
+            $lblStatus.Text = "Error Critico."
+            Write-Warning "Fallo despliegue: $_"
+            [System.Windows.Forms.MessageBox]::Show("Error Critico:`n$_", "Error", 'OK', 'Error')
+            try { Dismount-VHD -Path $vhdPath -ErrorAction SilentlyContinue } catch {}
+        } finally {
+            $btnDeploy.Enabled = $true; $form.Cursor = [System.Windows.Forms.Cursors]::Default
+        }
+    })
+
+    # 1. Configuracion del motor de ToolTips
+    $toolTip = New-Object System.Windows.Forms.ToolTip
+    $toolTip.AutoPopDelay = 8000   # Mantiene el mensaje visible 8 segundos
+    $toolTip.InitialDelay = 500    # Tarda 0.5s en aparecer (evita parpadeos al mover rápido)
+    $toolTip.ReshowDelay = 500     # Tiempo para reaparecer en otro control
+    $toolTip.ShowAlways = $true    # Mostrar incluso si la ventana no tiene el foco
+    $toolTip.IsBalloon = $false    # $true para estilo "globo", $false para rectángulo clásico
+
+    # 2. Asignacion de descripciones a los controles existentes
+
+    # --- Grupo Origen ---
+    $toolTip.SetToolTip($btnBrowseWim, "Haz clic para seleccionar el archivo de imagen (.wim o .esd) que contiene el instalador de Windows.")
+    $toolTip.SetToolTip($cmbIndex, "Selecciona la edicion de Windows a instalar (ej. Home, Pro, Enterprise).`nCada indice es una version diferente dentro del mismo archivo.")
+
+    # --- Grupo Destino ---
+    $toolTip.SetToolTip($btnBrowseVhd, "Define donde se guardará el nuevo archivo de disco virtual (.vhdx o .vhd).")
+    $toolTip.SetToolTip($txtVhd, "Ruta completa del archivo de disco virtual de destino.")
+    
+    # --- Configuracion de Disco ---
+    $toolTip.SetToolTip($numSize, "Size maximo que podrá tener el disco virtual (en Gigabytes).")
+    
+    $toolTip.SetToolTip($chkDynamic, "Marcado (Recomendado): El archivo empieza pequeño y crece según guardes datos.`nDesmarcado (Fixed): El archivo ocupa todo el Size (GB) inmediatamente (Mejor rendimiento, ocupa más espacio).")
+    
+    $toolTip.SetToolTip($chkUEFI, "Marcado (GPT): Para PCs modernos con UEFI. Crea particiones EFI y MSR.`nDesmarcado (MBR): Para PCs antiguos con BIOS Legacy. Crea particion 'System Reserved'.")
+
+    # --- Configuracion de Particiones (Avanzado) ---
+    $toolTip.SetToolTip($numEfiSize, "Size de la particion de arranque (EFI o System Reserved).`n100MB es el estándar recomendado.")
+    $toolTip.SetToolTip($numMsrSize, "Size de la particion MSR (Microsoft Reserved).`nSolo aplica en discos GPT/UEFI.")
+
+    # --- Boton de Accion ---
+    $toolTip.SetToolTip($btnDeploy, "ADVERTENCIA: Iniciara el proceso de creacion, formateo y aplicacion de imagen.`nSi el archivo VHD existe, sera sobrescrito.")
+
+    $form.ShowDialog() | Out-Null
+    $form.Dispose()
+}
+
 function Check-And-Repair-Mounts {
     Write-Host "Verificando consistencia del entorno WIM..." -ForegroundColor DarkGray
     
-    # 1. Obtener información de DISM
+    # 1. Obtener informacion de DISM
     $dismInfo = dism /Get-MountedImageInfo 2>$null
     
     # 2. Detectar si nuestra carpeta de montaje está en estado "Needs Remount" o "Invalid"
@@ -4476,7 +4868,7 @@ function Check-And-Repair-Mounts {
         [System.Console]::Beep(500, 300)
         Add-Type -AssemblyName System.Windows.Forms
         
-        # MENSAJE ESTILO DISM++ (Reparar sesión existente)
+        # MENSAJE ESTILO DISM++ (Reparar sesion existente)
         $msgResult = [System.Windows.Forms.MessageBox]::Show(
             "La imagen montada en '$($Script:MOUNT_DIR)' parece estar danada (posible cierre inesperado).`n`n¿Quieres intentar RECUPERAR la sesion (Remount-Image)?`n`n[Si] = Intentar reconectar y salvar cambios.`n[No] = Eliminar punto de montaje (Cleanup-Wim).", 
             "Recuperacion de Imagen", 
@@ -4541,9 +4933,9 @@ function Main-Menu {
         Write-Host ""
         Write-Host "   [2] Cambiar Edicion de Windows" 
         Write-Host ""
-        Write-Host "   [3] Integrar Drivers (Controladores)" -ForegroundColor Green # NUEVO
+        Write-Host "   [3] Integrar Drivers (Controladores)" -ForegroundColor Green
         Write-Host ""
-        Write-Host "   [4] Eliminar Bloatware (Apps)" -ForegroundColor Green # NUEVO
+        Write-Host "   [4] Eliminar Bloatware (Apps)" -ForegroundColor Green
         Write-Host ""
         Write-Host "   [5] Servicios del Sistema" -ForegroundColor Magenta
         Write-Host "       (Deshabilita servicios innecesarios)" -ForegroundColor Gray
@@ -4553,7 +4945,10 @@ function Main-Menu {
 		Write-Host ""
         Write-Host "   [7] Herramientas de Limpieza y Reparacion" -ForegroundColor White
         Write-Host ""
-		Write-Host "   [8] Configurar Rutas de Trabajo" -ForegroundColor Yellow
+		Write-Host "   [8] Despliegue: WIM a VHD/VHDX" -ForegroundColor Cyan
+        Write-Host "       (Crea discos virtuales arrancables desde una imagen)" -ForegroundColor Gray
+        Write-Host ""
+		Write-Host "   [9] Configurar Rutas de Trabajo" -ForegroundColor Yellow
         Write-Host "-------------------------------------------------------"
         Write-Host "   [S] Salir" -ForegroundColor Red
         Write-Host ""
@@ -4569,8 +4964,9 @@ function Main-Menu {
             "5" { if ($Script:IMAGE_MOUNTED) { Show-Services-Offline-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
             "6" { if ($Script:IMAGE_MOUNTED) { Show-Tweaks-Offline-GUI } else { Write-Warning "Monta una imagen primero."; Pause } }
             "7" { Limpieza-Menu }
-            "8" { Show-ConfigMenu }
-            "S" { 
+			"8" { Show-Deploy-To-VHD-GUI }
+            "9" { Show-ConfigMenu }
+			"S" { 
                 Write-Host "Saliendo..."
                 Write-Log -LogLevel INFO -Message "Script cerrado."
                 exit 
@@ -4590,7 +4986,7 @@ Write-Host "Verificando imagenes montadas..." -ForegroundColor Gray
 
 # --- PASO 1: DETECCION WIM/ESD (DISM) ---
 try {
-    # Capturamos salida a archivo para evitar problemas de codificación
+    # Capturamos salida a archivo para evitar problemas de codificacion
     dism /get-mountedimageinfo 2>$null | Out-File -FilePath $TEMP_DISM_OUT -Encoding utf8
     $mountInfo = Get-Content -Path $TEMP_DISM_OUT -Encoding utf8 -ErrorAction SilentlyContinue
     
@@ -4600,7 +4996,7 @@ try {
     if ($mountDirLine) {
         $foundPath = ($mountDirLine.Line -split ':', 2)[1].Trim()
         
-        # Validación extra: DISM a veces reporta carpetas que ya no existen
+        # Validacion extra: DISM a veces reporta carpetas que ya no existen
         if (Test-Path $foundPath) {
             $Script:IMAGE_MOUNTED = 1
             $Script:MOUNT_DIR = $foundPath
@@ -4649,7 +5045,7 @@ if ($Script:IMAGE_MOUNTED -eq 0) {
                     $Script:MOUNTED_INDEX = $part.PartitionNumber
                     
                     # Intentamos obtener la ruta del archivo .vhdx real
-                    # (Requiere módulo Hyper-V o permisos elevados WMI, intentamos ser tolerantes a fallos)
+                    # (Requiere modulo Hyper-V o permisos elevados WMI, intentamos ser tolerantes a fallos)
                     try {
                         if (Get-Command Get-VHD -ErrorAction SilentlyContinue) {
                             $vhdData = Get-VHD -DiskNumber $disk.Number -ErrorAction Stop
@@ -4681,13 +5077,18 @@ if ($Script:IMAGE_MOUNTED -eq 0) {
     Write-Host "Imagen WIM encontrada: $($Script:WIM_FILE_PATH)" -ForegroundColor Yellow
     Write-Host "Indice: $($Script:MOUNTED_INDEX) | Montada en: $($Script:MOUNT_DIR)" -ForegroundColor Yellow
     
-    # Limpieza preventiva de hives huérfanos si se detectó un montaje previo
+    # Limpieza preventiva de hives huérfanos si se detecto un montaje previo
     Unmount-Hives 
     [GC]::Collect()
 }
 
-Ensure-WorkingDirectories
+# 1. Cargar configuración y definir rutas
+Ensure-WorkingDirectories 
 
+# 2. Limpieza preventiva
+Initialize-ScratchSpace
+
+# 3. Verificar estado de montajes anteriores
 Check-And-Repair-Mounts
 
 # =============================================
@@ -4698,7 +5099,7 @@ $OnExitScript = {
     # Solo intentamos desmontar si detectamos que se quedaron montados
     if (Test-Path "Registry::HKLM\OfflineSystem") {
         Write-Host "`n[EVENTO SALIDA] Detectado cierre inesperado. Limpiando Hives..." -ForegroundColor Red
-        # Invocamos la lógica de desmontaje directamente (sin llamar a la función para evitar conflictos de scope)
+        # Invocamos la logica de desmontaje directamente (sin llamar a la funcion para evitar conflictos de scope)
         $hives = @("HKLM\OfflineSystem", "HKLM\OfflineSoftware", "HKLM\OfflineComponents", "HKLM\OfflineUser", "HKLM\OfflineUserClasses")
         foreach ($h in $hives) { 
             if (Test-Path "Registry::$h") { reg unload $h 2>$null }
@@ -4713,8 +5114,44 @@ try {
     Main-Menu
 }
 catch {
-    Write-Host "[CRITICAL ERROR] El script ha fallado inesperadamente: $_"
-    Write-Log -LogLevel ERROR -Message "CRASH DETECTADO: $_"
+    # --- MEJORA: Logging Detallado de Errores (Stack Trace) ---
+    $ErrorActionPreference = "Continue" # Asegurar que podemos procesar el error
+    
+    # 1. Capturar detalles técnicos
+    $ex = $_.Exception
+    $line = $_.InvocationInfo.ScriptLineNumber
+    $cmd = $_.InvocationInfo.MyCommand
+    $stack = $_.ScriptStackTrace
+
+    # 2. Formatear mensaje para el usuario (Limpio)
+    Clear-Host
+    Write-Host "=======================================================" -ForegroundColor Red
+    Write-Host "             ¡ERROR CRITICO DEL SISTEMA!               " -ForegroundColor Red
+    Write-Host "=======================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Ha ocurrido un error inesperado que detuvo la ejecucion." -ForegroundColor Gray
+    Write-Host "Error: " -NoNewline; Write-Host $_.ToString() -ForegroundColor Yellow
+    Write-Host "Linea: " -NoNewline; Write-Host $line -ForegroundColor Cyan
+    Write-Host ""
+
+    # 3. Escribir Log Técnico Completo (Para el SysAdmin)
+    $logPayload = @"
+CRASH REPORT
+--------------------------------------------------
+Timestamp : $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+Error     : $($_.ToString())
+Command   : $cmd
+Line      : $line
+Category  : $($_.CategoryInfo.ToString())
+Stack Tr. : 
+$stack
+--------------------------------------------------
+"@
+    Write-Log -LogLevel ERROR -Message $logPayload
+
+    # 4. Opción de recuperación
+    Write-Host "El detalle completo se ha guardado en el archivo de registro." -ForegroundColor Gray
+    Write-Warning "Se recomienda desmontar Hives y limpiar carpetas antes de reintentar."
     Pause
 }
 finally {
@@ -4724,8 +5161,8 @@ finally {
     # 1. Asegurar descarga de Hives
     Unmount-Hives
     
-    # 2. Desregistrar el evento para no dejar basura en la sesión de PS
+    # 2. Desregistrar el evento para no dejar basura en la sesion de PS
     Unregister-Event -SourceIdentifier PowerShell.Exiting -ErrorAction SilentlyContinue
     
-    Write-Log -LogLevel INFO -Message "Cierre de sesión completado."
+    Write-Log -LogLevel INFO -Message "Cierre de sesion completado."
 }
