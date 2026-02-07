@@ -1,4 +1,4 @@
-# AdminImagenOffline V1.4.5 by SOFTMAXTER
+# AdminImagenOffline V1.4.6 by SOFTMAXTER
 
 **AdminImagenOffline** es un completo script en PowerShell, diseñado para simplificar la administración y el mantenimiento de imágenes de instalación de Windows (`.wim`, `.esd`, `.vhd/vhdx`). El script encapsula complejas operaciones de `DISM`, manipulación del Registro y otras herramientas del sistema en una interfaz de menús interactiva y fácil de usar.
 
@@ -6,29 +6,31 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ## Características Principales
 
-* **Interfaz Híbrida (Consola + GUI)**: Combina la rapidez de la consola para operaciones básicas con interfaces gráficas (Windows Forms) modernas para la gestión de drivers, servicios, bloatware, despliegue y registro.
-* **Auto-Actualizador**: El script busca automáticamente nuevas versiones en GitHub al iniciar y ofrece al usuario la posibilidad de actualizarse.
+* **Interfaz Híbrida (Consola + GUI)**: Combina la rapidez de la consola para operaciones básicas con interfaces gráficas (Windows Forms) modernas para la gestión de drivers, servicios, bloatware, despliegue, metadatos y registro.
+* **Auto-Actualizador**: El script busca automáticamente nuevas versiones en GitHub al iniciar y ofrece al usuario la posibilidad de actualizarse mediante un módulo externo seguro.
 * **Configuración Persistente**: Guarda las rutas de trabajo (Directorio de Montaje y Directorio Temporal) en un archivo `config.json` para que las preferencias del usuario sean permanentes.
 * **Robustez y Seguridad**:
     * **Protección de Hives**: Implementa limpieza de memoria (`GC`) y pausas de seguridad para evitar la corrupción del registro al desmontar.
-    * **Logging Detallado**: Sistema de reporte de errores con "Stack Trace" completo para facilitar el diagnóstico de fallos críticos.
+    * **Logging Detallado**: Sistema de reporte de errores con "Stack Trace" completo para facilitar el diagnóstico de fallos críticos en la carpeta `Logs`.
     * **Saneamiento Automático**: Limpieza proactiva del directorio temporal (`Scratch`) al inicio para evitar errores de espacio o archivos corruptos.
-    * **Tooltips Informativos**: Ayuda contextual visual al pasar el cursor sobre opciones complejas en las interfaces gráficas.
+    * **Tablero de Estado (Dashboard)**: Muestra en tiempo real la información de la imagen montada (Nombre, Versión, Arquitectura, Directorio) en el menú principal.
 * **Detección Automática**: Verifica al inicio si ya existe una imagen montada en el sistema (WIM o VHD) y carga su información dinámicamente.
-* **Gestión de Imágenes**: Montaje, desmontaje (con descartes), guardado de cambios (commit/append) y recarga rápida. Soporte completo para montar y editar archivos **VHD/VHDX** directamente.
-* **Despliegue a VHD**: Nueva herramienta para crear discos virtuales arrancables desde un WIM, configurando particiones (GPT/UEFI o MBR/BIOS) automáticamente.
-* **Edición de Índices WIM**: Exportación y eliminación de índices específicos.
+* **Gestión de Imágenes**: Montaje, desmontaje (con descartes), guardado de cambios (commit/append/guardar como nuevo WIM) y recarga rápida. Soporte completo para montar y editar archivos **VHD/VHDX** directamente.
+* **Editor de Metadatos WIM**: Interfaz gráfica dedicada para editar el Nombre, Descripción y Nombre Mostrado de los índices de una imagen WIM.
+* **Creación de Medios**:
+    * **Despliegue a VHD**: Herramienta para crear discos virtuales arrancables desde un WIM, configurando particiones (GPT/UEFI o MBR/BIOS) automáticamente.
+    * **Generador de ISO**: Crea imágenes ISO arrancables (Legacy/UEFI) utilizando `oscdimg`, con soporte para inyección automática de archivos desatendidos.
 * **Conversión de Formatos**: ESD a WIM y VHD/VHDX a WIM.
-* **Cambio de Edición de Windows**: Detección y cambio de edición (ej. Home a Pro) offline.
+* **Cambio de Edición de Windows**: Detección y cambio de edición (ej. Home a Pro) offline con advertencias de seguridad para VHDs.
 * **Gestión Avanzada de Drivers**:
-    * **Inyector Flexible**: Interfaz que permite cargar carpetas recursivamente o agregar archivos `.inf` individuales. Incluye detección precisa por **Versión** y **Clase** para evitar duplicados. Actualiza la caché interna tras la inyección.
+    * **Inyector Flexible**: Interfaz que permite cargar carpetas recursivamente o agregar archivos `.inf` individuales. Incluye detección precisa por **Versión** y **Clase** para evitar duplicados.
     * **Desinstalador de Drivers**: Lista los drivers de terceros (OEM) instalados en la imagen y permite su eliminación selectiva.
-* **Eliminación de Bloatware**: Interfaz gráfica con clasificación por colores (Verde=Seguro, Naranja=Recomendado, Blanco=Otros) para eliminar aplicaciones preinstaladas (Appx).
-* **Optimización de Servicios**: Permite deshabilitar servicios del sistema innecesarios organizados por categorías. Incluye función para **Restaurar** valores originales.
-* **Tweaks y Registro Offline**:
-    * **Gestor Nativo**: Aplica ajustes de rendimiento y privacidad escribiendo directamente en el registro offline. Permite **Restaurar** valores por defecto.
-    * **Importador .REG Inteligente**: Permite importar archivos `.reg` externos con traducción automática de rutas (ej. `HKEY_CLASSES_ROOT` a `OfflineSoftware\Classes`).
-    * **Vista Previa**: Muestra una comparativa de valores antes de aplicar los cambios.
+* **Personalización Completa**:
+    * **Eliminación de Bloatware**: Interfaz gráfica con clasificación por colores para eliminar aplicaciones preinstaladas (Appx).
+    * **Gestor de Características (Features)**: Habilita o deshabilita componentes de Windows (IIS, .NET, Hyper-V, etc.) con una interfaz visual.
+    * **Optimización de Servicios**: Permite deshabilitar servicios del sistema innecesarios organizados por categorías. Incluye función para **Restaurar** valores originales.
+    * **Tweaks y Registro Offline**: Gestor nativo para aplicar ajustes de rendimiento y privacidad. Incluye un **Importador .REG Inteligente** con traducción automática de rutas y vista previa.
+    * **Automatización OOBE (Unattend.xml)**: Generador integrado para crear archivos de respuesta que configuran usuario, saltan requisitos de TPM/RAM (Windows 11), ocultan EULA y configuran privacidad automáticamente.
 * **Suite de Limpieza y Reparación**: `CheckHealth`, `ScanHealth`, `RestoreHealth` (con soporte para fuente WIM alternativa), `SFC` offline y limpieza de componentes (`ResetBase`).
 
 ---
@@ -39,16 +41,17 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 * PowerShell 5.1 o superior.
 * Privilegios de Administrador para ejecutar el script.
 * Módulo de Hyper-V habilitado (Recomendado para operaciones con VHD).
+* Kit de implementación (ADK) instalado o `oscdimg.exe` disponible en la carpeta `Tools` (para la creación de ISOs).
 * Conexión a internet (opcional, para el auto-actualizador).
 
 ---
 
 ## Modo de Uso
 
-1.  Descarga los archivos. El script es flexible con la estructura de carpetas, pero se recomienda mantener `Run.bat` junto a `AdminImagenOffline.ps1` con el script dentro de una subcarpeta `Script`.
+1.  Descarga los archivos. Se recomienda mantener `Run.bat` junto a `AdminImagenOffline.ps1` (o dentro de una subcarpeta `Script` si usas la estructura antigua, aunque el script detecta la ruta actual).
 2.  Haz clic derecho sobre el archivo `Run.bat` y selecciona **"Ejecutar como administrador"**.
 3.  Sigue las instrucciones en pantalla.
-4.  Si es la primera ejecución, ve al menú **[9] Configurar Rutas de Trabajo** para definir tus directorios.
+4.  Si es la primera ejecución, ve al menú **[7] Configuración** para definir tus directorios de trabajo.
 
 ---
 
@@ -56,69 +59,42 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ### Menú Principal
 
-* **1. Gestionar Imagen**: Operaciones base de WIM (Montar, Guardar, Exportar, Convertir).
-* **2. Cambiar Edicion de Windows**: Actualización de edición (ej. Home -> Pro).
-* **3. Integrar Drivers (Controladores)**: Herramientas GUI para añadir o quitar drivers.
-* **4. Eliminar Bloatware (Apps)**: Herramienta GUI para borrar aplicaciones Appx.
-* **5. Servicios del Sistema**: Herramienta GUI para deshabilitar o restaurar servicios.
-* **6. Tweaks y Registro**: Herramienta GUI para aplicar optimizaciones e importar archivos .reg.
-* **7. Herramientas de Limpieza**: Utilidades de reparación (DISM/SFC).
-* **8. Despliegue: WIM a VHD/VHDX**: Herramienta de creación de discos virtuales bootables.
-* **9. Configurar Rutas de Trabajo**: Configuración de directorios de montaje y temporales.
+* **1. Gestión de Imagen**: Operaciones base de WIM (Montar, Guardar, Editar Metadatos, Editar Índices).
+* **2. Convertir Formatos**: Conversión de ESD a WIM y VHD a WIM.
+* **3. Drivers (Inyectar/Eliminar)**: Herramientas GUI para gestión de controladores.
+* **4. Personalización**: Centro de ajustes (Apps, Features, Servicios, Tweaks, Unattend).
+* **5. Limpieza y Reparación**: Utilidades de mantenimiento (DISM/SFC).
+* **6. Crear Medio de Instalación**: Submenú para desplegar a VHD o crear ISO booteable.
+* **7. Configuración**: Configuración de directorios de montaje y temporales.
+* **8. Cambiar Edición**: Actualización de edición (ej. Home -> Pro).
 
-### 3. Integrar Drivers (Controladores)
+### 1. Gestión de Imagen
 
-* **1. Inyectar Drivers (Instalacion Inteligente)**:
-    * **Carga Flexible**: Usa el botón `[CARPETA] Cargar...` para escanear directorios completos o `+ Agregar Archivo .INF` para archivos sueltos.
-    * **Análisis Profundo**: Lee la versión interna (`DriverVer`) de cada archivo `.inf` y la compara con los drivers ya instalados en la imagen.
-    * **Visualización**: Muestra una tabla detallada con Estado, Nombre, Clase y **Versión**. Marca en amarillo los drivers ya existentes.
-* **2. Desinstalar Drivers**: Escanea el almacén de drivers de la imagen y lista los controladores de terceros (renombrados como `oemXX.inf`). Permite seleccionar y eliminar drivers problemáticos u obsoletos.
+Incluye las operaciones fundamentales y herramientas avanzadas como:
+* **Editar Info/Metadatos**: Una GUI exclusiva para renombrar las imágenes internas del WIM y cambiar sus descripciones.
+* **Editar Índices**: Exportar un índice específico a un nuevo archivo o eliminar índices para ahorrar espacio.
 
-### 4. Eliminar Bloatware (Apps)
+### 4. Personalización (Submenú)
 
-Abre una interfaz gráfica que lista todas las aplicaciones `AppxProvisionedPackage` detectadas en la imagen.
-* **Código de Colores**:
-    * **Verde**: Apps del sistema (Calculadora, Fotos, Store). No se recomienda borrar.
-    * **Naranja**: Bloatware común recomendado para borrar.
-    * **Blanco**: Otras apps.
-* Permite selección múltiple y eliminación segura.
+Este es el núcleo de la optimización:
+* **Eliminar Bloatware (Apps)**: Gestor visual para borrar aplicaciones Appx con código de colores (Verde=Seguro, Naranja=Recomendado).
+* **Características de Windows (Features)**: Nueva interfaz para activar/desactivar características opcionales del sistema (como SMB1, .NET Framework 3.5, etc.) offline.
+* **Servicios del Sistema**: Interfaz por pestañas para deshabilitar servicios masivamente o restaurarlos.
+* **Tweaks y Registro**: Aplica parches de registro predefinidos o importa tus propios archivos `.reg` con traducción automática de rutas (HKEY_LOCAL_MACHINE -> HKLM\OfflineSystem).
+* **Automatización OOBE (Unattend)**: Generador avanzado que inyecta un archivo `unattend.xml` en la imagen para automatizar la instalación, crear usuario local admin, y aplicar hacks para instalar Windows 11 en hardware no soportado (BypassTPM/SecureBoot).
 
-### 5. Servicios del Sistema
+### 6. Crear Medio de Instalación (ISO / USB / VHD)
 
-Carga los hives del registro y muestra una interfaz con pestañas por categorías (Estandar, Avanzado, Telemetría, etc.).
-* Lee el estado actual (`Start`) de cada servicio en la imagen offline.
-* Permite deshabilitar servicios masivamente o **Restaurar** su configuración original si te has equivocado.
-
-### 6. Tweaks y Registro
-
-Un potente gestor de registro en modo nativo.
-* **Pestañas de Categorías**: Rendimiento, Privacidad, UI, etc.
-* **Estado en Tiempo Real**: Muestra si un ajuste está `ACTIVO` (Cian) o `INACTIVO` (Blanco) leyendo directamente el hive montado.
-* **Botones Globales**: Permite "Aplicar Selección" o "Restaurar Valores" para revertir cambios.
-* **Importador .REG**: Analiza, traduce rutas y muestra vista previa antes de importar claves externas.
-
-### 8. Despliegue: WIM a VHD/VHDX
-
-Interfaz gráfica diseñada para crear entornos "Windows to Go" o discos virtuales para máquinas virtuales.
-* **Origen**: Selecciona tu WIM y el índice deseado.
-* **Destino**: Crea un archivo `.vhdx` o `.vhd` nuevo.
-* **Configuración Automática**:
-    * Tamaño del disco y tipo (Dinámico/Fijo).
-    * Esquema de particiones: **GPT (UEFI)** o **MBR (Legacy BIOS)**.
-    * Creación automática de particiones de sistema (EFI/System Reserved) y formateo.
-    * Aplicación de la imagen y configuración del arranque (`BCDBOOT`).
+* **1. Despliegue a VHD**: Herramienta para crear discos virtuales arrancables desde un WIM. Configura automáticamente particiones GPT/UEFI o MBR/BIOS y aplica la imagen.
+* **2. Crear ISO Booteable**: Utilidad gráfica que usa `oscdimg` para empaquetar tu carpeta de distribución de Windows en una ISO válida (BIOS/UEFI). Permite inyectar `autounattend.xml` en la raíz.
 
 ### 7. Herramientas de Limpieza
 
-Requiere una imagen montada. Ofrece un menú con las siguientes herramientas:
-
-* **1. Verificar Salud de Imagen**: `DISM /... /CheckHealth`.
-* **2. Escaneo Avanzado de Salud**: `DISM /... /ScanHealth`.
-* **3. Reparar Imagen**: `DISM /... /RestoreHealth` (con lógica de fallback a fuente WIM).
-* **4. Reparación SFC (Offline)**: Ejecuta `SFC /scannow` redirigiendo los directorios.
-* **5. Analizar Almacen de Componentes**: `DISM /... /AnalyzeComponentStore`.
-* **6. Limpieza de Componentes**: `DISM /... /StartComponentCleanup /ResetBase`.
-* **7. Ejecutar TODO**: Secuencia automática de mantenimiento completo con comprobaciones de seguridad.
+Requiere una imagen montada. Ofrece:
+* **Diagnóstico**: `CheckHealth` y `ScanHealth`.
+* **Reparación**: `RestoreHealth` (con lógica de fallback que solicita un WIM fuente si falla la reparación automática) y `SFC` offline.
+* **Optimización**: Análisis y limpieza del almacén de componentes (`ResetBase`) para reducir el tamaño de la imagen.
+* **Ejecutar TODO**: Secuencia automática de mantenimiento completo.
 
 ## Notas Importantes
 
@@ -135,7 +111,7 @@ Este script realiza operaciones avanzadas que modifican archivos de imagen de Wi
 ## Autor y Colaboradores
 
 * **Autor Principal**: SOFTMAXTER
-* **Análisis y refinamiento de código**: Realizado en colaboración con **Gemini**, para garantizar calidad, seguridad y compatibilidad internacional del script.
+* **Colaboración Técnica**: Optimización de código, lógica de interfaces gráficas y robustez general refinadas con asistencia de IA avanzada.
 
 ---
 ### Cómo Contribuir
@@ -147,4 +123,3 @@ Si deseas contribuir al desarrollo de este script:
 3.  Realiza tus cambios y haz commit (`git commit -am 'Añade nueva funcionalidad'`).
 4.  Haz Push a la rama (`git push origin feature/nueva-funcionalidad`).
 5.  Abre un Pull Request.
-
