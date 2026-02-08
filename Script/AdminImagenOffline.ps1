@@ -16,6 +16,9 @@
 # =================================================================
 $script:Version = "1.4.6"
 
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
 function Write-Log {
     [CmdletBinding()]
     param(
@@ -6027,29 +6030,31 @@ function Main-Menu {
         Write-Host " [ GESTION DE IMAGEN ]" -ForegroundColor Yellow
         Write-Host "   1. Montar / Desmontar / Guardar Imagen" 
         Write-Host "   2. Convertir Formatos (ESD -> WIM, VHD -> WIM)"
-        Write-Host "   6. Crear Medio de Instalacion (ISO / USB)"
+        Write-Host "   3. Crear Medio de Instalacion (ISO / USB)"
         Write-Host ""
 
         Write-Host " [ INGENIERIA & AJUSTES ]" -ForegroundColor Yellow
         if ($Script:IMAGE_MOUNTED -gt 0) {
-            Write-Host "   3. Drivers (Inyectar/Eliminar)" -ForegroundColor White
-            Write-Host "   4. Personalizacion (Apps, Tweaks, Unattend.xml)" -ForegroundColor White
-            Write-Host "   5. Limpieza y Reparacion (DISM/SFC)" -ForegroundColor White
-            Write-Host "   8. Cambiar Edicion (Home -> Pro)" -ForegroundColor White
+            Write-Host "   4. Drivers (Inyectar/Eliminar)" -ForegroundColor White
+            Write-Host "   5. Personalizacion (Apps, Tweaks, Unattend.xml)" -ForegroundColor White
+            Write-Host "   6. Limpieza y Reparacion (DISM/SFC)" -ForegroundColor White
+            Write-Host "   7. Cambiar Edicion (Home -> Pro)" -ForegroundColor White
         } else {
             # Opciones deshabilitadas visualmente
-            Write-Host "   3. Drivers (Requiere Montaje)" -ForegroundColor DarkGray
-            Write-Host "   4. Personalizacion (Requiere Montaje)" -ForegroundColor DarkGray
-            Write-Host "   5. Limpieza y Reparacion (Requiere Montaje)" -ForegroundColor DarkGray
-            Write-Host "   8. Cambiar Edicion (Requiere Montaje)" -ForegroundColor DarkGray
+            Write-Host "   4. Drivers (Requiere Montaje)" -ForegroundColor DarkGray
+            Write-Host "   5. Personalizacion (Requiere Montaje)" -ForegroundColor DarkGray
+            Write-Host "   6. Limpieza y Reparacion (Requiere Montaje)" -ForegroundColor DarkGray
+            Write-Host "   7. Cambiar Edicion (Requiere Montaje)" -ForegroundColor DarkGray
         }
         Write-Host ""
         
         Write-Host " [ SISTEMA ]" -ForegroundColor Yellow
-        Write-Host "   7. Configuracion (Rutas)"
-        Write-Host "   S. Salir" -ForegroundColor Red
-        Write-Host ""
+        Write-Host "   8. Configuracion (Rutas)"
+		Write-Host ""
         Write-Host "--------------------------------------------------------------------------------"
+        Write-Host "   [L] Ver Logs   [H] Ayuda/Info   [S] Salir" -ForegroundColor Gray
+		Write-Host ""
+        
         
         $prompt = "Seleccione una opcion"
         if ($Script:IMAGE_MOUNTED -gt 0) { $prompt = "Comando (Imagen Lista)" }
@@ -6060,19 +6065,37 @@ function Main-Menu {
         switch ($opcionM.ToUpper()) {
             "1" { Image-Management-Menu }
             "2" { Convert-Image-Menu }
-            "3" { if ($Script:IMAGE_MOUNTED) { Drivers-Menu } else { Show-Mount-Warning } }
-            "4" { if ($Script:IMAGE_MOUNTED) { Customization-Menu } else { Show-Mount-Warning } }
-            "5" { if ($Script:IMAGE_MOUNTED) { Limpieza-Menu } else { Show-Mount-Warning } }
-            "6" { 
+			"3" { 
                 Clear-Host; Write-Host "--- DESPLIEGUE ---" -ForegroundColor Cyan
                 Write-Host "1. Despliegue a VHD (Instalacion Nativa Virtual)"
                 Write-Host "2. Crear ISO Booteable (Instalador Clasico)"
                 Write-Host "V. Volver"
                 $d = Read-Host "Elige"; 
                 if($d -eq 1){Show-Deploy-To-VHD-GUI} elseif($d -eq 2){Show-IsoMaker-GUI}
-            } 
-            "7" { Show-ConfigMenu }
-            "8" { if ($Script:IMAGE_MOUNTED) { Cambio-Edicion-Menu } else { Show-Mount-Warning } }
+            }
+            "4" { if ($Script:IMAGE_MOUNTED) { Drivers-Menu } else { Show-Mount-Warning } }
+            "5" { if ($Script:IMAGE_MOUNTED) { Customization-Menu } else { Show-Mount-Warning } }
+            "6" { if ($Script:IMAGE_MOUNTED) { Limpieza-Menu } else { Show-Mount-Warning } }
+            "7" { if ($Script:IMAGE_MOUNTED) { Cambio-Edicion-Menu } else { Show-Mount-Warning } }
+			"8" { Show-ConfigMenu }
+			'L' {
+                $logFile = Join-Path (Split-Path -Parent $PSScriptRoot) "Logs\Registro.log"
+                if (Test-Path $logFile) {
+                    Start-Process notepad.exe -ArgumentList $logFile
+                    $statusMessage = "Abriendo logs..."; $statusColor = "Green"
+                } else {
+                    $statusMessage = "Error: El archivo de log aun no existe."; $statusColor = "Red"
+                }
+            }
+            'H' {
+               $msg = "Aegis Phoenix Suite v$($script:Version)`n" +
+                      "Desarrollado por SOFTMAXTER`n`n" +
+                      "Email: softmaxter@hotmail.com`n" +
+                      "Blog: softmaxter.blogspot.com`n`n" +
+                      "Una suite integral para el mantenimiento proactivo de sistemas Windows."
+               
+               [System.Windows.Forms.MessageBox]::Show($msg, "Acerca de", 0, 64)
+            }
             "S" { 
                 if ($Script:IMAGE_MOUNTED -gt 0) {
                     [System.Console]::Beep(500, 300)
