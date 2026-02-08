@@ -99,7 +99,7 @@ Este es el núcleo de la optimización:
     * **Sin Internet**: Opción para permitir instalación sin red (BypassNRO).
     * **Usuario**: Creación automática de admin o modo interactivo.
 
-### 3. Crear Medio de Instalación (ISO / USB / VHD)
+### 3. Crear Medio de Instalación (ISO / VHD)
 
 * **1. Despliegue a VHD**: Herramienta para crear discos virtuales arrancables desde un WIM. Configura automáticamente particiones GPT/UEFI o MBR/BIOS y aplica la imagen.
 * **2. Crear ISO Booteable**: Utilidad gráfica que usa `oscdimg` para empaquetar tu carpeta de distribución de Windows en una ISO válida (BIOS/UEFI). Genera logs detallados de la creación.
@@ -139,3 +139,4 @@ Si deseas contribuir al desarrollo de este script:
 3.  Realiza tus cambios y haz commit (`git commit -am 'Añade nueva funcionalidad'`).
 4.  Haz Push a la rama (`git push origin feature/nueva-funcionalidad`).
 5.  Abre un Pull Request.
+
