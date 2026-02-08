@@ -6067,8 +6067,8 @@ function Main-Menu {
             "2" { Convert-Image-Menu }
 			"3" { 
                 Clear-Host; Write-Host "--- DESPLIEGUE ---" -ForegroundColor Cyan
-                Write-Host "1. Despliegue a VHD (Instalacion Nativa Virtual)"
-                Write-Host "2. Crear ISO Booteable (Instalador Clasico)"
+                Write-Host "1. Despliegue a VHD (Instalacion Virtual)"
+                Write-Host "2. Crear ISO Booteable"
                 Write-Host "V. Volver"
                 $d = Read-Host "Elige"; 
                 if($d -eq 1){Show-Deploy-To-VHD-GUI} elseif($d -eq 2){Show-IsoMaker-GUI}
@@ -6088,7 +6088,7 @@ function Main-Menu {
                 }
             }
             'H' {
-               $msg = "Aegis Phoenix Suite v$($script:Version)`n" +
+               $msg = "AdminImagenOffline v$($script:Version)`n" +
                       "Desarrollado por SOFTMAXTER`n`n" +
                       "Email: softmaxter@hotmail.com`n" +
                       "Blog: softmaxter.blogspot.com`n`n" +
