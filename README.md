@@ -30,7 +30,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
     * **Gestor de Características (Features)**: Habilita o deshabilita componentes de Windows (IIS, .NET, Hyper-V, etc.) con una interfaz visual.
     * **Optimización de Servicios**: Permite deshabilitar servicios del sistema innecesarios organizados por categorías. Incluye función para **Restaurar** valores originales.
     * **Tweaks y Registro Offline**: Gestor nativo para aplicar ajustes de rendimiento y privacidad. Incluye un **Importador .REG Inteligente** con traducción automática de rutas y vista previa.
-    * **Automatización OOBE (Unattend.xml)**: Generador integrado para crear archivos de respuesta que configuran usuario, saltan requisitos de TPM/RAM (Windows 11), ocultan EULA y configuran privacidad automáticamente.
+    * **Automatización OOBE (Unattend.xml)**: Generador avanzado que crea archivos de respuesta para configurar usuario, saltar EULA y aplicar hacks para instalar Windows 11 en hardware no soportado (BypassTPM/SecureBoot/RAM) y permitir instalación sin internet (BypassNRO).
 * **Suite de Limpieza y Reparación**: `CheckHealth`, `ScanHealth`, `RestoreHealth` (con soporte para fuente WIM alternativa), `SFC` offline y limpieza de componentes (`ResetBase`).
 
 ---
@@ -48,10 +48,23 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ## Modo de Uso
 
-1.  Descarga los archivos. Se recomienda mantener `Run.bat` junto a `AdminImagenOffline.ps1` (o dentro de una subcarpeta `Script` si usas la estructura antigua, aunque el script detecta la ruta actual).
-2.  Haz clic derecho sobre el archivo `Run.bat` y selecciona **"Ejecutar como administrador"**.
-3.  Sigue las instrucciones en pantalla.
-4.  Si es la primera ejecución, ve al menú **[7] Configuración** para definir tus directorios de trabajo.
+1.  Descarga el repositorio como un archivo `.zip` y extráelo.
+2.  Asegúrate de que la estructura de carpetas sea la siguiente:
+    ```
+    TuCarpetaPrincipal/
+    │
+    ├── Run.bat
+    ├── Tools/
+    └── Script/
+        │
+        └── AdminImagenOffline.ps1
+        └── Catalogos/
+            ├── Ajustes.ps1
+            ├── Servicios.ps1
+            └── Bloatware.ps1
+    ```
+3.  Haz doble clic en **`Run.bat`**. El script validará los permisos y se iniciará.
+4.  Si es la primera ejecución, ve al menú **[8] Configuración** para definir tus directorios de trabajo.
 
 ---
 
@@ -61,12 +74,12 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 * **1. Gestión de Imagen**: Operaciones base de WIM (Montar, Guardar, Editar Metadatos, Editar Índices).
 * **2. Convertir Formatos**: Conversión de ESD a WIM y VHD a WIM.
-* **3. Drivers (Inyectar/Eliminar)**: Herramientas GUI para gestión de controladores.
-* **4. Personalización**: Centro de ajustes (Apps, Features, Servicios, Tweaks, Unattend).
-* **5. Limpieza y Reparación**: Utilidades de mantenimiento (DISM/SFC).
-* **6. Crear Medio de Instalación**: Submenú para desplegar a VHD o crear ISO booteable.
-* **7. Configuración**: Configuración de directorios de montaje y temporales.
-* **8. Cambiar Edición**: Actualización de edición (ej. Home -> Pro).
+* **3. Crear Medio de Instalación**: Submenú para desplegar a VHD o crear ISO booteable.
+* **4. Drivers (Inyectar/Eliminar)**: Herramientas GUI para gestión de controladores.
+* **5. Personalización**: Centro de ajustes (Apps, Features, Servicios, Tweaks, Unattend).
+* **6. Limpieza y Reparación**: Utilidades de mantenimiento (DISM/SFC).
+* **7. Cambiar Edición**: Actualización de edición (ej. Home -> Pro).
+* **8. Configuración**: Configuración de directorios de montaje y temporales.
 
 ### 1. Gestión de Imagen
 
@@ -74,27 +87,30 @@ Incluye las operaciones fundamentales y herramientas avanzadas como:
 * **Editar Info/Metadatos**: Una GUI exclusiva para renombrar las imágenes internas del WIM y cambiar sus descripciones.
 * **Editar Índices**: Exportar un índice específico a un nuevo archivo o eliminar índices para ahorrar espacio.
 
-### 4. Personalización (Submenú)
+### 5. Personalización (Submenú)
 
 Este es el núcleo de la optimización:
 * **Eliminar Bloatware (Apps)**: Gestor visual para borrar aplicaciones Appx con código de colores (Verde=Seguro, Naranja=Recomendado).
 * **Características de Windows (Features)**: Nueva interfaz para activar/desactivar características opcionales del sistema (como SMB1, .NET Framework 3.5, etc.) offline.
 * **Servicios del Sistema**: Interfaz por pestañas para deshabilitar servicios masivamente o restaurarlos.
 * **Tweaks y Registro**: Aplica parches de registro predefinidos o importa tus propios archivos `.reg` con traducción automática de rutas (HKEY_LOCAL_MACHINE -> HKLM\OfflineSystem).
-* **Automatización OOBE (Unattend)**: Generador avanzado que inyecta un archivo `unattend.xml` en la imagen para automatizar la instalación, crear usuario local admin, y aplicar hacks para instalar Windows 11 en hardware no soportado (BypassTPM/SecureBoot).
+* **Automatización OOBE (Unattend)**: Generador avanzado que inyecta un archivo `unattend.xml` en la imagen.
+    * **Hacks Win11**: Permite activar BypassTPM, BypassSecureBoot y BypassRAM.
+    * **Sin Internet**: Opción para permitir instalación sin red (BypassNRO).
+    * **Usuario**: Creación automática de admin o modo interactivo.
 
-### 6. Crear Medio de Instalación (ISO / USB / VHD)
+### 3. Crear Medio de Instalación (ISO / USB / VHD)
 
 * **1. Despliegue a VHD**: Herramienta para crear discos virtuales arrancables desde un WIM. Configura automáticamente particiones GPT/UEFI o MBR/BIOS y aplica la imagen.
-* **2. Crear ISO Booteable**: Utilidad gráfica que usa `oscdimg` para empaquetar tu carpeta de distribución de Windows en una ISO válida (BIOS/UEFI). Permite inyectar `autounattend.xml` en la raíz.
+* **2. Crear ISO Booteable**: Utilidad gráfica que usa `oscdimg` para empaquetar tu carpeta de distribución de Windows en una ISO válida (BIOS/UEFI). Genera logs detallados de la creación.
 
-### 7. Herramientas de Limpieza
+### 6. Herramientas de Limpieza
 
 Requiere una imagen montada. Ofrece:
 * **Diagnóstico**: `CheckHealth` y `ScanHealth`.
 * **Reparación**: `RestoreHealth` (con lógica de fallback que solicita un WIM fuente si falla la reparación automática) y `SFC` offline.
 * **Optimización**: Análisis y limpieza del almacén de componentes (`ResetBase`) para reducir el tamaño de la imagen.
-* **Ejecutar TODO**: Secuencia automática de mantenimiento completo.
+* **Ejecutar TODO**: Secuencia automática de mantenimiento completo con comprobación inteligente de estado ("Healthy", "Repairable", "NonRepairable").
 
 ## Notas Importantes
 
@@ -111,7 +127,7 @@ Este script realiza operaciones avanzadas que modifican archivos de imagen de Wi
 ## Autor y Colaboradores
 
 * **Autor Principal**: SOFTMAXTER
-* **Colaboración Técnica**: Optimización de código, lógica de interfaces gráficas y robustez general refinadas con asistencia de IA avanzada.
+* **Análisis y refinamiento de código**: Realizado en colaboración con **Gemini**, para garantizar calidad, seguridad, optimización de algoritmos y transición a interfaces gráficas.
 
 ---
 ### Cómo Contribuir
