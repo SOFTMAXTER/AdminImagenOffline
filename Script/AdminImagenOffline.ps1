@@ -6030,7 +6030,7 @@ function Main-Menu {
         Write-Host " [ GESTION DE IMAGEN ]" -ForegroundColor Yellow
         Write-Host "   1. Montar / Desmontar / Guardar Imagen" 
         Write-Host "   2. Convertir Formatos (ESD -> WIM, VHD -> WIM)"
-        Write-Host "   3. Crear Medio de Instalacion (ISO / USB)"
+        Write-Host "   3. Crear Medio de Instalacion (ISO / VHD)"
         Write-Host ""
 
         Write-Host " [ INGENIERIA & AJUSTES ]" -ForegroundColor Yellow
