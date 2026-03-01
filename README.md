@@ -157,7 +157,7 @@ Si deseas contribuir al desarrollo de este script:
 
 DeltaPack Dual-Engine es una herramienta de grado empresarial desarrollada y mantenida para facilitar la ingeniería de sistemas. Si esta suite te ha ahorrado horas de trabajo empaquetando software atípico o ha mejorado tus despliegues corporativos, considera apoyar su desarrollo para garantizar actualizaciones continuas frente a las nuevas iteraciones de Windows.
 
-* [💳 Donar vía PayPal](https://paypal.me/SOFTMAXTER)
+* [💳 Donar vía PayPal](https://www.paypal.com/donate/?hosted_button_id=U65G2GXDTUGML)
 
 ---
 ## 📝 Licencia y Modelo de Negocio (Dual Licensing)
@@ -171,4 +171,5 @@ Distribuido bajo la **Licencia GNU GPLv3**. Eres libre de usar, modificar y comp
 Si deseas integrar el motor de DeltaPack en un producto comercial propietario (closed-source), o requieres Acuerdos de Nivel de Servicio (SLA) para tu corporación, **debes adquirir una Licencia Comercial**. 
 
 Para licenciamiento corporativo, contactar a: `(softmaxter@hotmail.com)`
+
 
