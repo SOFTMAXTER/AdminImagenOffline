@@ -4954,6 +4954,7 @@ function Show-Unattend-GUI {
     $chkInteractiveUser.Text = "Forzar creacion manual de usuario (Mostrar pantalla OOBE)"
     $chkInteractiveUser.Location = "20, 25"
     $chkInteractiveUser.AutoSize = $true
+    $chkInteractiveUser.Checked = $true
     $chkInteractiveUser.ForeColor = [System.Drawing.Color]::Yellow
     $grpUser.Controls.Add($chkInteractiveUser)
 
@@ -4966,6 +4967,7 @@ function Show-Unattend-GUI {
     $txtUser = New-Object System.Windows.Forms.TextBox
     $txtUser.Location = "80, 53"
     $txtUser.Text = "Admin"
+    $txtUser.Enabled = $false
     $grpUser.Controls.Add($txtUser)
 
     $lblPass = New-Object System.Windows.Forms.Label
@@ -4978,6 +4980,7 @@ function Show-Unattend-GUI {
     $txtPass.Location = "300, 53"
     $txtPass.Text = "1234"
     $txtPass.PasswordChar = "*"
+    $txtPass.Enabled = $false
     $grpUser.Controls.Add($txtPass)
 
     $chkInteractiveUser.Add_CheckedChanged({
@@ -5477,7 +5480,7 @@ $wpeSetupBlock
 }
 
 # =================================================================
-#  Modulo GUI: OEM Branding
+#  Modulo GUI OEM Branding
 # =================================================================
 function Show-OEMBranding-GUI {
     Add-Type -AssemblyName System.Windows.Forms
@@ -5822,6 +5825,8 @@ SchemeName=@%SystemRoot%\System32\mmres.dll,-800
                             if (-not (Test-Path "HKLM:\$themeRegPath")) { New-Item -Path "HKLM:\$themeRegPath" -Force | Out-Null }
                             
                             Set-ItemProperty -Path "HKLM:\$themeRegPath" -Name "InstallTheme" -Value "%SystemRoot%\Resources\Themes\oem.theme" -Type String -Force
+							Set-ItemProperty -Path "HKLM:\$themeRegPath" -Name "InstallThemeDark" -Value "%SystemRoot%\Resources\Themes\oem.theme" -Type String -Force
+                            Set-ItemProperty -Path "HKLM:\$themeRegPath" -Name "InstallThemeLight" -Value "%SystemRoot%\Resources\Themes\oem.theme" -Type String -Force
                             Restore-KeyOwner -KeyPath "HKLM:\$themeRegPath"
                         }
 
