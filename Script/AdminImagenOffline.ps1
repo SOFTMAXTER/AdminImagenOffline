@@ -1687,7 +1687,7 @@ function Manage-BootWim-Menu {
 }
 
 # =================================================================
-#  MODULO DE INYECCION DE ADDONS (.TPK, .BPK, .REG, .CAB)
+#  MODULO DE INYECCION DE ADDONS (.WIM, .TPK, .BPK, .REG,)
 # =================================================================
 # --- HELPER 1: Importador de Registro Silencioso (Headless) ---
 # Extrae la lógica de tu Show-Tweaks-Offline-GUI para uso automatizado
@@ -1755,8 +1755,18 @@ function Expand-AddonArchive {
     if (-not (Test-Path $DestPath)) { New-Item -Path $DestPath -ItemType Directory -Force | Out-Null }
 
     if ($hexSignature -match "^4D535749") { 
-        Write-Log -LogLevel INFO -Message "Firma detectada: WIM (MSWI). Extrayendo payload (Indice $WimIndex)..."
-        Expand-WindowsImage -ImagePath $FilePath -Index $WimIndex -ApplyPath $DestPath -ErrorAction Stop | Out-Null
+        # Auditoría dinámica del paquete WIM
+        $imageInfo = Get-WindowsImage -ImagePath $FilePath -ErrorAction SilentlyContinue
+        $actualIndexToExtract = $WimIndex
+
+        # Si el WIM fue creado por (cualquier herramienta) y solo tiene 1 indice, forzamos el 1.
+        if ($imageInfo.Count -eq 1) {
+            $actualIndexToExtract = 1
+            Write-Log -LogLevel INFO -Message "WIM de indice unico detectado. Forzando extraccion del Indice 1."
+        }
+
+        Write-Log -LogLevel INFO -Message "Firma detectada: WIM (MSWI). Extrayendo payload (Indice $actualIndexToExtract)..."
+        Expand-WindowsImage -ImagePath $FilePath -Index $actualIndexToExtract -ApplyPath $DestPath -ErrorAction Stop | Out-Null
     }
     else {
         throw "Firma no reconocida ($hexSignature). No es WIM, válido."
@@ -1776,7 +1786,7 @@ function Install-OfflineAddon {
         return "Registro inyectado exitosamente."
     }
 
-    if ($ext -match '\.(wum|tpk|bpk)$') {
+    if ($ext -match '\.(wim|tpk|bpk)$') {
         $tempExtract = Join-Path $Script:Scratch_DIR "Addon_$baseName"
         
         try {
@@ -5905,7 +5915,7 @@ SchemeName=@%SystemRoot%\System32\mmres.dll,-800
 }
 
 # =================================================================
-#  Modulo GUI: Inyector y Actualizador de Apps Modernas
+#  Modulo GUI Inyector y Actualizador de Apps Modernas
 # =================================================================
 function Show-AppxInjector-GUI {
     if ($Script:IMAGE_MOUNTED -eq 0) { 
