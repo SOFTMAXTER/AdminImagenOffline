@@ -5263,7 +5263,7 @@ function Show-Unattend-GUI {
             $msg = "El archivo se inyecto en el WIM (Windows\Panther\unattend.xml) para la fase de configuración OOBE.`n`n"
             $msg += "Sin embargo, para que funcionen la Seleccion de Idioma inicial y los Bypasses de TPM, "
             $msg += "DEBES colocar una copia de este archivo en la RAIZ de tu USB/ISO bajo el nombre 'autounattend.xml'.`n`n"
-            $msg += "¿Deseas guardar una copia en tu PC ahora mismo?"
+            $msg += "Deseas guardar una copia en tu PC ahora mismo?"
 
             $res = [System.Windows.Forms.MessageBox]::Show($msg, "Inyección Parcial Exitosa", 'YesNo', 'Information')
             
@@ -7120,7 +7120,7 @@ function Show-RegQueue-GUI {
     $btnProcess.Add_Click({
         if ($lvQ.Items.Count -eq 0) { return }
 
-        $res = [System.Windows.Forms.MessageBox]::Show("Se fusionaran e importaran $($lvQ.Items.Count) archivos en una sola transaccion.`n¿Desea continuar?", "Confirmar Lote", 'YesNo', 'Question')
+        $res = [System.Windows.Forms.MessageBox]::Show("Se fusionaran e importaran $($lvQ.Items.Count) archivos en una sola transaccion.`nDesea continuar?", "Confirmar Lote", 'YesNo', 'Question')
         if ($res -ne 'Yes') { 
             Write-Log -LogLevel INFO -Message "RegBatch: El usuario cancelo el procesamiento del lote en el cuadro de confirmacion."
             return 
@@ -8969,7 +8969,7 @@ function Show-LanguageInjector {
     Write-Host " - Boot.wim (En $bootWimPath)" -ForegroundColor Gray
     Write-Host " - Lang.ini (Regeneracion en $isoDistPath)" -ForegroundColor Gray
     
-    $confirm = Read-Host "`n¿Iniciar inyeccion masiva? Esto tomara bastante tiempo (S/N)"
+    $confirm = Read-Host "`nIniciar inyeccion masiva? Esto tomara bastante tiempo (S/N)"
     if ($confirm -notmatch '^(s|S)$') { 
         Write-Log -LogLevel INFO -Message "LangInjectorGUI: El usuario cancelo en la confirmacion final."
         return 
