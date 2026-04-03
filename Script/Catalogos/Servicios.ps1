@@ -28,7 +28,7 @@ $script:ServiceCatalog = @(
         DefaultStartupType = "Automatic"
     },
     [PSCustomObject]@{
-        Name               = "TabletInputService" # CORRECCIoN: Este es el nombre de servicio real.
+        Name               = "TabletInputService"
         Description        = "Habilita el teclado tactil y el panel de escritura. Innecesario en equipos de escritorio sin pantalla tactil."
         Category           = "Estandar"
         DefaultStartupType = "Manual"
@@ -111,6 +111,18 @@ $script:ServiceCatalog = @(
         Category           = "Estandar"
         DefaultStartupType = "Automatic"
     },
+	[PSCustomObject]@{
+        Name               = "FontCache"
+        Description        = "Optimiza el rendimiento almacenando fuentes en cache. Desactivar ahorra RAM pero puede ralentizar la carga inicial de fuentes."
+        Category           = "Estandar"
+        DefaultStartupType = "Automatic"
+    },
+    [PSCustomObject]@{
+        Name               = "FontCache3.0.0.0"
+        Description        = "Servicio heredado de cache de fuentes de Windows Presentation Foundation (WPF). Generalmente seguro de desactivar."
+        Category           = "Estandar"
+        DefaultStartupType = "Manual"
+    },
     # Categoria: Avanzado/Opcional (Servicios para funciones especificas)
     [PSCustomObject]@{
         Name               = "TermService"
@@ -169,6 +181,18 @@ $script:ServiceCatalog = @(
     [PSCustomObject]@{
         Name               = "WerSvc"
         Description        = "Servicio de informe de errores. Envia datos a Microsoft cuando una aplicacion falla. Seguro de desactivar."
+        Category           = "Avanzado"
+        DefaultStartupType = "Manual"
+    },
+	[PSCustomObject]@{
+        Name               = "GraphicsPerfSvc"
+        Description        = "Monitoriza el rendimiento grafico. Rara vez necesario a menos que uses herramientas de diagnostico de GPU especificas."
+        Category           = "Avanzado"
+        DefaultStartupType = "Manual"
+    },
+    [PSCustomObject]@{
+        Name               = "Wecsvc"
+        Description        = "Recopilador de eventos de Windows. Reune eventos de otros equipos en la red. Innecesario para usuarios domesticos."
         Category           = "Avanzado"
         DefaultStartupType = "Manual"
     },
