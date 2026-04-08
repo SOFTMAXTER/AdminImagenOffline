@@ -173,7 +173,7 @@ Este proyecto está protegido bajo derechos de autor y utiliza un modelo de **Do
 Distribuido bajo la **Licencia GNU GPLv3**. Eres libre de usar, modificar y compartir este software. Bajo esta licencia (*Copyleft*), cualquier herramienta derivada o script que integre código de AdminImagenOffline **debe ser de código abierto** bajo la misma licencia.
 
 ### 2. Licencia Comercial Corporativa
-Si deseas integrar el motor de DeltaPack en un producto comercial propietario (closed-source), o requieres Acuerdos de Nivel de Servicio (SLA) para tu corporación, **debes adquirir una Licencia Comercial**. 
+Si deseas integrar el motor de AdminImagenOffline en un producto comercial propietario (closed-source), o requieres Acuerdos de Nivel de Servicio (SLA) para tu corporación, **debes adquirir una Licencia Comercial**. 
 
 Para licenciamiento corporativo, contactar a: `(softmaxter@hotmail.com)`
 
