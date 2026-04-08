@@ -1,3 +1,6 @@
+# --- CATALOGO CENTRAL DE AJUSTES (OPTIMIZADO PARA OFFLINE / WIM) ---
+# Contiene solo ajustes basados en REGISTRO que pueden aplicarse a una imagen montada.
+
 $script:SystemTweaks = @(
 
     # =========================================================
