@@ -1,10 +1,7 @@
-# --- CATALOGO CENTRAL DE AJUSTES (OPTIMIZADO PARA OFFLINE / WIM) ---
-# Contiene solo ajustes basados en REGISTRO que pueden aplicarse a una imagen montada.
-
 $script:SystemTweaks = @(
 
     # =========================================================
-    # NUEVO: BLOQUEO DE REINSTALACION (Consumer Features)
+    # ANTI-BLOATWARE
     # =========================================================
     [PSCustomObject]@{
         Name           = "Bloquear Reinstalacion de Apps Basura (Consumer Features)"
@@ -30,8 +27,63 @@ $script:SystemTweaks = @(
     },
 
     # =========================================================
-    # RENDIMIENTO DEL SISTEMA (Reg)
+    # RENDIMIENTO DEL SISTEMA (JUEGOS Y GENERAL)
     # =========================================================
+    [PSCustomObject]@{
+        Name           = "Maximo Rendimiento Multimedia (SystemResponsiveness 0)"
+        Category       = "Rendimiento del Sistema"
+        Description    = "Asigna el 100% de la CPU a juegos y multimedia, eliminando la reserva del 20% para procesos en segundo plano."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
+        RegistryKey    = "SystemResponsiveness"
+        EnabledValue   = 0
+        DefaultValue   = 20
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Prioridad de GPU Extrema para Juegos"
+        Category       = "Rendimiento del Sistema"
+        Description    = "Fuerza al planificador multimedia a dar maxima prioridad grafica a las aplicaciones de pantalla completa."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games"
+        RegistryKey    = "GPU Priority"
+        EnabledValue   = 8
+        DefaultValue   = 2
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Prioridad de CPU Extrema para Juegos"
+        Category       = "Rendimiento del Sistema"
+        Description    = "Fuerza al planificador multimedia a dar prioridad alta de CPU a los juegos."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games"
+        RegistryKey    = "Priority"
+        EnabledValue   = 6
+        DefaultValue   = 2
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Desactivar Grabacion en Segundo Plano (GameDVR)"
+        Category       = "Rendimiento del Sistema"
+        Description    = "Deshabilita la funcion de Xbox Game DVR a nivel de directiva de maquina para evitar tirones de FPS."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR"
+        RegistryKey    = "value"
+        EnabledValue   = 0
+        DefaultValue   = 1
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Habilitar Programacion de GPU (HAGS)"
+        Category       = "Rendimiento del Sistema"
+        Description    = "Hardware Accelerated GPU Scheduling. Reduce latencia en juegos (requiere hardware compatible)."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\GraphicsDrivers"
+        RegistryKey    = "HwSchMode"
+        EnabledValue   = 2
+        DefaultValue   = 1
+        RegistryType   = "DWord"
+    },
     [PSCustomObject]@{
         Name           = "Priorizar Aplicacion en Primer Plano (CPU Boost)"
         Category       = "Rendimiento del Sistema"
@@ -55,28 +107,6 @@ $script:SystemTweaks = @(
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Limitar CPU de Windows Defender (25%)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Evita que los escaneos de Defender acaparen toda la CPU."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows Defender\Scan"
-        RegistryKey    = "AvgCPULoadFactor"
-        EnabledValue   = 25
-        DefaultValue   = 50
-        RegistryType   = "DWord"
-    },
-    [PSCustomObject]@{
-        Name           = "Reducir Latencia del Sistema (SystemResponsiveness)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Libera recursos de CPU reservados para servicios en segundo plano, mejorando juegos y multimedia."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
-        RegistryKey    = "SystemResponsiveness"
-        EnabledValue   = 10
-        DefaultValue   = 20
-        RegistryType   = "DWord"
-    },
-    [PSCustomObject]@{
         Name           = "Acelerar Apagado (WaitToKillService)"
         Category       = "Rendimiento del Sistema"
         Description    = "Reduce el tiempo de espera para cerrar servicios al apagar (2000ms)."
@@ -86,17 +116,6 @@ $script:SystemTweaks = @(
         EnabledValue   = "2000"
         DefaultValue   = "5000"
         RegistryType   = "String"
-    },
-    [PSCustomObject]@{
-        Name           = "Habilitar Programacion de GPU (HAGS)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Hardware Accelerated GPU Scheduling. Reduce latencia en juegos (requiere hardware compatible)."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\GraphicsDrivers"
-        RegistryKey    = "HwSchMode"
-        EnabledValue   = 2
-        DefaultValue   = 1
-        RegistryType   = "DWord"
     },
     [PSCustomObject]@{
         Name           = "Deshabilitar Indexacion 'Mejorada' (Forzar Clasico)"
@@ -109,27 +128,82 @@ $script:SystemTweaks = @(
         DefaultValue   = 1
         RegistryType   = "DWord"
     },
+    [PSCustomObject]@{
+        Name           = "Limitar CPU de Windows Defender (25%)"
+        Category       = "Rendimiento del Sistema"
+        Description    = "Evita que los escaneos de Defender acaparen toda la CPU."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows Defender\Scan"
+        RegistryKey    = "AvgCPULoadFactor"
+        EnabledValue   = 25
+        DefaultValue   = 50
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Deshabilitar Superfetch / SysMain"
+        Category       = "Rendimiento del Sistema"
+        Description    = "Recomendado para discos SSD. Evita la pre-carga constante en memoria y ahorra desgaste de escritura."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\SysMain"
+        RegistryKey    = "Start"
+        EnabledValue   = 4
+        DefaultValue   = 2
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Desactivar Hibernacion (Hiberfil.sys)"
+        Category       = "Rendimiento del Sistema"
+        Description    = "Libera gigabytes de espacio en el disco C: desactivando el archivo de hibernacion de Windows."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Power"
+        RegistryKey    = "HibernateEnabled"
+        EnabledValue   = 0
+        DefaultValue   = 1
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Deshabilitar Aislamiento del Nucleo (VBS / Memory Integrity)"
+        Category       = "Rendimiento del Sistema"
+        Description    = "Mejora el rendimiento en juegos (hasta un 15%) apagando la virtualizacion de seguridad. (Reduce seguridad)."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity"
+        RegistryKey    = "Enabled"
+        EnabledValue   = 0
+        DefaultValue   = 1
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Deshabilitar Mapas Descargados (MapsBroker)"
+        Category       = "Rendimiento del Sistema"
+        Description    = "Apaga el administrador de mapas offline. Excelente para ahorrar RAM si no usas la app Mapas de Windows."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\MapsBroker"
+        RegistryKey    = "Start"
+        EnabledValue   = 4
+        DefaultValue   = 2
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Deshabilitar Cola de Impresion (Print Spooler)"
+        Category       = "Rendimiento del Sistema"
+        Description    = "ATENCION: Activa esto SOLO si jamas vas a usar una impresora fisica o imprimir en PDF. Ahorra RAM y cierra brechas de seguridad."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Spooler"
+        RegistryKey    = "Start"
+        EnabledValue   = 4
+        DefaultValue   = 2
+        RegistryType   = "DWord"
+    },
 
     # =========================================================
-    # RENDIMIENTO UI (Interfaz)
+    # RENDIMIENTO UI E INTERFAZ
     # =========================================================
-    [PSCustomObject]@{
-        Name           = "Eliminar Retraso de Menus (MenuShowDelay)"
-        Category       = "Rendimiento UI"
-        Description    = "Hace que los menus contextuales aparezcan instantaneamente (0ms)."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\Control Panel\Desktop"
-        RegistryKey    = "MenuShowDelay"
-        EnabledValue   = "0"
-        DefaultValue   = "400"
-        RegistryType   = "String"
-    },
     [PSCustomObject]@{
         Name           = "Deshabilitar Retraso de Inicio (StartupDelay)"
         Category       = "Rendimiento UI"
-        Description    = "Elimina la demora artificial al cargar programas de inicio."
+        Description    = "Elimina la demora artificial al cargar programas de inicio a nivel de maquina."
         Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Serialize"
         RegistryKey    = "StartupDelayInMSec"
         EnabledValue   = 0
         DefaultValue   = 1000
@@ -148,45 +222,23 @@ $script:SystemTweaks = @(
     },
 
     # =========================================================
-    # WINDOWS 11 / BARRA DE TAREAS
+    # WINDOWS 11 UI
     # =========================================================
     [PSCustomObject]@{
         Name           = "Deshabilitar Windows Copilot"
         Category       = "Windows 11 UI"
-        Description    = "Elimina el asistente de IA de la barra de tareas."
+        Description    = "Elimina el asistente de IA de la barra de tareas mediante directiva de maquina."
         Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\Software\Policies\Microsoft\Windows\WindowsCopilot"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot"
         RegistryKey    = "TurnOffWindowsCopilot"
         EnabledValue   = 1
         DefaultValue   = 0
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Alineacion Izquierda (Barra Tareas)"
-        Category       = "Windows 11 UI"
-        Description    = "Mueve el boton de Inicio a la izquierda (Estilo Win10)."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
-        RegistryKey    = "TaskbarAl"
-        EnabledValue   = 0
-        DefaultValue   = 1
-        RegistryType   = "DWord"
-    },
-    [PSCustomObject]@{
-        Name           = "Ocultar Icono Chat/Teams"
-        Category       = "Windows 11 UI"
-        Description    = "Elimina el icono de Chat personal de la barra de tareas."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
-        RegistryKey    = "TaskbarMn"
-        EnabledValue   = 0
-        DefaultValue   = 1
-        RegistryType   = "DWord"
-    },
-	[PSCustomObject]@{
         Name           = "Bloquear Widgets y Noticias (Directiva GPO)"
         Category       = "Windows 11 UI"
-        Description    = "Desactiva el panel de Widgets (Tiempo/Noticias) para ahorrar RAM."
+        Description    = "Desactiva el panel de Widgets (Tiempo/Noticias) para ahorrar RAM en todo el sistema."
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Dsh"
         RegistryKey    = "AllowNewsAndInterests"
@@ -197,7 +249,7 @@ $script:SystemTweaks = @(
     [PSCustomObject]@{
         Name           = "Deshabilitar Search Highlights (Dibujos)"
         Category       = "Windows 11 UI"
-        Description    = "Quita los iconos animados del cuadro de busqueda."
+        Description    = "Quita los iconos animados del cuadro de busqueda a nivel de maquina."
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
         RegistryKey    = "EnableSearchHighlights"
@@ -205,16 +257,38 @@ $script:SystemTweaks = @(
         DefaultValue   = 1
         RegistryType   = "DWord"
     },
+    [PSCustomObject]@{
+        Name           = "Ocultar Boton de Vista de Tareas (Global)"
+        Category       = "Windows 11 UI"
+        Description    = "Elimina el icono de multiples escritorios de la barra de tareas para todos los usuarios."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Explorer"
+        RegistryKey    = "HideTaskViewButton"
+        EnabledValue   = 1
+        DefaultValue   = 0
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Deshabilitar Desenfoque (Blur) en Pantalla de Bloqueo"
+        Category       = "Windows 11 UI"
+        Description    = "Muestra el fondo de la pantalla de inicio de sesion nitido, sin el efecto acrilico borroso que consume GPU."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\System"
+        RegistryKey    = "DisableAcrylicBackgroundOnLogon"
+        EnabledValue   = 1
+        DefaultValue   = 0
+        RegistryType   = "DWord"
+    },
 
     # =========================================================
-    # PRIVACIDAD Y TELEMETRÍA
+    # PRIVACIDAD Y TELEMETRIA
     # =========================================================
     [PSCustomObject]@{
-        Name           = "Desactivar ID de Publicidad"
+        Name           = "Desactivar ID de Publicidad (Global)"
         Category       = "Privacidad"
-        Description    = "Impide el rastreo para anuncios personalizados."
+        Description    = "Impide el rastreo para anuncios personalizados a nivel de maquina."
         Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo"
         RegistryKey    = "Enabled"
         EnabledValue   = 0
         DefaultValue   = 1
@@ -245,7 +319,7 @@ $script:SystemTweaks = @(
     [PSCustomObject]@{
         Name           = "Deshabilitar Cortana"
         Category       = "Privacidad"
-        Description    = "Desactiva Cortana por directiva."
+        Description    = "Desactiva Cortana por directiva global."
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
         RegistryKey    = "AllowCortana"
@@ -267,12 +341,67 @@ $script:SystemTweaks = @(
     [PSCustomObject]@{
         Name           = "Deshabilitar Apps en Segundo Plano (Global)"
         Category       = "Privacidad"
-        Description    = "Impide que las apps de la tienda se ejecuten sin abrirse."
+        Description    = "Impide que las apps de la tienda se ejecuten sin abrirse para todos los usuarios."
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy"
         RegistryKey    = "LetAppsRunInBackground"
         EnabledValue   = 2
         DefaultValue   = 0
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Desactivar Windows Error Reporting (WER)"
+        Category       = "Privacidad"
+        Description    = "Evita que Windows envie reportes de bloqueos y fallos de aplicaciones a los servidores de Microsoft."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting"
+        RegistryKey    = "Disabled"
+        EnabledValue   = 1
+        DefaultValue   = 0
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Deshabilitar Seguimiento de Lanzamiento de Apps (Global)"
+        Category       = "Privacidad"
+        Description    = "Impide que Windows rastree que programas abres para personalizar el menu de inicio de los usuarios."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\EdgeUI"
+        RegistryKey    = "DisableMFUTracking"
+        EnabledValue   = 1
+        DefaultValue   = 0
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Desactivar Diagnostico de Experiencia del Usuario (DiagTrack)"
+        Category       = "Privacidad"
+        Description    = "Apaga el servicio 'Connected User Experiences and Telemetry' a nivel de kernel."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\DiagTrack"
+        RegistryKey    = "Start"
+        EnabledValue   = 4
+        DefaultValue   = 2
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Deshabilitar Servicio de Rastreo WAP (dmwappushservice)"
+        Category       = "Privacidad"
+        Description    = "Apaga el servicio de enrutamiento de mensajes push que Microsoft usa para recopilar telemetria."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\dmwappushservice"
+        RegistryKey    = "Start"
+        EnabledValue   = 4
+        DefaultValue   = 3
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Deshabilitar Servicio de Politica de Diagnostico (DPS)"
+        Category       = "Privacidad"
+        Description    = "Desactiva el diagnostico de problemas del sistema, reduciendo el uso del disco y CPU en segundo plano."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\DPS"
+        RegistryKey    = "Start"
+        EnabledValue   = 4
+        DefaultValue   = 2
         RegistryType   = "DWord"
     },
 
@@ -303,72 +432,50 @@ $script:SystemTweaks = @(
     },
 
     # =========================================================
-    # COMPORTAMIENTO Y EXTRAS
+    # EXTRAS / COMPORTAMIENTO
     # =========================================================
     [PSCustomObject]@{
-        Name           = "Mostrar Extensiones de Archivo"
+        Name           = "Restaurar Menu Contextual Clasico (Win11 Global)"
         Category       = "Extras"
-        Description    = "Muestra siempre .exe, .bat, etc. por seguridad."
+        Description    = "Elimina el 'Mostrar mas opciones' y muestra el menu completo a nivel de maquina."
         Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
-        RegistryKey    = "HideFileExt"
-        EnabledValue   = 0
-        DefaultValue   = 1
-        RegistryType   = "DWord"
-    },
-    [PSCustomObject]@{
-        Name           = "Abrir Explorador en 'Este Equipo'"
-        Category       = "Extras"
-        Description    = "Evita abrir en 'Acceso Rapido' o 'Recientes'."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
-        RegistryKey    = "LaunchTo"
-        EnabledValue   = 1
-        DefaultValue   = 2
-        RegistryType   = "DWord"
-    },
-    [PSCustomObject]@{
-        Name           = "Modo Oscuro (Aplicaciones)"
-        Category       = "Visual"
-        Description    = "Fuerza el tema oscuro en las apps."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-        RegistryKey    = "AppsUseLightTheme"
-        EnabledValue   = 0
-        DefaultValue   = 1
-        RegistryType   = "DWord"
-    },
-    [PSCustomObject]@{
-        Name           = "Modo Oscuro (Sistema)"
-        Category       = "Visual"
-        Description    = "Fuerza el tema oscuro en barra de tareas y menu inicio."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-        RegistryKey    = "SystemUsesLightTheme"
-        EnabledValue   = 0
-        DefaultValue   = 1
-        RegistryType   = "DWord"
-    },
-    [PSCustomObject]@{
-        Name           = "Restaurar Menu Contextual Clasico (Win11)"
-        Category       = "Visual"
-        Description    = "Elimina el 'Mostrar mas opciones' y muestra el menu completo."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"
         RegistryKey    = "(Default)"
         EnabledValue   = ""
         DefaultValue   = "DeleteKey"
         RegistryType   = "String"
     },
     [PSCustomObject]@{
-        Name           = "Desactivar Sticky Keys (5 veces Shift)"
+        Name           = "Desactivar Reinicio Automatico en Pantalla Azul (BSOD)"
         Category       = "Extras"
-        Description    = "Evita que aparezca el dialogo al pulsar Shift repetidamente."
+        Description    = "Permite leer el codigo de error de una pantalla azul de la muerte sin que el PC se reinicie inmediatamente."
         Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_CURRENT_USER\Control Panel\Accessibility\StickyKeys"
-        RegistryKey    = "Flags"
-        EnabledValue   = "506"
-        DefaultValue   = "510"
-        RegistryType   = "String"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\CrashControl"
+        RegistryKey    = "AutoReboot"
+        EnabledValue   = 0
+        DefaultValue   = 1
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Aumentar Limite de Ruta Larga (LongPathsEnabled)"
+        Category       = "Extras"
+        Description    = "Permite que Windows maneje rutas de archivos que exceden los clasicos 260 caracteres en todo el sistema."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem"
+        RegistryKey    = "LongPathsEnabled"
+        EnabledValue   = 1
+        DefaultValue   = 0
+        RegistryType   = "DWord"
+    },
+    [PSCustomObject]@{
+        Name           = "Deshabilitar Notificaciones y Centro de Accion (Global)"
+        Category       = "Extras"
+        Description    = "Oculta los avisos emergentes y desactiva completamente el centro de notificaciones para todos."
+        Method         = "Registry"
+        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Explorer"
+        RegistryKey    = "DisableNotificationCenter"
+        EnabledValue   = 1
+        DefaultValue   = 0
+        RegistryType   = "DWord"
     }
 )
