@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.0
+    1.5.2
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.0"
+$script:Version = "1.5.2"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -57,16 +57,12 @@ function Write-Log {
         [string]$Message
     )
     
+    # Si falló la inicialización y la variable es nula, salimos silenciosamente
+    if (-not $script:logFile) { return }
+    
     try {
-        $parentDir = Split-Path -Parent $PSScriptRoot
-        $logDir = Join-Path -Path $parentDir -ChildPath "Logs"
-        if (-not (Test-Path $logDir)) {
-            New-Item -Path $logDir -ItemType Directory -Force | Out-Null
-        }
-        $logFile = Join-Path -Path $logDir -ChildPath "Registro.log"
-        
         $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        "[$timestamp] [$LogLevel] - $Message" | Out-File -FilePath $logFile -Append -Encoding utf8
+        "[$timestamp] [$LogLevel] - $Message" | Out-File -FilePath $script:logFile -Append -Encoding utf8
     }
     catch {
         Write-Warning "No se pudo escribir en el archivo de log: $_"
@@ -79,11 +75,11 @@ function Invoke-FullRepoUpdater {
     $repoUser = "SOFTMAXTER"
     $repoName = "AdminImagenOffline"
     $repoBranch = "main"
-    
+
     # URLs directas
     $versionUrl = "https://raw.githubusercontent.com/$repoUser/$repoName/$repoBranch/version.txt"
     $zipUrl = "https://github.com/$repoUser/$repoName/archive/refs/heads/$repoBranch.zip"
-    
+
     $updateAvailable = $false
     $remoteVersionStr = ""
 
@@ -116,25 +112,25 @@ function Invoke-FullRepoUpdater {
 
     # --- Si hay una actualizacion, preguntamos al usuario ---
     if ($updateAvailable) {
-        Write-Host "`n¡Nueva version encontrada!" -ForegroundColor Green
+        Write-Host "`nNueva version encontrada!" -ForegroundColor Green
         Write-Host ""
 		Write-Host "Version Local: v$($script:Version)" -ForegroundColor Gray
         Write-Host "Version Remota: v$remoteVersionStr" -ForegroundColor Yellow
         Write-Log -LogLevel INFO -Message "UPDATER: Nueva version detectada. Local: v$($script:Version) | Remota: v$remoteVersionStr"
-        
+
 		Write-Host ""
         $confirmation = Read-Host "Deseas descargar e instalar la actualizacion ahora? (S/N)"
-        
+
         if ($confirmation.ToUpper() -eq 'S') {
             Write-Warning "`nEl actualizador se ejecutara en una nueva ventana."
             Write-Warning "Este script principal se cerrara para permitir la actualizacion."
             Write-Log -LogLevel ACTION -Message "UPDATER: Iniciando proceso de actualizacion. El script se cerrara."
-            
+
             # --- Preparar el script del actualizador externo ---
             $tempDir = Join-Path $env:TEMP "AdminUpdater"
             if (Test-Path $tempDir) { Remove-Item -Path $tempDir -Recurse -Force }
             New-Item -Path $tempDir -ItemType Directory | Out-Null
-            
+
             $updaterScriptPath = Join-Path $tempDir "updater.ps1"
             $installPath = (Split-Path -Path $PSScriptRoot -Parent)
             $batchPath = Join-Path $installPath "Run.bat"
@@ -170,23 +166,41 @@ try {
         Write-Host "   - El proceso principal ya ha finalizado." -ForegroundColor Gray
     }
 
-    Write-UpdateLog "[PASO 4/6] Preparando instalacion (limpiando archivos antiguos)..."
+    Write-UpdateLog "[PASO 4/6] Verificando integridad de la descarga..."
     
-    # --- EXCLUSIONES ESPECIFICAS DE AdminImagenOffline ---
-    `$itemsToRemove = Get-ChildItem -Path "$installPath" -Exclude "Logs", "config.json", "sxs"
-    if (`$null -ne `$itemsToRemove) { 
-        Remove-Item -Path `$itemsToRemove.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    # --- LECTURA PREVENTIVA ---
+    # Capturamos los nuevos archivos ANTES de borrar los viejos.
+    `$elementosNuevos = Get-ChildItem -Path `$updateSourcePath -Force
+    
+    if (`$elementosNuevos.Count -eq 0) {
+        throw "ERROR DE INTEGRIDAD: El archivo ZIP descargado esta vacio o corrupto. Abortando actualizacion para proteger la instalacion actual."
     }
 
-    Write-UpdateLog "[PASO 5/6] Instalando nuevos archivos..."
-    Copy-Item -Path "`$updateSourcePath\*" -Destination "$installPath" -Recurse -Force
-    
-    # Desbloqueamos los archivos descargados
-    Get-ChildItem -Path "$installPath" -Recurse | Unblock-File -ErrorAction SilentlyContinue
+    Write-UpdateLog "[PASO 5/6] Preparando instalacion (eliminando version anterior)..."
 
-    Write-UpdateLog "[PASO 6/6] ¡Actualizacion completada con exito!"
-    Write-Host "`nReiniciando AdminImagenOffline en 5 segundos..." -ForegroundColor Green
-    Start-Sleep -Seconds 5
+    # --- 1. ELIMINACION POR LISTA EXPLICITA (Solo si la descarga fue exitosa) ---
+    `$elementosABorrar = @(
+        "Run.bat",
+        "Script",
+        "README.md",
+        "LICENSE",
+        "version.txt"
+    )
+
+    foreach (`$elemento in `$elementosABorrar) {
+        `$rutaDestino = Join-Path "$installPath" `$elemento
+        if (Test-Path -LiteralPath `$rutaDestino) {
+            Remove-Item -Path `$rutaDestino -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Write-UpdateLog "[PASO 6/6] Instalando nuevos archivos..."
+    
+    # --- 2. COPIA BLINDADA ---
+    foreach (`$nuevo in `$elementosNuevos) {
+        `$destinoFinal = Join-Path "$installPath" `$nuevo.Name
+        Copy-Item -Path `$nuevo.FullName -Destination `$destinoFinal -Recurse -Force
+    }
     
     # Limpieza y reinicio
     Remove-Item -Path "`$tempDir_updater" -Recurse -Force -ErrorAction SilentlyContinue
@@ -203,11 +217,11 @@ catch {
             # Guardar el script del actualizador con codificacion UTF8 limpia
             $utf8NoBom = New-Object System.Text.UTF8Encoding $false
             [System.IO.File]::WriteAllText($updaterScriptPath, $updaterScriptContent, $utf8NoBom)
-            
+
             # Lanzar el actualizador y cerrar
             $launchArgs = "/c start `"PROCESO DE ACTUALIZACION`" powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$updaterScriptPath`" -parentPID $PID"
             Start-Process cmd.exe -ArgumentList $launchArgs -WindowStyle Normal
-            
+
             exit
         } else {
             Write-Host "`nActualizacion omitida por el usuario." -ForegroundColor Yellow
@@ -264,6 +278,25 @@ function Format-WrappedText {
     # Creamos el bloque de texto final con la sangria aplicada a cada linea.
     $indentation = " " * $Indent
     return $lines | ForEach-Object { "$indentation$_" }
+}
+
+# --- HELPER PRIVADO: Obtener letra de unidad libre (Z -> A) ---
+function Get-UnusedDriveLetter {
+    # 1. Usamos la clase nativa de .NET para una detección absoluta.
+    # A diferencia de Get-PSDrive, esto detecta todas las letras ocupadas en el sistema operativo a bajo nivel.
+    $usedLetters = [System.IO.DriveInfo]::GetDrives() | Select-Object -ExpandProperty Name | ForEach-Object { $_[0] }
+    
+    # 2. Rango ASCII invertido: Z (90) hasta F (70).
+    # Esto protege las letras A y B (Legacy), C (Sistema), D y E (Ópticos o discos secundarios fijos).
+    $alphabet = [char[]](90..70) 
+    
+    foreach ($letter in $alphabet) {
+        if ($usedLetters -notcontains $letter) {
+            return $letter
+        }
+    }
+    
+    throw "Excepcion de Montaje: No hay letras de unidad disponibles (rango Z: a F:) para adjuntar particiones temporales."
 }
 
 # --- Carga la configuracion desde el archivo JSON ---
@@ -474,21 +507,36 @@ try {
 }
 
 # =================================================================
-#  Registro Inicial
+#  Registro Inicial y Rotación de Logs
 # =================================================================
-# --- Rutas de Log (Definidas aqui para usar Write-Log inmediatamente) ---
 try {
-    # Si $PSScriptRoot es null (ejecutando seleccion en ISE), usar directorio actual como fallback
     $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
-    # Determinar directorio padre (asumiendo que puede estar en /bin o no)
     $parentDir = Split-Path -Parent $scriptRoot
     $script:logDir = Join-Path -Path $parentDir -ChildPath "Logs"
+    
     if (-not (Test-Path $script:logDir)) {
         New-Item -Path $script:logDir -ItemType Directory -Force | Out-Null
     }
+    
     $script:logFile = Join-Path -Path $script:logDir -ChildPath "Registro.log"
+
+    # --- LÓGICA DE ROTACIÓN (Se ejecuta SOLO al abrir AdminImagenOffline) ---
+    $maxLogSizeMB = 5
+    
+    if (Test-Path -LiteralPath $script:logFile) {
+        $logItem = Get-Item -LiteralPath $script:logFile
+        
+        # Si supera el límite, rotamos el archivo antes de iniciar la sesión
+        if ($logItem.Length -gt ($maxLogSizeMB * 1MB)) {
+            Write-Host "Realizando mantenimiento del archivo de Log..." -ForegroundColor Gray
+            $oldLogFile = Join-Path -Path $script:logDir -ChildPath "Registro_old.log"
+            
+            # Sobrescribe el backup viejo con el log gigante actual y empieza uno nuevo
+            Move-Item -LiteralPath $script:logFile -Destination $oldLogFile -Force
+        }
+    }
 } catch {
-    Write-Warning "No se pudo crear el directorio de Logs. El registro de eventos se desactivara. Error: $_"
+    Write-Warning "No se pudo crear el directorio de Logs. El registro de eventos se desactivará. Error: $_"
     $script:logFile = $null
 }
 
@@ -510,10 +558,25 @@ $script:configFile = Join-Path $parentDir "config.json"
 # --- Inicializar variables globales con los valores por defecto ---
 $Script:WIM_FILE_PATH = $null
 $Script:MOUNT_DIR = $defaultMountDir
-# ERROR PRESERVADO (inicialmente): Se usa el valor por defecto que podria no existir
 $Script:Scratch_DIR = $defaultScratchDir 
 $Script:IMAGE_MOUNTED = 0
 $Script:MOUNTED_INDEX = $null
+$Script:CachedControlSet = $null
+$Script:OfflineUserClassesPresent = $null
+
+Get-ChildItem -Path $PSScriptRoot -Filter "Modulo-*.ps1" | ForEach-Object {
+    . $_.FullName
+}
+
+. "$PSScriptRoot\Modulo-Appx.ps1"
+. "$PSScriptRoot\Modulo-DeployVHD.ps1"
+. "$PSScriptRoot\Modulo-Drivers.ps1"
+. "$PSScriptRoot\Modulo-Features.ps1"
+. "$PSScriptRoot\Modulo-Idioma.ps1"
+. "$PSScriptRoot\Modulo-IsoMaker.ps1"
+. "$PSScriptRoot\Modulo-Metadata.ps1"
+. "$PSScriptRoot\Modulo-OEMBranding.ps1"
+. "$PSScriptRoot\Modulo-Unattend.ps1"
 
 # --- Cargar Configuracion Guardada ---
 # Sobrescribe $Script:MOUNT_DIR y $Script:Scratch_DIR si el archivo config.json existe
@@ -522,7 +585,6 @@ Load-Config
 # =================================================================
 #  Modulos de Dialogo GUI
 # =================================================================
-
 # --- Funcion para ABRIR archivos o carpetas ---
 function Select-PathDialog {
     param(
@@ -593,6 +655,113 @@ function Select-SavePathDialog {
 # =============================================
 #  FUNCIONES DE ACCION (Montaje/Desmontaje)
 # =============================================
+function Select-WindowsMediaSource {
+	param(
+        [string]$ExtractDir = $(Join-Path $parentDir "ISO_Extract")
+    )
+
+    Write-Log -LogLevel INFO -Message "SourceSelector: Iniciando seleccion de fuente de medios (Solo ISO)."
+    $SelectedPath = $null
+
+    Add-Type -AssemblyName System.Windows.Forms
+
+    # --- 1. SELECCION DE ISO ---
+    $ofd = New-Object System.Windows.Forms.OpenFileDialog
+    $ofd.Filter = "Archivos ISO (*.iso)|*.iso"
+    $ofd.Title = "SELECCIONA TU ISO DE WINDOWS"
+    
+    if ($ofd.ShowDialog() -ne 'OK') { 
+        Write-Log -LogLevel INFO -Message "SourceSelector: Usuario cancelo la seleccion de ISO."
+        Write-Warning "Operacion cancelada."
+        return $null 
+    }
+    
+    $IsoPath = $ofd.FileName
+	Clear-Host
+	Write-Host ""
+    Write-Host "ISO Seleccionada: $IsoPath" -ForegroundColor Yellow
+    Write-Log -LogLevel INFO -Message "SourceSelector: ISO seleccionada -> $IsoPath"
+
+    # --- 2. AVISO Y LIMPIEZA DE CONTENIDO PREVIO ---
+    if (Test-Path $ExtractDir) {
+        # Verificamos si realmente hay archivos adentro (para no asustar si la carpeta está vacía)
+        $existingFiles = Get-ChildItem -Path $ExtractDir -Force
+        
+        if ($existingFiles.Count -gt 0) {
+            $warnMsg = "Se ha detectado contenido previo en la carpeta de extraccion:`n$ExtractDir`n`nPara evitar que los archivos se mezclen y corrompan la imagen, se ELIMINARA todo el contenido actual de esa carpeta antes de extraer la nueva ISO.`n`nEstas de acuerdo en vaciar la carpeta y continuar?"
+            
+            $dialogRes = [System.Windows.Forms.MessageBox]::Show($warnMsg, "Advertencia de Limpieza", 'YesNo', 'Warning')
+            
+            if ($dialogRes -ne 'Yes') {
+                Write-Log -LogLevel INFO -Message "SourceSelector: Operacion cancelada por el usuario para no borrar el directorio previo."
+                Write-Warning "Extracción cancelada para proteger los archivos existentes."
+                return $null
+            }
+            
+            Write-Host "  >> Vaciando directorio de extraccion anterior..." -ForegroundColor DarkGray
+            Write-Log -LogLevel ACTION -Message "SourceSelector: Eliminando contenido previo en $ExtractDir."
+            # Borramos el contenido, no la carpeta principal
+            Remove-Item "$ExtractDir\*" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } else {
+        # Si no existe, la creamos
+        New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
+    }
+    
+    # --- 3. MONTAJE Y EXTRACCION ---
+    try {
+        Write-Host "  >> Montando imagen de disco..." -ForegroundColor Gray
+        $mountResult = Mount-DiskImage -ImagePath $IsoPath -PassThru -StorageType ISO
+        
+        # Pausa tactica de veterano
+        Start-Sleep -Seconds 2 
+        
+        $vol = $mountResult | Get-Volume
+        
+        if (-not $vol) { throw "No se pudo obtener la letra de la unidad montada." }
+        
+        $driveRoot = "$($vol.DriveLetter):\" 
+        
+        Write-Host "  >> Copiando archivos (esto puede tardar varios minutos)..." -ForegroundColor Cyan
+        Write-Log -LogLevel ACTION -Message "SourceSelector: Copiando contenido de $driveRoot a $ExtractDir via Robocopy."
+        
+        $argsRobo = @($driveRoot, $ExtractDir, "/E", "/NFL", "/NDL", "/NJH", "/NJS")
+        $proc = Start-Process "robocopy.exe" -ArgumentList $argsRobo -Wait -PassThru -NoNewWindow
+        
+        if ($proc.ExitCode -ge 8) {
+            Write-Log -LogLevel WARN -Message "SourceSelector: Robocopy fallo con exit code $($proc.ExitCode). Usando Copy-Item."
+            Write-Warning "Robocopy reporto errores. Intentando metodo alternativo (Copy-Item)..."
+            Copy-Item -Path "$driveRoot*" -Destination $ExtractDir -Recurse -Force
+        }
+        
+        Write-Log -LogLevel INFO -Message "SourceSelector: Desmontando ISO."
+        Dismount-DiskImage -ImagePath $IsoPath | Out-Null
+        $SelectedPath = $ExtractDir
+        
+    } catch {
+        Write-Log -LogLevel ERROR -Message "SourceSelector: Fallo al procesar la ISO - $($_.Exception.Message)"
+        [System.Windows.Forms.MessageBox]::Show("Error critico al procesar la ISO:`n$($_.Exception.Message)", "Error ISO", 'OK', 'Error')
+        
+        try { Dismount-DiskImage -ImagePath $IsoPath -ErrorAction SilentlyContinue | Out-Null } catch {}
+        return $null
+    }
+
+    # --- 4. PERMISOS ---
+    Write-Host "  >> Normalizando atributos de archivos (Quitando Solo Lectura)..." -ForegroundColor Yellow
+    Write-Log -LogLevel ACTION -Message "SourceSelector: Eliminando atributos IsReadOnly en $SelectedPath"
+    
+    try {
+        Get-ChildItem -Path $SelectedPath -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.IsReadOnly) { $_.IsReadOnly = $false }
+        }
+        Write-Host "  [OK] Atributos normalizados." -ForegroundColor Green
+    } catch {
+        Write-Log -LogLevel WARN -Message "SourceSelector: Advertencia menor al cambiar atributos - $($_.Exception.Message)"
+    }
+
+    return $SelectedPath
+}
+
 function Mount-Image {
     Clear-Host
     Write-Log -LogLevel INFO -Message "MountManager: Iniciando solicitud de montaje de imagen."
@@ -603,18 +772,79 @@ function Mount-Image {
         Pause; return
     }
 
-    $path = Select-PathDialog -DialogType File -Title "Seleccione la imagen a montar" -Filter "Archivos Soportados (*.wim, *.vhd, *.vhdx)|*.wim;*.vhd;*.vhdx|Todos (*.*)|*.*"
-    if ([string]::IsNullOrEmpty($path)) { 
-        Write-Log -LogLevel INFO -Message "MountManager: El usuario cancelo el dialogo de seleccion de archivo."
-        Write-Warning "Operacion cancelada."; Pause; return 
+    # =======================================================
+    #  NUEVA LÓGICA: SELECCIÓN DE ORIGEN (ISO vs Archivo)
+    # =======================================================
+    Write-Host "=======================================================" -ForegroundColor Cyan
+    Write-Host "               SELECCION DE FUENTE                     " -ForegroundColor Cyan
+    Write-Host "=======================================================" -ForegroundColor Cyan
+    Write-Host " Que deseas montar?`n"
+    Write-Host "   [1] Archivo Individual (.wim, .vhd, .vhdx)"
+    Write-Host "   [2] Extraer desde una ISO de Windows" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "   [V] Cancelar y Volver" -ForegroundColor Red
+    Write-Host ""
+    
+    $sourceType = Read-Host "Elige una opcion"
+
+    if ($sourceType.ToUpper() -eq 'V') { return }
+
+    if ($sourceType -eq '2') {
+        Write-Log -LogLevel INFO -Message "MountManager: Usuario eligio extraer desde ISO/Carpeta."
+
+        # Llamamos a nuestra nueva y robusta función
+        $ExtractPath = Select-WindowsMediaSource
+        
+        if (-not $ExtractPath) { 
+            Write-Log -LogLevel INFO -Message "MountManager: Seleccion de fuente cancelada."
+            return 
+        }
+
+        # Auto-detectar la imagen del sistema operativo
+        $wimPath = Join-Path $ExtractPath "sources\install.wim"
+        $esdPath = Join-Path $ExtractPath "sources\install.esd"
+
+        if (Test-Path -LiteralPath $wimPath) {
+            $Script:WIM_FILE_PATH = $wimPath
+            Write-Host "`n[OK] Imagen base detectada: install.wim" -ForegroundColor Green
+        } elseif (Test-Path -LiteralPath $esdPath) {
+            Clear-Host
+            Write-Host "=======================================================" -ForegroundColor Red
+            Write-Host "             FORMATO ESD DETECTADO                     " -ForegroundColor Yellow
+            Write-Host "=======================================================" -ForegroundColor Red
+            Write-Host "La ISO extraida contiene un archivo 'install.esd' (Compresion Solida)." -ForegroundColor White
+            Write-Host "DISM no permite montar archivos .esd para realizar ediciones directas." -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "SOLUCION:" -ForegroundColor Cyan
+            Write-Host "Ve al Menu Principal -> [2] Convertir Formatos."
+            Write-Host "Selecciona 'Convertir ESD a WIM' y apunta a este archivo:" -ForegroundColor Gray
+            Write-Host $esdPath -ForegroundColor Yellow
+            Write-Host ""
+            Write-Log -LogLevel WARN -Message "MountManager: install.esd detectado. Abortando montaje directo."
+            Pause; return
+        } else {
+            Write-Warning "No se encontro install.wim ni install.esd en la ruta: $ExtractPath\sources"
+            Write-Log -LogLevel ERROR -Message "MountManager: No se encontro imagen base en la ISO extraida."
+            Pause; return
+        }
+
+    } elseif ($sourceType -eq '1') {
+        $path = Select-PathDialog -DialogType File -Title "Seleccione la imagen a montar" -Filter "Archivos Soportados (*.wim, *.vhd, *.vhdx)|*.wim;*.vhd;*.vhdx|Todos (*.*)|*.*"
+        if ([string]::IsNullOrEmpty($path)) { 
+            Write-Log -LogLevel INFO -Message "MountManager: El usuario cancelo el dialogo de seleccion de archivo individual."
+            Write-Warning "Operacion cancelada."; Pause; return 
+        }
+        $Script:WIM_FILE_PATH = $path
+    } else {
+        Write-Warning "Opción no válida."
+        Pause; return
     }
     
-    $Script:WIM_FILE_PATH = $path
-    $extension = [System.IO.Path]::GetExtension($path).ToUpper()
+    $extension = [System.IO.Path]::GetExtension($Script:WIM_FILE_PATH).ToUpper()
     Write-Log -LogLevel INFO -Message "MountManager: Archivo seleccionado -> $Script:WIM_FILE_PATH | Formato detectado: $extension"
 
     # =======================================================
-    #  MODO VHD / VHDX (LOGICA ROBUSTA)
+    #  MODO VHD / VHDX (CON LA PAUSA TÁCTICA APLICADA)
     # =======================================================
     if ($extension -eq ".VHD" -or $extension -eq ".VHDX") {
         Clear-Host
@@ -637,6 +867,10 @@ function Mount-Image {
             Write-Log -LogLevel ACTION -Message "MountManager: Ejecutando Mount-VHD para adjuntar el disco virtual."
             $vhdInfo = Mount-VHD -Path $Script:WIM_FILE_PATH -PassThru -ErrorAction Stop
             
+            # --- CORRECCIÓN: Pausa táctica (Respiración del bus virtual) ---
+            Write-Log -LogLevel INFO -Message "MountManager: Esperando 2 segundos para inicializacion logica del disco..."
+            Start-Sleep -Seconds 2
+
             # 1. Escaneo Inteligente de Particiones
             Write-Log -LogLevel INFO -Message "MountManager: Escaneando tabla de particiones del disco virtual montado."
             $targetPart = $null
@@ -649,6 +883,8 @@ function Mount-Image {
                     Write-Log -LogLevel INFO -Message "MountManager: Asignando letra temporal [$freeLet] a particion sin montar."
                     Set-Partition -InputObject $part -NewDriveLetter $freeLet -ErrorAction SilentlyContinue
                     $part.DriveLetter = $freeLet # Actualizamos objeto en memoria
+                    
+                    Start-Sleep -Milliseconds 500 # Micro-pausa para NTFS
                 }
                 
                 # Verificar si es Windows
@@ -694,6 +930,7 @@ function Mount-Image {
             $Script:MOUNT_DIR = $driveLetter
             $Script:IMAGE_MOUNTED = 2         # Estado 2 = VHD
             $Script:MOUNTED_INDEX = $selectedPart.PartitionNumber
+            $Script:CachedControlSet = $null
             
             Write-Host "[OK] VHD Montado en: $Script:MOUNT_DIR" -ForegroundColor Green
             Write-Log -LogLevel INFO -Message "MountManager: VHD Montado y vinculado exitosamente. Entorno local redireccionado a $Script:MOUNT_DIR"
@@ -710,9 +947,9 @@ function Mount-Image {
     # =======================================================
     #  MODO WIM (DISM)
     # =======================================================
-    Write-Host "[+] Leyendo WIM..." -ForegroundColor Yellow
+    Write-Host "`n[+] Leyendo estructura del WIM..." -ForegroundColor Yellow
     Write-Log -LogLevel INFO -Message "MountManager: Consultando a DISM la estructura de indices del archivo WIM."
-    dism /get-wiminfo /wimfile:"$Script:WIM_FILE_PATH"
+    dism /get-wiminfo /wimfile:"$Script:WIM_FILE_PATH" /English
 
     $INDEX = Read-Host "`nNumero de indice a montar"
     Write-Log -LogLevel INFO -Message "MountManager: Indice seleccionado por el usuario -> [$INDEX]"
@@ -738,6 +975,7 @@ function Mount-Image {
     if ($LASTEXITCODE -eq 0) {
         $Script:IMAGE_MOUNTED = 1
         $Script:MOUNTED_INDEX = $INDEX
+        $Script:CachedControlSet = $null
         Write-Host "[OK] Imagen montada." -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "MountManager: Montaje WIM completado exitosamente. Entorno listo para personalizacion."
     } else {
@@ -806,6 +1044,7 @@ function Unmount-Image {
             $Script:IMAGE_MOUNTED = 0
             $Script:WIM_FILE_PATH = $null
             Load-Config # Restaurar ruta original
+			$Script:CachedControlSet = $null
             Write-Log -LogLevel INFO -Message "UnmountManager: Desmontaje de VHD exitoso. Entorno virtualizado cerrado."
         } catch {
             Write-Log -LogLevel ERROR -Message "UnmountManager: Fallo al desmontar VHD - $($_.Exception.Message)"
@@ -831,6 +1070,14 @@ function Unmount-Image {
         Write-Host "   > Intento $retry de $($maxRetries): $actionText WIM..." -ForegroundColor Yellow
         Write-Log -LogLevel INFO -Message "UnmountManager: Ejecutando DISM (Intento $retry de $maxRetries)..."
         
+        if ($Commit) {
+            Write-Host "   [!] Empaquetando y comprimiendo cambios en el archivo WIM..." -ForegroundColor Cyan
+            Write-Host "   [!] DISM tardara varios minutos en iniciar la barra de progreso. Por favor, no interrumpa el proceso..." -ForegroundColor DarkGray
+        } else {
+            Write-Host "   [!] Revirtiendo estructura de directorios y liberando bloqueos..." -ForegroundColor Cyan
+            Write-Host "   [!] Esto tomara unos instantes. Por favor, espere..." -ForegroundColor Gray
+        }
+
         dism /unmount-wim /mountdir:"$Script:MOUNT_DIR" $dismArg
         
         if ($LASTEXITCODE -eq 0) {
@@ -853,6 +1100,7 @@ function Unmount-Image {
         $Script:IMAGE_MOUNTED = 0
         $Script:WIM_FILE_PATH = $null
         $Script:MOUNTED_INDEX = $null
+		$Script:CachedControlSet = $null
         Write-Host "[OK] Imagen desmontada correctamente." -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "UnmountManager: Operacion WIM completada exitosamente. Entorno local limpio."
     } else {
@@ -906,7 +1154,6 @@ function Reload-Image {
         Write-Host "Esperando 5 segundos para liberar archivos..." -ForegroundColor Cyan
         Write-Log -LogLevel INFO -Message "ImageReloader: Forzando pausa de 5 segundos para liberar handles de archivos del sistema operativo."
         Start-Sleep -Seconds 5 
-        # -----------------------------------------------
         
         # Llamada recursiva con contador incrementado
         Write-Log -LogLevel WARN -Message "ImageReloader: Iniciando llamada recursiva de recarga..."
@@ -922,6 +1169,7 @@ function Reload-Image {
         Write-Host "[OK] Imagen recargada exitosamente." -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "ImageReloader: Recarga completada exitosamente. El entorno esta listo para seguir trabajando."
         $Script:IMAGE_MOUNTED = 1
+		$Script:CachedControlSet = $null
     } else {
         Write-Host "[ERROR] Error al remontar la imagen."
         Write-Log -LogLevel ERROR -Message "ImageReloader: Fallo critico al remontar la imagen. El entorno ha quedado desmontado. LASTEXITCODE: $LASTEXITCODE"
@@ -985,12 +1233,14 @@ function Save-Changes {
     if ($Mode -eq 'Commit') {
         Clear-Host
         Write-Host "[+] Guardando cambios en el indice $Script:MOUNTED_INDEX..." -ForegroundColor Yellow
+        Write-Host "    > Por favor espera. DISM esta inicializando el motor de guardado (puede tardar en comenzar)..." -ForegroundColor Gray
         Write-Log -LogLevel ACTION -Message "SaveManager: Ejecutando DISM /Commit-Image para sobrescribir el indice $Script:MOUNTED_INDEX."
         dism /commit-image /mountdir:"$Script:MOUNT_DIR"
     } 
     elseif ($Mode -eq 'Append') {
         Clear-Host
         Write-Host "[+] Guardando cambios en un nuevo indice (Append)..." -ForegroundColor Yellow
+        Write-Host "    > Por favor espera. DISM esta calculando las diferencias (puede tardar en comenzar)..." -ForegroundColor Gray
         Write-Log -LogLevel ACTION -Message "SaveManager: Ejecutando DISM /Commit-Image /Append para crear un indice nuevo en la imagen."
         dism /commit-image /mountdir:"$Script:MOUNT_DIR" /append
     } 
@@ -1032,6 +1282,7 @@ function Save-Changes {
         if ([string]::IsNullOrWhiteSpace($IMAGE_DESC)) { $IMAGE_DESC = "Imagen creada con AdminImagenOffline" }
         
         Write-Host "`n[+] Capturando estado actual a nuevo WIM..." -ForegroundColor Yellow
+        Write-Host "    > Por favor espera. DISM esta preparando la compresion maxima (puede tardar unos minutos en iniciar)..." -ForegroundColor Gray
         Write-Log -LogLevel ACTION -Message "SaveManager: Ejecutando DISM /Capture-Image desde la carpeta de montaje hacia '$DEST_WIM_PATH' (Nombre: $IMAGE_NAME)."
         
         dism /Capture-Image /ImageFile:"$DEST_WIM_PATH" /CaptureDir:"$Script:MOUNT_DIR" /Name:"$IMAGE_NAME" /Description:"$IMAGE_DESC" /Compress:max /CheckIntegrity
@@ -1083,8 +1334,28 @@ function Export-Index {
         Write-Log -LogLevel INFO -Message "IndexManager: Usando archivo WIM global pre-cargado -> $Script:WIM_FILE_PATH"
     }
 
+    $isVhd = ($Script:WIM_FILE_PATH -match '\.vhdx?$')
+    if ($isVhd -or $Script:IMAGE_MOUNTED -eq 2) {
+        Write-Log -LogLevel WARN -Message "IndexManager: Bloqueo activado. Intento de exportar indices desde un disco virtual."
+        Clear-Host
+        Write-Host "=======================================================" -ForegroundColor Red
+        Write-Host "      OPERACION NO PERMITIDA EN DISCOS VIRTUALES       " -ForegroundColor Yellow
+        Write-Host "=======================================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Has intentado exportar un indice desde un archivo VHD o VHDX." -ForegroundColor White
+        Write-Host "EXPLICACION TECNICA:" -ForegroundColor Cyan
+        Write-Host "Los discos virtuales usan particiones (bloques), no indices de imagen como los WIM/ESD." -ForegroundColor Gray
+        Write-Host "Para extraer Windows de un VHD, usa la opcion 'Convertir VHD/VHDX a WIM' en el menu de Conversion." -ForegroundColor Gray
+        Write-Host ""
+        Pause
+        return
+    }
+
     Write-Host "Archivo WIM actual: $Script:WIM_FILE_PATH" -ForegroundColor Gray
     Write-Log -LogLevel INFO -Message "IndexManager: Consultando a DISM la estructura de indices del archivo origen."
+    
+    # MENSAJE DE ESPERA AÑADIDO AQUI
+    Write-Host "Por favor, espere. DISM esta leyendo la estructura del archivo (Esto puede tardar unos segundos)..." -ForegroundColor Cyan
     dism /get-wiminfo /wimfile:"$Script:WIM_FILE_PATH"
     
     $INDEX_TO_EXPORT = Read-Host "`nIngrese el numero de Indice que desea exportar"
@@ -1104,6 +1375,8 @@ function Export-Index {
     Write-Host "[+] Exportando Indice $INDEX_TO_EXPORT a '$DEST_WIM_PATH'..." -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "IndexManager: Ejecutando DISM /Export-Image para clonar el Indice $INDEX_TO_EXPORT de '$($Script:WIM_FILE_PATH)' hacia '$DEST_WIM_PATH'."
     
+    # MENSAJE DE ESPERA AÑADIDO AQUI
+    Write-Host "Por favor, espere. DISM esta iniciando el proceso de exportacion (No cierre la ventana)..." -ForegroundColor Cyan
     dism /export-image /sourceimagefile:"$Script:WIM_FILE_PATH" /sourceindex:$INDEX_TO_EXPORT /destinationimagefile:"$DEST_WIM_PATH"
 
     if ($LASTEXITCODE -eq 0) {
@@ -1133,8 +1406,28 @@ function Delete-Index {
         Write-Log -LogLevel INFO -Message "IndexManager: Usando archivo WIM global pre-cargado -> $Script:WIM_FILE_PATH"
     }
 
+    $isVhd = ($Script:WIM_FILE_PATH -match '\.vhdx?$')
+    if ($isVhd -or $Script:IMAGE_MOUNTED -eq 2) {
+        Write-Log -LogLevel WARN -Message "IndexManager: Bloqueo activado. Intento de eliminar indices en un disco virtual."
+        Clear-Host
+        Write-Host "=======================================================" -ForegroundColor Red
+        Write-Host "      OPERACION NO PERMITIDA EN DISCOS VIRTUALES       " -ForegroundColor Yellow
+        Write-Host "=======================================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Has intentado eliminar un indice de un archivo VHD o VHDX." -ForegroundColor White
+        Write-Host "EXPLICACION TECNICA:" -ForegroundColor Cyan
+        Write-Host "Los discos virtuales no contienen indices gestionables por DISM." -ForegroundColor Gray
+        Write-Host "Si deseas eliminar el sistema operativo o particiones de un VHD, debes montarlo y usar el Administrador de Discos de Windows (diskmgmt.msc)." -ForegroundColor Gray
+        Write-Host ""
+        Pause
+        return
+    }
+
     Write-Host "Archivo WIM actual: $Script:WIM_FILE_PATH" -ForegroundColor Gray
     Write-Log -LogLevel INFO -Message "IndexManager: Consultando a DISM la estructura de indices del archivo."
+    
+    # MENSAJE DE ESPERA AÑADIDO AQUI
+    Write-Host "Por favor, espere. DISM esta leyendo la estructura del archivo (Esto puede tardar unos segundos)..." -ForegroundColor Cyan
     dism /get-wiminfo /wimfile:"$Script:WIM_FILE_PATH"
     
     $INDEX_TO_DELETE = Read-Host "`nIngrese el numero de Indice que desea eliminar"
@@ -1147,6 +1440,8 @@ function Delete-Index {
         Write-Host "[+] Eliminando Indice $INDEX_TO_DELETE..." -ForegroundColor Yellow
         Write-Log -LogLevel ACTION -Message "IndexManager: Ejecutando DISM /Delete-Image para eliminar el Indice $INDEX_TO_DELETE de '$($Script:WIM_FILE_PATH)'."
         
+        # MENSAJE DE ESPERA AÑADIDO AQUI
+        Write-Host "Por favor, espere. DISM esta procediendo a borrar el indice (La operacion tomara algo de tiempo)..." -ForegroundColor Cyan
         dism /delete-image /imagefile:"$Script:WIM_FILE_PATH" /index:$INDEX_TO_DELETE
         
         if ($LASTEXITCODE -eq 0) {
@@ -1181,6 +1476,8 @@ function Convert-ESD {
 
     Write-Host "[+] Obteniendo informacion de los indices del ESD..." -ForegroundColor Yellow
     Write-Log -LogLevel INFO -Message "ConvertESD: Consultando a DISM la estructura de indices del archivo."
+    
+    Write-Host "   > Inicializando motor DISM, por favor espere..." -ForegroundColor Cyan
     dism /get-wiminfo /wimfile:"$ESD_FILE_PATH"
     
     $INDEX_TO_CONVERT = Read-Host "`nIngrese el numero de indice que desea convertir"
@@ -1200,6 +1497,7 @@ function Convert-ESD {
     Write-Host "[+] Convirtiendo... Esto puede tardar varios minutos." -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "ConvertESD: Ejecutando DISM /Export-Image del archivo '$ESD_FILE_PATH' (Indice: $INDEX_TO_CONVERT) hacia '$DEST_WIM_PATH'."
     
+    Write-Host "   > Inicializando motor DISM, por favor espere..." -ForegroundColor Cyan
     dism /export-image /SourceImageFile:"$ESD_FILE_PATH" /SourceIndex:$INDEX_TO_CONVERT /DestinationImageFile:"$DEST_WIM_PATH" /Compress:max /CheckIntegrity
 
     if ($LASTEXITCODE -eq 0) {
@@ -1224,8 +1522,12 @@ function Convert-VHD {
     # 1. Verificar modulo Hyper-V
     if (-not (Get-Command "Mount-Vhd" -ErrorAction SilentlyContinue)) {
         Write-Log -LogLevel ERROR -Message "ConvertVHD: Faltan dependencias. El cmdlet 'Mount-Vhd' (Hyper-V) no esta disponible."
-        Write-Host "[ERROR] El cmdlet 'Mount-Vhd' no esta disponible."
-        Write-Warning "Necesitas habilitar el modulo de Hyper-V o las herramientas de gestion de discos virtuales."
+        Write-Host "[ERROR] El cmdlet 'Mount-Vhd' no esta disponible en el sistema actual." -ForegroundColor Red
+        Write-Host "Necesitas habilitar las herramientas de gestion de discos virtuales de Hyper-V." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "Para solucionarlo, abre una consola PowerShell como Administrador y ejecuta:" -ForegroundColor Yellow
+        Write-Host "Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-Management-PowerShell" -ForegroundColor Cyan
+        Write-Host ""
         Pause; return
     }
 
@@ -1266,64 +1568,86 @@ function Convert-VHD {
     $mountedDisk = $null
 
     try {
-        # A. Montar VHD sin letra inicial
-        $mountedDisk = Mount-Vhd -Path $VHD_FILE_PATH -PassThru -ErrorAction Stop
+        # A. Montar VHD quitándole el control automático a Windows (NoDriveLetter)
+        # Esto evita condiciones de carrera con el sistema Plug and Play
+        $mountedDisk = Mount-Vhd -Path $VHD_FILE_PATH -NoDriveLetter -PassThru -ErrorAction Stop
         
-        # B. Obtener todas las particiones de DATOS (Ignoramos pequeñas tipo EFI/MSR < 2GB para ir rapido)
-        #    Esto filtra basura y acelera el proceso.
-        $partitions = Get-Partition -DiskNumber $mountedDisk.Number | Where-Object { $_.Size -gt 3GB }
+        # Pausa táctica (Respiración del bus SCSI virtual)
+        Start-Sleep -Seconds 2
+
+        # B. Obtener particiones filtrando por topología real, no por tamaño arbitrario
+        # Excluimos explícitamente particiones de Sistema (EFI), Reservadas (MSR) y Ocultas/OEM.
+        $partitions = Get-Partition -DiskNumber $mountedDisk.Number | Where-Object { 
+            $_.Type -notin @('System', 'Reserved', 'Recovery') -and 
+            $_.IsHidden -eq $false -and
+            $_.Size -gt 500MB 
+        }
 
         foreach ($part in $partitions) {
             $currentLet = $part.DriveLetter
+            $assignedTemp = $false
             
-            # --- LOGICA DE AUTO-ASIGNACIoN ---
+            # --- LÓGICA DE AUTO-ASIGNACIÓN (Con validación de éxito) ---
             if (-not $currentLet) {
-                # Buscar letra libre (Z hacia A)
-                $usedLetters = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Name
-                $alphabet = [char[]](90..65) # Z..A
-                $freeLet = $null
-                foreach ($l in $alphabet) { if ($usedLetters -notcontains $l) { $freeLet = $l; break } }
-
-                if ($freeLet) {
-                    Write-Log -LogLevel INFO -Message "ConvertVHD: Asignando letra temporal [$freeLet] a particion sin montar."
-                    Write-Host "   > Particion sin montar detectada. Asignando letra temporal $freeLet`:..." -ForegroundColor DarkGray
-                    Set-Partition -InputObject $part -NewDriveLetter $freeLet -ErrorAction SilentlyContinue
-                    $currentLet = $freeLet # Usamos esta letra para verificar
+                try {
+                    # Invocamos al helper global (protegido contra mapeos de red y restringido de Z a F)
+                    $freeLet = Get-UnusedDriveLetter
+                    
+                    Write-Log -LogLevel INFO -Message "ConvertVHD: Intentando asignar letra temporal [$freeLet] a la Particion $($part.PartitionNumber)."
+                    Write-Host "   > Inspeccionando particion sin letra. Asignando $freeLet`: temporalmente..." -ForegroundColor Gray
+                    
+                    Set-Partition -InputObject $part -NewDriveLetter $freeLet -ErrorAction Stop
+                    $currentLet = $freeLet
+                    $assignedTemp = $true
+                    
+                    # Micro-pausa para que el sistema de archivos (NTFS) monte el volumen
+                    Start-Sleep -Milliseconds 500 
+                } catch {
+                    Write-Log -LogLevel WARN -Message "ConvertVHD: Particion protegida, RAW, cifrada, o sin letras disponibles. Ignorando. ($($_.Exception.Message))"
+                    continue # Saltamos a la siguiente iteración
                 }
             }
 
-            # --- VERIFICACIoN DE WINDOWS ---
+            # --- VERIFICACIÓN EXACTA DE WINDOWS ---
             if ($currentLet) {
                 $winPath = "$currentLet`:\Windows\System32\config\SYSTEM"
-                if (Test-Path $winPath) {
+                
+                if (Test-Path -LiteralPath $winPath) {
                     $DRIVE_LETTER = $currentLet
                     Write-Log -LogLevel INFO -Message "ConvertVHD: Instalacion de Windows validada en la particion [$DRIVE_LETTER`]."
                     Write-Host "   [OK] Windows detectado en particion $DRIVE_LETTER`:" -ForegroundColor Green
-                    break # ¡Encontrado! Dejamos de buscar.
+                    break # ¡Encontrado! Detenemos la búsqueda.
                 } else {
-                    Write-Log -LogLevel INFO -Message "ConvertVHD: Particion [$currentLet`] ignorada (No contiene instalacion de Windows)."
-                    Write-Host "   [-] Particion $currentLet`: no contiene Windows. Ignorando." -ForegroundColor DarkGray
+                    Write-Log -LogLevel INFO -Message "ConvertVHD: Particion [$currentLet`] no es el sistema operativo."
+                    Write-Host "   [-] Particion $currentLet`: no contiene Windows. Ignorando." -ForegroundColor Gray
+                    
+                    # Limpieza: Si asignamos la letra y no era Windows, la removemos para no dejar basura montada
+                    if ($assignedTemp) {
+                        Remove-PartitionAccessPath -InputObject $part -AccessPath "$currentLet`:" -ErrorAction SilentlyContinue
+                    }
                 }
             }
         }
 
         if (-not $DRIVE_LETTER) {
             Write-Log -LogLevel ERROR -Message "ConvertVHD: Fallo estructural. No se encontro ninguna instalacion de Windows valida en el VHD."
-            throw "No se encontro ninguna instalacion de Windows valida en el VHD (se escanearon todas las particiones >3GB)."
+            throw "No se encontro ninguna instalacion de Windows valida en el VHD. Asegurese de que la imagen no esta cifrada con BitLocker."
         }
 
-        Write-Host "   > Optimizando volumen antes de la captura (Trim)..." -ForegroundColor DarkGray
+        Write-Host "   > Optimizando volumen antes de la captura (Trim)..." -ForegroundColor Gray
         Write-Log -LogLevel INFO -Message "ConvertVHD: Ejecutando Optimize-Volume (Trim) en el disco virtual."
+        
         try {
             Optimize-Volume -DriveLetter $DRIVE_LETTER -ReTrim -ErrorAction Stop | Out-Null
         } catch {
-            Write-Log -LogLevel WARN -Message "ConvertVHD: Omitiendo Trim. El volumen no lo soporta o esta en solo lectura. ($($_.Exception.Message))"
+            Write-Log -LogLevel WARN -Message "ConvertVHD: Omitiendo Trim. El volumen no lo soporta o es de solo lectura. ($($_.Exception.Message))"
         }
         
         # 5. Captura (DISM)
         Write-Host "`n[+] Capturando volumen $DRIVE_LETTER`: a WIM..." -ForegroundColor Yellow
         Write-Log -LogLevel ACTION -Message "ConvertVHD: Ejecutando DISM /Capture-Image del volumen [$DRIVE_LETTER`] hacia '$DEST_WIM_PATH'."
 
+        Write-Host "   > Inicializando motor DISM, por favor espere..." -ForegroundColor Cyan
         dism /capture-image /imagefile:"$DEST_WIM_PATH" /capturedir:"$DRIVE_LETTER`:\" /name:"$IMAGE_NAME" /description:"$IMAGE_DESC" /compress:max /checkintegrity
 
         if ($LASTEXITCODE -eq 0) {
@@ -1392,9 +1716,14 @@ function Manage-WinRE-Menu {
     Write-Host "[2/5] Extrayendo winre.wim de la imagen principal..." -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "WinRE_Manager: Desbloqueando atributos del archivo original y copiando a Staging."
     
-    # --- Manipulacion pura con .NET para evadir las restricciones de PowerShell ---
+    # --- CAPTURA DE SEGURIDAD (Atributos y ACLs NTFS) ---
     $winreFile = Get-Item -LiteralPath $winrePath -Force
     $originalAttributes = $winreFile.Attributes
+    # Guardamos los permisos exactos (TrustedInstaller, etc.)
+    $originalAcl = Get-Acl -LiteralPath $winrePath 
+    Write-Log -LogLevel INFO -Message "WinRE_Manager: ACLs y atributos originales de winre.wim respaldados en memoria."
+
+    # Cambiamos a Normal para manipulación segura
     $winreFile.Attributes = 'Normal'
 
     $tempWinrePath = Join-Path $winreStaging "winre.wim"
@@ -1407,10 +1736,15 @@ function Manage-WinRE-Menu {
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] No se pudo montar winre.wim. Abortando..." -ForegroundColor Red
         Write-Log -LogLevel ERROR -Message "WinRE_Manager: Fallo critico al montar winre.wim. Codigo DISM: $LASTEXITCODE"
-        dism /cleanup-wim | Out-Null
-        # Restaurar atributos si falla el montaje
+        
+        # FIX: Evitar la bomba nuclear global, solo desmontamos nuestro dir
+        Write-Log -LogLevel INFO -Message "WinRE_Manager: Ejecutando limpieza de emergencia (discard) especificamente en $winreMount."
+        dism /unmount-image /mountdir:"$winreMount" /discard 2>$null | Out-Null
+        
+        # Restaurar atributos si falla
         $winreFile = Get-Item -LiteralPath $winrePath -Force
         $winreFile.Attributes = $originalAttributes
+        Write-Log -LogLevel INFO -Message "WinRE_Manager: Atributos restaurados tras el fallo de montaje."
         Pause; return
     }
 
@@ -1432,7 +1766,7 @@ function Manage-WinRE-Menu {
             Write-Host "El entorno de recuperacion esta montado y listo."
             Write-Host "Puedes inyectar Addons (DaRT) y Drivers (VMD/RAID/Red)."
             Write-Host ""
-            Write-Host "   [1] Inyectar Addons (.tpk, .bpk, .reg, .cab)"
+            Write-Host "   [1] Inyectar Addons (.tpk, .bpk, .reg,)"
             Write-Host "   [2] Inyectar Drivers (.inf)" -ForegroundColor Cyan
             Write-Host ""
             Write-Host "   [T] Terminar edicion y proceder a Guardar" -ForegroundColor Green
@@ -1463,13 +1797,13 @@ function Manage-WinRE-Menu {
                 Enable-Privileges 
                 
                 # =========================================================
-                #  MOTOR DE COMPRESION EXTREMA (EXPORT-IMAGE)
+                #  MOTOR DE COMPRESIÓN EXTREMA (EXPORT-IMAGE)
                 # =========================================================
                 $optimizedWinrePath = Join-Path $winreStaging "winre_optimized.wim"
                 $sizeBefore = (Get-Item -LiteralPath $tempWinrePath).Length
                 
                 Write-Host "      -> Ejecutando reconstruccion de diccionario WIM (Tardara unos minutos)..." -ForegroundColor Cyan
-                Write-Log -LogLevel ACTION -Message "WinRE_Manager: Ejecutando DISM /Export-Image para reconstruir el diccionario WIM y purgar peso muerto."
+                Write-Log -LogLevel ACTION -Message "WinRE_Manager: Ejecutando Export-Image con flag /Bootable para reconstruir el diccionario WIM."
                 
                 $dismArgs = "/Export-Image /SourceImageFile:`"$tempWinrePath`" /SourceIndex:1 /DestinationImageFile:`"$optimizedWinrePath`" /Bootable"
                 $proc = Start-Process "dism.exe" -ArgumentList $dismArgs -Wait -NoNewWindow -PassThru
@@ -1481,9 +1815,9 @@ function Manage-WinRE-Menu {
                     # Movemos el nuevo y comprimido a su lugar
                     Move-Item -LiteralPath $optimizedWinrePath -Destination $winrePath -Force
 
-                    # Restauramos los atributos originales de fabrica (+h +s) via .NET
-                    $restoredFile = Get-Item -LiteralPath $winrePath -Force
-                    $restoredFile.Attributes = $originalAttributes
+                    # FIX: Restauramos el ACL original (Propiedad de TrustedInstaller)
+                    Set-Acl -Path $winrePath -AclObject $originalAcl
+                    Write-Log -LogLevel INFO -Message "WinRE_Manager: ACL original restaurado en el winre.wim optimizado."
 
                     $sizeAfter = (Get-Item -LiteralPath $winrePath).Length
                     $savedMB = [math]::Round(($sizeBefore - $sizeAfter) / 1MB, 2)
@@ -1491,18 +1825,20 @@ function Manage-WinRE-Menu {
 
                     Write-Host "[EXITO] WinRE optimizado e integrado correctamente." -ForegroundColor Green
                     Write-Host "        Tamano final: $finalMB MB (Ahorro de $savedMB MB de peso muerto)." -ForegroundColor DarkGreen
-                    Write-Log -LogLevel INFO -Message "WinRE_Manager: Optimizacion exitosa. Tamano Final: $finalMB MB. Ahorro: $savedMB MB."
+                    Write-Log -LogLevel INFO -Message "WinRE_Manager: Optimizacion exitosa. Tamano final: $finalMB MB (Ahorro: $savedMB MB)."
                 } else {
                     Write-Host "[ADVERTENCIA] La compresion profunda fallo (Codigo: $($proc.ExitCode))." -ForegroundColor Red
                     Write-Host "              Aplicando metodo de volcado de emergencia..." -ForegroundColor Yellow
-                    Write-Log -LogLevel ERROR -Message "WinRE_Manager: Fallo Export-Image (Codigo: $($proc.ExitCode)). Aplicando volcado basico de emergencia."
+                    Write-Log -LogLevel WARN -Message "WinRE_Manager: Fallo Export-Image (Codigo: $($proc.ExitCode)). Aplicando volcado de emergencia."
                     
                     # Fallback de Seguridad
                     Copy-Item -LiteralPath $tempWinrePath -Destination $winrePath -Force
-                    $restoredFile = Get-Item -LiteralPath $winrePath -Force
-                    $restoredFile.Attributes = $originalAttributes
+                    
+                    # FIX: Restauramos el ACL original en el fallback también
+                    Set-Acl -Path $winrePath -AclObject $originalAcl
+                    Write-Log -LogLevel INFO -Message "WinRE_Manager: ACL original restaurado en el winre.wim de volcado de emergencia."
+                    
                     Write-Host "[OK] WinRE guardado con exito (Sin compresion adicional)." -ForegroundColor Green
-                    Write-Log -LogLevel WARN -Message "WinRE_Manager: Archivo guardado correctamente mediante volcado basico."
                 }
             } else {
                 Write-Host "[ERROR] Fallo al guardar winre.wim. La imagen principal no fue modificada." -ForegroundColor Red
@@ -1516,13 +1852,22 @@ function Manage-WinRE-Menu {
             # Restauramos atributos si descartamos los cambios
             $restoredFile = Get-Item -LiteralPath $winrePath -Force
             $restoredFile.Attributes = $originalAttributes
+            Write-Log -LogLevel INFO -Message "WinRE_Manager: Atributos restaurados tras descartar los cambios."
         }
     } finally {
-        # --- RESTAURAR EL ESTADO GLOBAL (CRITICO) ---
-        Write-Log -LogLevel INFO -Message "WinRE_Manager: Restaurando variable global MOUNT_DIR y limpiando temporales."
+        # --- RESTAURAR EL ESTADO GLOBAL (CRÍTICO) ---
+        Write-Log -LogLevel INFO -Message "WinRE_Manager: Restaurando variable global MOUNT_DIR, atributos originales y limpiando temporales."
         $Script:MOUNT_DIR = $originalMountDir
         
+        # FIX: Restaurar SIEMPRE los atributos (Hidden, System), sin importar si hubo éxito, error o crash
+        if (Test-Path -LiteralPath $winrePath) {
+            $restoredFile = Get-Item -LiteralPath $winrePath -Force
+            $restoredFile.Attributes = $originalAttributes
+            Write-Log -LogLevel INFO -Message "WinRE_Manager: Asegurando que winre.wim mantenga sus atributos nativos (Hidden, System)."
+        }
+        
         # Limpieza de basura temporal
+        Write-Log -LogLevel INFO -Message "WinRE_Manager: Limpiando directorios de Staging y Mount."
         Remove-Item $winreStaging -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item $winreMount -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -1588,11 +1933,11 @@ function Manage-BootWim-Menu {
     # 4. Seleccion Inteligente
     Write-Host "======================================================="
     Write-Host "Donde quieres inyectar DaRT/Addons?"
-    Write-Host "   [1] En el Instalador (Indice $idxSetup)" -ForegroundColor White
-    Write-Host "       (Aparecera al pulsar 'Reparar el equipo' durante la instalacion)" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "   [2] En Windows PE (Indice $idxPE)" -ForegroundColor White
+    Write-Host "   [1] En Windows PE (Indice $idxPE)" -ForegroundColor White
     Write-Host "       (Para crear un USB booteable exclusivo de diagnostico)" -ForegroundColor Gray
+    Write-Host ""
+	Write-Host "   [2] En el Instalador (Indice $idxSetup)" -ForegroundColor White
+    Write-Host "       (Aparecera al pulsar 'Reparar el equipo' durante la instalacion)" -ForegroundColor Gray
     Write-Host ""
     Write-Host "   [M] Seleccion Manual (Si la deteccion fallo)" -ForegroundColor DarkGray
     
@@ -1600,8 +1945,8 @@ function Manage-BootWim-Menu {
     $targetIndex = $null
 
     switch ($sel) {
-        "1" { $targetIndex = $idxSetup }
-        "2" { $targetIndex = $idxPE }
+        "1" { $targetIndex = $idxPE }
+        "2" { $targetIndex = $idxSetup }
         "M" { $targetIndex = Read-Host "Introduce el numero de Indice manualmente" }
     }
 
@@ -1686,410 +2031,6 @@ function Manage-BootWim-Menu {
     }
 }
 
-# =================================================================
-#  MODULO DE INYECCION DE ADDONS (.WIM, .TPK, .BPK, .REG,)
-# =================================================================
-# --- HELPER 1: Importador de Registro Silencioso (Headless) ---
-# Extrae la logica de tu Show-Tweaks-Offline-GUI para uso automatizado
-function Import-OfflineReg {
-    param([string]$FilePath)
-    
-    Write-Log -LogLevel INFO -Message "Procesando Registro Automatizado: $FilePath"
-    
-    # 1. Lectura Inteligente (Autodeteccion nativa de codificacion)
-    $content = Get-Content -Path $FilePath -Raw
-    
-    # 2. Traduccion de Rutas (Motor Universal)
-    $newContent = $content -replace "(?i)HKEY_LOCAL_MACHINE\\(SOFTWARE|TK_SOFTWARE)", "HKEY_LOCAL_MACHINE\OfflineSoftware" `
-                           -replace "(?i)HKLM\\(SOFTWARE|TK_SOFTWARE)", "HKEY_LOCAL_MACHINE\OfflineSoftware" `
-                           -replace "(?i)HKEY_LOCAL_MACHINE\\(SYSTEM|TK_SYSTEM)", "HKEY_LOCAL_MACHINE\OfflineSystem" `
-                           -replace "(?i)HKLM\\(SYSTEM|TK_SYSTEM)", "HKEY_LOCAL_MACHINE\OfflineSystem" `
-                           -replace "(?i)HKEY_CURRENT_USER\\(Software|TK_SOFTWARE)\\Classes", "HKEY_LOCAL_MACHINE\OfflineUserClasses" `
-                           -replace "(?i)HKCU\\(Software|TK_SOFTWARE)\\Classes", "HKEY_LOCAL_MACHINE\OfflineUserClasses" `
-                           -replace "(?i)HKEY_CURRENT_USER|HKEY_LOCAL_MACHINE\\TK_USER", "HKEY_LOCAL_MACHINE\OfflineUser" `
-                           -replace "(?i)HKCU", "HKEY_LOCAL_MACHINE\OfflineUser" `
-                           -replace "(?i)HKEY_CLASSES_ROOT|HKEY_LOCAL_MACHINE\\TK_CLASSES", "HKEY_LOCAL_MACHINE\OfflineSoftware\Classes" `
-                           -replace "(?i)HKCR", "HKEY_LOCAL_MACHINE\OfflineSoftware\Classes"
-
-    $tempReg = Join-Path $Script:Scratch_DIR "headless_import_$($RANDOM).reg"
-    
-    # regedit.exe requiere estrictamente UTF-16 LE (Unicode) para no corromper caracteres
-    [System.IO.File]::WriteAllText($tempReg, $newContent, [System.Text.Encoding]::Unicode)
-
-    # 3. Analisis y Desbloqueo de Claves
-    $keysToProcess = New-Object System.Collections.Generic.HashSet[string]
-    $pattern = '\[-?(HKEY_LOCAL_MACHINE\\(OfflineSoftware|OfflineSystem|OfflineUser|OfflineUserClasses|OfflineComponents)[^\]]*)\]'
-    $matches = [regex]::Matches($newContent, $pattern)
-                    
-    foreach ($m in $matches) {
-        $keyPath = $m.Groups[1].Value.Trim()
-        if ($keyPath.StartsWith("-")) { $keyPath = $keyPath.Substring(1) }
-        $null = $keysToProcess.Add($keyPath)
-    }
-
-    foreach ($targetKey in $keysToProcess) { Unlock-OfflineKey -KeyPath $targetKey }
-
-    # 4. Importacion con el motor tolerante a fallos (regedit.exe en lugar de reg.exe)
-    $process = Start-Process regedit.exe -ArgumentList "/s `"$tempReg`"" -Wait -PassThru -WindowStyle Hidden
-    
-    # 5. Restauracion Crítica de Permisos (Con escudo Anti-Comodines)
-    foreach ($targetKey in $keysToProcess) {
-        $psCheckPath = $targetKey -replace "^HKEY_LOCAL_MACHINE", "HKLM:"
-        if (Test-Path -LiteralPath $psCheckPath) { Restore-KeyOwner -KeyPath $targetKey }
-    }
-
-    Remove-Item $tempReg -Force -ErrorAction SilentlyContinue
-}
-
-# --- HELPER 2: Extractor Inteligente por Analisis de Cabecera ---
-function Expand-AddonArchive {
-    # AÑADIMOS EL PARÁMETRO $WimIndex
-    param([string]$FilePath, [string]$DestPath, [int]$WimIndex = 1)
-    
-    $stream = New-Object System.IO.FileStream($FilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-    $buffer = New-Object byte[] 4
-    $stream.Read($buffer, 0, 4) | Out-Null
-    $stream.Close()
-    $hexSignature = [BitConverter]::ToString($buffer) -replace '-'
-
-    if (-not (Test-Path $DestPath)) { New-Item -Path $DestPath -ItemType Directory -Force | Out-Null }
-
-    if ($hexSignature -match "^4D535749") { 
-        # Auditoría dinamica del paquete WIM
-        $imageInfo = Get-WindowsImage -ImagePath $FilePath -ErrorAction SilentlyContinue
-        $actualIndexToExtract = $WimIndex
-
-        # Si el WIM fue creado por (cualquier herramienta) y solo tiene 1 indice, forzamos el 1.
-        if ($imageInfo.Count -eq 1) {
-            $actualIndexToExtract = 1
-            Write-Log -LogLevel INFO -Message "WIM de indice unico detectado. Forzando extraccion del Indice 1."
-        }
-
-        Write-Log -LogLevel INFO -Message "Firma detectada: WIM (MSWI). Extrayendo payload (Indice $actualIndexToExtract)..."
-        Expand-WindowsImage -ImagePath $FilePath -Index $actualIndexToExtract -ApplyPath $DestPath -ErrorAction Stop | Out-Null
-    }
-    else {
-        throw "Firma no reconocida ($hexSignature). No es WIM, valido."
-    }
-}
-
-# --- MOTOR PRINCIPAL: Inyector de Addons ---
-function Install-OfflineAddon {
-    # AÑADIMOS EL PARÁMETRO $WimIndex
-    param([string]$FilePath, [int]$WimIndex = 1)
-    
-    $ext = [System.IO.Path]::GetExtension($FilePath).ToLower()
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($FilePath)
-    
-    if ($ext -eq '.reg') {
-        Import-OfflineReg -FilePath $FilePath
-        return "Registro inyectado exitosamente."
-    }
-
-    if ($ext -match '\.(wim|tpk|bpk)$') {
-        $tempExtract = Join-Path $Script:Scratch_DIR "Addon_$baseName"
-        
-        try {
-            # PASAMOS EL ÍNDICE AL EXTRACTOR
-            Expand-AddonArchive -FilePath $FilePath -DestPath $tempExtract -WimIndex $WimIndex
-            
-            # --- FASE A: Inyeccion de Archivos (Mapeo de Estructura Blindado) ---
-            $hasFiles = $false
-            $rootFolders = Get-ChildItem -Path $tempExtract -Directory
-            
-            foreach ($folder in $rootFolders) {
-                $targetDir = Join-Path $Script:MOUNT_DIR $folder.Name
-                Write-Log -LogLevel ACTION -Message "Inyectando estructura: $($folder.Name) -> $targetDir"
-                
-                # Activamos privilegios de Dios (SeBackup / SeRestore)
-                Enable-Privileges
-
-                # Usamos Robocopy en Modo Backup (/B) para ignorar permisos de TrustedInstaller
-                # /E = Recursivo | /B = Backup Mode | /IS = Sobrescribir iguales | /IT = Sobrescribir modificados
-                # /R:0 /W:0 = Sin reintentos | /NJH /NJS /NDL /NC /NS /NP = Totalmente silencioso
-                $roboArgs = "`"$($folder.FullName)`" `"$targetDir`" /E /B /IS /IT /R:0 /W:0 /NJH /NJS /NDL /NC /NS /NP"
-                
-                $proc = Start-Process robocopy.exe -ArgumentList $roboArgs -Wait -PassThru -WindowStyle Hidden
-                
-                # Robocopy devuelve codigos < 8 si fue exitoso (1=Copiado, 2=Extras, 3=Ambos, etc)
-                if ($proc.ExitCode -ge 8) {
-                    Write-Log -LogLevel ERROR -Message "Robocopy fallo al inyectar $($folder.Name) (Codigo: $($proc.ExitCode))"
-                    throw "Robocopy no pudo inyectar los archivos en $targetDir. (Codigo de salida: $($proc.ExitCode))"
-                }
-                
-                $hasFiles = $true
-            }
-
-            $regFiles = Get-ChildItem -Path $tempExtract -Filter "*.reg" -Recurse
-            foreach ($reg in $regFiles) {
-                Write-Log -LogLevel ACTION -Message "Inyectando registro adjunto: $($reg.Name)"
-                Import-OfflineReg -FilePath $reg.FullName
-            }
-
-            $msg = "Inyectado: "
-            if ($hasFiles) { $msg += "[Archivos] " }
-            if ($regFiles) { $msg += "[Registro] " }
-            if ($cabFiles) { $msg += "[Paquete DISM] " }
-            return $msg.Trim()
-
-        } finally {
-            if (Test-Path $tempExtract) { Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
-        }
-    }
-    throw "Formato no soportado para inyeccion automatica."
-}
-
-# --- INTERFAZ GRÁFICA DEL GESTOR DE ADDONS ---
-function Show-Addons-GUI {
-    if ($Script:IMAGE_MOUNTED -eq 0) { 
-        [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
-        return 
-    }
-
-    if (-not (Mount-Hives)) { return }
-
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Instalador de Addons y Paquetes Avanzados (.WIM .TPK, .BPK, .REG)"
-    $form.Size = New-Object System.Drawing.Size(950, 640)
-    $form.StartPosition = "CenterScreen"
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $form.ForeColor = [System.Drawing.Color]::White
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
-
-    # --- TÍTULO Y BOTÓN DE CARGA ---
-    $lblTitle = New-Object System.Windows.Forms.Label
-    $lblTitle.Text = "Integracion de Paquetes de Terceros"
-    $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-    $lblTitle.Location = "20, 15"; $lblTitle.AutoSize = $true
-    $form.Controls.Add($lblTitle)
-
-    $btnAddFiles = New-Object System.Windows.Forms.Button
-    $btnAddFiles.Text = "+ Agregar Addons (.wim, .tpk, .bpk, .reg)..."
-    $btnAddFiles.Location = "670, 12"
-    $btnAddFiles.Size = "240, 30"
-    $btnAddFiles.BackColor = [System.Drawing.Color]::RoyalBlue
-    $btnAddFiles.FlatStyle = "Flat"
-    $form.Controls.Add($btnAddFiles)
-
-    # --- DETECCIÓN INTELIGENTE DE ARQUITECTURA (INSTANTÁNEA) ---
-    $defaultIdx = 1 # Asumimos x86 por defecto
-    if (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysWOW64")) {
-        $defaultIdx = 2 # Si existe SysWOW64, es un Windows x64 garantizado
-    }
-
-    # --- SELECTOR DE ARQUITECTURA (GRUPO) ---
-    $grpArch = New-Object System.Windows.Forms.GroupBox
-    $grpArch.Text = " Arquitectura del Addon (Solo aplica para desempaquetar .wim/.tpk/.bpk) "
-    $grpArch.Location = "20, 50"
-    $grpArch.Size = "890, 55"
-    $grpArch.ForeColor = [System.Drawing.Color]::Orange
-    $form.Controls.Add($grpArch)
-
-    $radX86 = New-Object System.Windows.Forms.RadioButton
-    $radX86.Text = "x86 / 32-bits"
-    $radX86.Location = "20, 22"
-    $radX86.AutoSize = $true
-    $radX86.ForeColor = [System.Drawing.Color]::White
-    if ($defaultIdx -eq 1) { $radX86.Checked = $true }
-    $grpArch.Controls.Add($radX86)
-
-    $radX64 = New-Object System.Windows.Forms.RadioButton
-    $radX64.Text = "x64 / 64-bits"
-    $radX64.Location = "200, 22"
-    $radX64.AutoSize = $true
-    $radX64.ForeColor = [System.Drawing.Color]::White
-    if ($defaultIdx -eq 2) { $radX64.Checked = $true }
-    $grpArch.Controls.Add($radX64)
-
-    # --- LISTVIEW (DESPLAZADO HACIA ABAJO) ---
-    $lv = New-Object System.Windows.Forms.ListView
-    $lv.Location = "20, 120"
-    $lv.Size = "890, 370"
-    $lv.View = "Details"
-    $lv.FullRowSelect = $true
-    $lv.GridLines = $true
-    $lv.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
-    $lv.ForeColor = [System.Drawing.Color]::White
-    
-    $lv.Columns.Add("Estado", 150) | Out-Null
-    $lv.Columns.Add("Archivo", 250) | Out-Null
-    $lv.Columns.Add("Tipo Detectado", 120) | Out-Null
-    $lv.Columns.Add("Ruta Completa", 360) | Out-Null
-    $form.Controls.Add($lv)
-
-    # --- ESTADO Y BOTONES INFERIORES ---
-    $lblStatus = New-Object System.Windows.Forms.Label
-    $lblStatus.Text = "Agrega los archivos a la cola de inyeccion."
-    $lblStatus.Location = "20, 500"
-    $lblStatus.AutoSize = $true
-    $lblStatus.ForeColor = [System.Drawing.Color]::Cyan
-    $form.Controls.Add($lblStatus)
-
-    $btnRemoveItem = New-Object System.Windows.Forms.Button
-    $btnRemoveItem.Text = "Quitar de la lista"
-    $btnRemoveItem.Location = "20, 520"
-    $btnRemoveItem.Size = "150, 30"
-    $btnRemoveItem.BackColor = [System.Drawing.Color]::Crimson
-    $btnRemoveItem.FlatStyle = "Flat"
-    $form.Controls.Add($btnRemoveItem)
-
-    $btnInstall = New-Object System.Windows.Forms.Button
-    $btnInstall.Text = "INYECTAR TODOS LOS ADDONS"
-    $btnInstall.Location = "640, 510"
-    $btnInstall.Size = "270, 40"
-    $btnInstall.BackColor = [System.Drawing.Color]::SeaGreen
-    $btnInstall.FlatStyle = "Flat"
-    $btnInstall.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $form.Controls.Add($btnInstall)
-
-    # --- EVENTOS ---
-    $btnAddFiles.Add_Click({
-        $ofd = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "Addons Windows (*.tpk;*.bpk;*.wim;*.reg;*)|*.tpk;*.bpk;*.wim;*.reg|Todos los archivos (*.*)|*.*"
-        $ofd.Multiselect = $true
-        if ($ofd.ShowDialog() -eq 'OK') {
-            $lv.BeginUpdate()
-            foreach ($file in $ofd.FileNames) {
-                $item = New-Object System.Windows.Forms.ListViewItem("EN ESPERA")
-                $item.SubItems.Add([System.IO.Path]::GetFileName($file)) | Out-Null
-                $item.SubItems.Add([System.IO.Path]::GetExtension($file).ToUpper()) | Out-Null
-                $item.SubItems.Add($file) | Out-Null
-                $item.ForeColor = [System.Drawing.Color]::Yellow
-                $item.Tag = $file
-                $lv.Items.Add($item) | Out-Null
-            }
-            $lv.EndUpdate()
-        }
-    })
-
-    $btnRemoveItem.Add_Click({
-        foreach ($item in $lv.SelectedItems) { $lv.Items.Remove($item) }
-    })
-
-    $btnInstall.Add_Click({
-        if ($lv.Items.Count -eq 0) { 
-            Write-Log -LogLevel WARN -Message "AddonInjector: Intento de ejecucion sin addons en la lista."
-            return 
-        }
-        $confirm = [System.Windows.Forms.MessageBox]::Show("Iniciar la inyeccion en lote? Esto fusionara archivos y claves de registro en el orden correcto.", "Confirmar", 'YesNo', 'Warning')
-        if ($confirm -ne 'Yes') { 
-            Write-Log -LogLevel INFO -Message "AddonInjector: Operacion cancelada por el usuario en el cuadro de confirmacion."
-            return 
-        }
-
-        Write-Log -LogLevel ACTION -Message "AddonInjector: Iniciando motor de inyeccion inteligente de Addons."
-
-        $btnInstall.Enabled = $false
-        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-        $errors = 0; $success = 0; $skipped = 0
-
-        # Capturamos la arquitectura de la UI
-        $selectedIndex = if ($radX86.Checked) { 1 } else { 2 }
-        $isX64 = $radX64.Checked
-        Write-Log -LogLevel INFO -Message "AddonInjector: Destino arquitectonico -> $(if($isX64){'x64'}else{'x86'}) | Indice WIM local: $selectedIndex"
-
-        # --- 1. EXTRAER ELEMENTOS PENDIENTES ---
-        $pendingItems = @()
-        foreach ($item in $lv.Items) {
-            if ($item.Text -eq "EN ESPERA") {
-                $pendingItems += $item
-            }
-        }
-
-        # --- 2. ORDENAMIENTO INTELIGENTE (Prioridad + Alfabeto) ---
-        $lblStatus.Text = "Calculando orden de inyeccion..."
-        $form.Refresh()
-
-        $sortedItems = $pendingItems | Sort-Object {
-            $fileName = $_.SubItems[1].Text.ToLower()
-            $priority = 5 # Prioridad por defecto (otros)
-            
-            # Asignacion de pesos (1 es lo primero que se instala)
-            if ($fileName -match "_main\.(tpk|bpk|wim)$") { $priority = 1 } # Paquetes Principales
-            elseif ($fileName -match "_main\.reg$")               { $priority = 2 } # Registro Principal
-            elseif ($fileName -match "\.(tpk|bpk|wim)$")   { $priority = 3 } # Paquetes de Idioma / Extras
-            elseif ($fileName -match "\.reg$")                     { $priority = 4 } # Registros de Idioma / Extras
-
-            # Al retornar "Prioridad-Nombre", PowerShell agrupa primero por fase y luego alfabeticamente
-            # Ej: "1-firefox_main.tpk" se procesara antes que "2-firefox_x64_main.reg"
-            "$priority-$fileName"
-        }
-        Write-Log -LogLevel INFO -Message "AddonInjector: Fase 2 - $($sortedItems.Count) elementos ordenados por algoritmo de prioridad."
-
-        # --- 3. PROCESAMIENTO E INYECCION ---
-        foreach ($item in $sortedItems) {
-            $fileName = $item.SubItems[1].Text.ToLower()
-
-            # --- CONDICION 1: FILTRO DE ARQUITECTURA ---
-            # Busca variaciones como _x64, -x64, 64bit, 64-bit, amd64
-            $is64BitFile = $fileName -match "(\b|_|\.|-)(x64|64-?bit|amd64)(\b|_|\.|-)"
-            $is32BitFile = $fileName -match "(\b|_|\.|-)(x86|32-?bit)(\b|_|\.|-)"
-
-            if ($isX64 -and $is32BitFile) {
-                $item.Text = "OMITIDO (Arch)"
-                $item.SubItems[2].Text = "Ignorado (Solo x86)"
-                $item.ForeColor = [System.Drawing.Color]::DarkGray
-                $skipped++
-                Write-Log -LogLevel INFO -Message "AddonInjector: Omitiendo [$fileName] (Paquete de 32-bits en imagen destino x64)."
-                continue
-            }
-            if (-not $isX64 -and $is64BitFile) {
-                $item.Text = "OMITIDO (Arch)"
-                $item.SubItems[2].Text = "Ignorado (Solo x64)"
-                $item.ForeColor = [System.Drawing.Color]::DarkGray
-                $skipped++
-                Write-Log -LogLevel INFO -Message "AddonInjector: Omitiendo [$fileName] (Paquete de 64-bits en imagen destino x86)."
-                continue
-            }
-
-            # --- CONDICION 2: INYECCION EN ORDEN ---
-            $lblStatus.Text = "Inyectando: $($item.SubItems[1].Text)..."
-            $item.Text = "PROCESANDO..."
-            
-            # Hacemos auto-scroll en la UI para ver por donde va
-            $item.EnsureVisible()
-            $form.Refresh()
-
-            Write-Log -LogLevel INFO -Message "AddonInjector: Instalando -> [$fileName]"
-
-            try {
-                # Llamamos al motor pasandole la ruta y el indice WIM a usar
-                $resultado = Install-OfflineAddon -FilePath $item.Tag -WimIndex $selectedIndex
-                
-                $item.Text = "COMPLETADO"
-                $item.SubItems[2].Text = $resultado
-                $item.ForeColor = [System.Drawing.Color]::LightGreen
-                $success++
-                Write-Log -LogLevel INFO -Message "AddonInjector: Completado. Motor devolvio: $resultado"
-            } catch {
-                $item.Text = "ERROR"
-                $item.SubItems[2].Text = $_.Exception.Message
-                $item.ForeColor = [System.Drawing.Color]::Salmon
-                $errors++
-                Write-Log -LogLevel ERROR -Message "AddonInjector: Fallo critico instalando addon [$fileName] - $($_.Exception.Message)"
-            }
-        }
-
-        Write-Log -LogLevel ACTION -Message "AddonInjector: Ciclo de inyeccion finalizado. Exitos: $success | Errores: $errors | Omitidos (Arch): $skipped"
-
-        $form.Cursor = [System.Windows.Forms.Cursors]::Default
-        $btnInstall.Enabled = $true
-        $lblStatus.Text = "Proceso terminado."
-        [System.Windows.Forms.MessageBox]::Show("Inyeccion de Addons finalizada.`n`nExitos: $success`nErrores: $errors`nOmitidos (Arch): $skipped", "Reporte de Operacion", 'OK', 'Information')
-    })
-
-    # Cierre seguro (Desmontar Hives de registro)
-    $form.Add_FormClosing({ Unmount-Hives })
-    
-    $form.ShowDialog() | Out-Null
-    $form.Dispose()
-    [GC]::Collect()
-}
-
 # =============================================
 #  FUNCIONES DE MENU (Interfaz de Usuario)
 # =============================================
@@ -2160,7 +2101,7 @@ function Mount-Unmount-Menu {
         Write-Host "       (Carga un .wim o .vhd/vhdx en $Script:MOUNT_DIR)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "   [2] Desmontar Imagen (Descartar Cambios)"
-        Write-Host "       (Descarga la imagen. ¡Cambios no guardados se pierden!)" -ForegroundColor Gray
+        Write-Host "       (Descarga la imagen. Cambios no guardados se pierden!)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "   [3] Guardar y Desmontar Imagen (Commit)" -ForegroundColor Green
         Write-Host "       (Guarda todos los cambios y luego descarga la imagen)" -ForegroundColor Gray
@@ -2346,9 +2287,6 @@ function Image-Management-Menu {
         Write-Host "   [4] Editar Indices (Exportar/Eliminar)" -ForegroundColor White
         Write-Host "       (Gestiona los indices dentro de un .wim)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [5] Convertir Imagen a WIM" -ForegroundColor White
-        Write-Host "       (Importa imagen desde ESD o VHD)" -ForegroundColor Gray
-        Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
         Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
@@ -2371,10 +2309,6 @@ function Image-Management-Menu {
             "4" { 
                 Write-Log -LogLevel INFO -Message "MenuImageMgmt: Accediendo a 'Edit-Indexes-Menu' (Gestion de Indices WIM/ESD)."
                 Edit-Indexes-Menu 
-            }
-            "5" { 
-                Write-Log -LogLevel INFO -Message "MenuImageMgmt: Accediendo a 'Convert-Image-Menu' (Conversion WIM/ESD/SWM)."
-                Convert-Image-Menu 
             }
             "V" { 
                 return 
@@ -2735,16 +2669,15 @@ function Customization-Menu {
     }
 }
 
-# :limpieza_menu
 function Limpieza-Menu {
      while ($true) {
         Clear-Host
         if ($Script:IMAGE_MOUNTED -eq 0)
-		{
-			Write-Warning "Necesita montar imagen primero."
-			Pause
-			return
-		}
+        {
+            Write-Warning "Necesita montar imagen primero."
+            Pause
+            return
+        }
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host "             Herramientas de Limpieza de Imagen          " -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
@@ -2754,12 +2687,13 @@ function Limpieza-Menu {
         Write-Host "   [3] Reparar Imagen" -NoNewline; Write-Host "           (DISM /RestoreHealth)" -ForegroundColor Gray
         Write-Host "   [4] Reparacion SFC (Offline)" -NoNewline; Write-Host " (SFC /Scannow /OffWindir)" -ForegroundColor Gray
         Write-Host "   [5] Analizar Componentes" -NoNewline; Write-Host "   (DISM /AnalyzeComponentStore)" -ForegroundColor Gray
-        Write-Host "   [6] Limpiar Componentes" -NoNewline; Write-Host "    (DISM /StartComponentCleanup /ResetBase)" -ForegroundColor Gray
+        Write-Host "   [6] Limpiar Componentes" -NoNewline; Write-Host "    (DISM /StartComponentCleanup)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "   [7] Ejecutar TODO (1-6)" -ForegroundColor Yellow
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host "   [V] Volver" -ForegroundColor Red
+
         $opcionL = Read-Host "`nSelecciona una opcion"
         Write-Log -LogLevel INFO -Message "MENU_LIMPIEZA: Usuario selecciono '$opcionL'."
 
@@ -2767,132 +2701,145 @@ function Limpieza-Menu {
         function Invoke-RestoreHealthWithFallback {
             param(
                 [string]$MountDir,
-                [switch]$IsSequence # Para saber si estamos en la opcion '7'
+                [switch]$IsSequence
             )
 
             Write-Host "`n[+] Ejecutando DISM /RestoreHealth..." -ForegroundColor Yellow
             Write-Log -LogLevel ACTION -Message "LIMPIEZA: Ejecutando DISM /RestoreHealth..."
+
             DISM /Image:$MountDir /Cleanup-Image /RestoreHealth
             $exitCode = $LASTEXITCODE
 
-            if ($exitCode -ne 0) {
-                Write-Host "[ERROR] DISM /RestoreHealth fallo (Codigo: $exitCode). Puede que no encuentre los archivos necesarios." -ForegroundColor Red
-                Write-Log -LogLevel ERROR -Message "LIMPIEZA: DISM /RestoreHealth fallo inicialmente (Codigo: $exitCode)."
+            if ($exitCode -notin @(0, 3010)) {
+                Write-Host "[ADVERTENCIA] DISM /RestoreHealth no pudo reparar la imagen (Codigo: $exitCode)." -ForegroundColor Red
+                Write-Host "Es probable que falten los archivos necesarios y el sistema este offline." -ForegroundColor Gray
+                Write-Log -LogLevel WARN -Message "LIMPIEZA: RestoreHealth inicial devolvio $exitCode. Iniciando protocolo de Fallback."
 
-                $useSourceChoice = Read-Host "Deseas intentar la reparacion usando un archivo WIM como fuente? (S/N)"
-                if ($useSourceChoice.ToUpper() -eq 'S') {
+                $useSourceChoice = Read-Host "`nDeseas intentar la reparacion usando un archivo WIM intacto como fuente? (S/N)"
+
+                if ($useSourceChoice -match '^(s|S)$') {
                     Write-Log -LogLevel INFO -Message "LIMPIEZA: Usuario eligio usar fuente WIM para RestoreHealth."
-                    $sourceWimPath = Select-PathDialog -DialogType File -Title "Selecciona el archivo WIM de origen (ej. install.wim)" -Filter "Archivos WIM (*.wim)|*.wim"
-                    if (-not [string]::IsNullOrWhiteSpace($sourceWimPath)) {
-                        Write-Host "[+] Obteniendo indices del WIM seleccionado..." -ForegroundColor Yellow
+                    $sourceWimPath = Select-PathDialog -DialogType File -Title "Selecciona el WIM de origen (ej. install.wim)" -Filter "Archivos WIM (*.wim)|*.wim"
+
+                    if ($sourceWimPath) {
+                        Write-Host "`n[+] Analizando indices del WIM seleccionado..." -ForegroundColor Yellow
                         dism /get-wiminfo /wimfile:"$sourceWimPath"
-                        $sourceIndex = Read-Host "`nIntroduce el numero de INDICE del WIM que contiene la version correcta de Windows"
-                        # Validar que sourceIndex sea un numero
 
-                        # correcto
-                        if (-not [string]::IsNullOrWhiteSpace($sourceIndex)) 
-						{
-                             Write-Host "[+] Reintentando DISM /RestoreHealth con fuente WIM..." -ForegroundColor Yellow
-                             $sourceArgument = "/Source:WIM:$($sourceWimPath):$($sourceIndex)"
-                             Write-Log -LogLevel ACTION -Message "LIMPIEZA: Reintentando RestoreHealth con $sourceArgument"
-                             DISM /Image:$MountDir /Cleanup-Image /RestoreHealth $sourceArgument
-                             $exitCode = $LASTEXITCODE # Actualizar el codigo de salida
+                        [int]$sourceIndex = 0
+                        $inputIndex = Read-Host "`nIntroduce el numero de INDICE que coincide con tu edicion de Windows"
 
-                             if ($exitCode -eq 0) {
-                                 Write-Host "[OK] DISM /RestoreHealth completado exitosamente usando la fuente WIM." -ForegroundColor Green
-                                 Write-Log -LogLevel INFO -Message "LIMPIEZA: RestoreHealth exitoso con fuente WIM."
-                             } else {
-                                 Write-Host "[ERROR] DISM /RestoreHealth volvio a fallar incluso con la fuente WIM (Codigo: $exitCode)." -ForegroundColor Red
-                                 Write-Log -LogLevel ERROR -Message "LIMPIEZA: RestoreHealth fallo de nuevo con fuente WIM (Codigo: $exitCode)."
-                             }
+                        if ([int]::TryParse($inputIndex, [ref]$sourceIndex) -and $sourceIndex -gt 0) {
+                            Write-Host "`n[+] Reintentando reparacion forzando la fuente local (/LimitAccess)..." -ForegroundColor Yellow
+                            Write-Log -LogLevel ACTION -Message "LIMPIEZA: Reintentando RestoreHealth con /LimitAccess y Source WIM."
+
+                            $ext = [System.IO.Path]::GetExtension($sourceWimPath).ToUpper()
+                            $sourceType = if ($ext -eq ".ESD") { "ESD" } else { "WIM" }
+
+                            $dismArgs = @(
+                                "/Image:`"$MountDir`"", 
+                                "/Cleanup-Image", 
+                                "/RestoreHealth", 
+                                "/Source:${sourceType}:`"$sourceWimPath`":$sourceIndex", 
+                                "/LimitAccess"
+                            )
+
+                            $proc = Start-Process "dism.exe" -ArgumentList $dismArgs -Wait -NoNewWindow -PassThru
+                            $exitCode = $proc.ExitCode
+
+                            if ($exitCode -in @(0, 3010)) {
+                                Write-Host "[OK] DISM /RestoreHealth reparo la imagen exitosamente usando la fuente WIM." -ForegroundColor Green
+                                Write-Log -LogLevel INFO -Message "LIMPIEZA: RestoreHealth exitoso con fuente WIM."
+                            } else {
+                                Write-Host "[ERROR] La reparacion fallo de nuevo con fuente WIM (Codigo: $exitCode)." -ForegroundColor Red
+                                Write-Log -LogLevel ERROR -Message "LIMPIEZA: RestoreHealth fallo con fuente WIM (Codigo: $exitCode)."
+                            }
                         } else {
-                             Write-Warning "No se ingreso un indice. Omitiendo reintento con fuente."
-                             Write-Log -LogLevel WARN -Message "LIMPIEZA: No se ingreso indice para fuente WIM."
+                            Write-Warning "Indice no valido. Omitiendo reintento."
                         }
                     } else {
-                        Write-Warning "No se selecciono un archivo WIM. Omitiendo reintento con fuente."
-                        Write-Log -LogLevel WARN -Message "LIMPIEZA: Usuario cancelo seleccion de fuente WIM."
+                        Write-Warning "No se selecciono un archivo WIM."
                     }
-                } else {
-                    Write-Warning "Operacion de reparacion con fuente WIM omitida por el usuario."
-                    Write-Log -LogLevel WARN -Message "LIMPIEZA: Usuario omitio reintento con fuente WIM."
                 }
             } else {
                  Write-Host "[OK] DISM /RestoreHealth completado exitosamente." -ForegroundColor Green
-                 Write-Log -LogLevel INFO -Message "LIMPIEZA: DISM /RestoreHealth exitoso (primer intento)."
+                 Write-Log -LogLevel INFO -Message "LIMPIEZA: DISM /RestoreHealth exitoso."
             }
-            # Solo pausar si NO estamos en la secuencia completa
+            
             if (-not $IsSequence) { Pause }
         }
 
         switch ($opcionL.ToUpper()) {
             "1" {
-				Write-Host "`n[+] Verificando salud..." -ForegroundColor Yellow
-				Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /CheckHealth..."
-				DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /CheckHealth
-				Pause
-			}
+                Write-Host "`n[+] Verificando salud..." -ForegroundColor Yellow
+                Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /CheckHealth..."
+                DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /CheckHealth
+                Pause
+            }
             "2" {
-				Write-Host "`n[+] Escaneando corrupcion..." -ForegroundColor Yellow
-				Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /ScanHealth..."
-				DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /ScanHealth
-				Pause
-			}
+                Write-Host "`n[+] Escaneando corrupcion..." -ForegroundColor Yellow
+                Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /ScanHealth..."
+                DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /ScanHealth
+                Pause
+            }
             "3" {
                 Invoke-RestoreHealthWithFallback -MountDir $Script:MOUNT_DIR
             }
             "4" {
-                # Definir rutas dinamicas basadas en el directorio de montaje actual
                 $sfcBoot = $Script:MOUNT_DIR
-                # SFC es estricto: offbootdir debe terminar en backslash (\)
                 if (-not $sfcBoot.EndsWith("\")) { $sfcBoot += "\" }
                 $sfcWin = Join-Path -Path $Script:MOUNT_DIR -ChildPath "Windows"
 
                 Write-Host "`n[+] Verificando archivos (SFC)..." -ForegroundColor Yellow
-                Write-Host "    BootDir: $sfcBoot" -ForegroundColor Gray
-                Write-Host "    WinDir : $sfcWin" -ForegroundColor Gray
-
-                Write-Log -LogLevel ACTION -Message "LIMPIEZA: SFC /Scannow Offline en '$sfcBoot' / '$sfcWin'..."
-				
-				if (-not (Test-Path $sfcWin)) {
+                Write-Log -LogLevel ACTION -Message "LIMPIEZA: SFC /Scannow Offline..."
+                
+                if (-not (Test-Path $sfcWin)) {
                      Write-Host "No se encuentra la carpeta Windows en $sfcWin. Esta montada correctamente?"
                      Pause; break
                 }
 
-                # Ejecucion corregida
                 SFC /scannow /offbootdir="$sfcBoot" /offwindir="$sfcWin"
-
                 if ($LASTEXITCODE -ne 0) { Write-Warning "SFC encontro errores o no pudo completar."}
                 Pause
             }
             "5" {
-				Write-Host "`n[+] Analizando componentes..." -ForegroundColor Yellow
-				Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /AnalyzeComponentStore..."
-       			DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /AnalyzeComponentStore
-		       	Pause
-			}
+                Write-Host "`n[+] Analizando componentes..." -ForegroundColor Yellow
+                Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /AnalyzeComponentStore..."
+                DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /AnalyzeComponentStore
+                Pause
+            }
             "6" {
-                Write-Host "`n[+] Limpiando componentes..." -ForegroundColor Yellow
-                Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /StartComponentCleanup /ResetBase..."
-                DISM /Cleanup-Image /Image:$Script:MOUNT_DIR /StartComponentCleanup /ResetBase /ScratchDir:$Script:Scratch_DIR
+                Write-Host "`n[+] Preparando limpieza de componentes..." -ForegroundColor Yellow
+                
+                # --- NUEVA LOGICA: Preguntar por /ResetBase ---
+                $useResetBase = Read-Host "`nDeseas incluir el parametro /ResetBase?`n[ADVERTENCIA] Esto ahorra espacio, pero no podras desinstalar actualizaciones previas (S/N)"
+                
+                if ($useResetBase -match '^(s|S)$') {
+                    Write-Host "`nEjecutando limpieza CON /ResetBase..." -ForegroundColor Cyan
+                    Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /StartComponentCleanup /ResetBase..."
+                    DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /StartComponentCleanup /ResetBase /ScratchDir:$Script:Scratch_DIR
+                } else {
+                    Write-Host "`nEjecutando limpieza estandar SIN /ResetBase..." -ForegroundColor Cyan
+                    Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /StartComponentCleanup (Sin ResetBase)..."
+                    DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /StartComponentCleanup /ScratchDir:$Script:Scratch_DIR
+                }
                 Pause
             }
             "7" {
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: Iniciando secuencia COMPLETA..."
-                
-                # --- PASO 1: CheckHealth ---
+
+                # Preguntar por /ResetBase antes de iniciar la secuencia para no interrumpir el flujo después
+                $useResetBaseSeq = Read-Host "`nAntes de iniciar: ¿Deseas incluir el parametro /ResetBase en la limpieza final?`n[ADVERTENCIA] Impide desinstalar actualizaciones previas (S/N)"
+                $resetBaseFlag = ($useResetBaseSeq -match '^(s|S)$')
+
+                # --- PASO 1 ---
                 Write-Host "`n[1/5] Verificando salud rapida (CheckHealth)..." -ForegroundColor Yellow
-                Write-Log -LogLevel ACTION -Message "LIMPIEZA: (1/5) CheckHealth..."
                 DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /CheckHealth
 
-                # --- PASO 2: ScanHealth (Diagnostico Inteligente) ---
+                # --- PASO 2 ---
                 Write-Host "`n[2/5] Escaneando a fondo (ScanHealth)..." -ForegroundColor Yellow
-                Write-Log -LogLevel ACTION -Message "LIMPIEZA: (2/5) ScanHealth..."
-                
-                $imageState = "Unknown" # Estado por defecto por si falla el Cmdlet
+                $imageState = "Unknown"
                 
                 try {
-                    # Usamos el Cmdlet nativo para obtener el objeto de estado
                     $scanResult = Repair-WindowsImage -Path $Script:MOUNT_DIR -ScanHealth -ErrorAction Stop
                     $imageState = $scanResult.ImageHealthState
                     
@@ -2904,47 +2851,35 @@ function Limpieza-Menu {
                     }
                 }
                 catch {
-                    Write-Warning "Cmdlet nativo no disponible. Usando DISM clasico (Diagnostico ciego)..."
+                    Write-Warning "Cmdlet nativo no disponible. Usando DISM clasico..."
                     DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /ScanHealth
-                    # Si cae aqui, $imageState sigue siendo "Unknown", asi que intentaremos reparar por si acaso.
                 }
 
-                # --- LOGICA DE DECISION ---
+                # --- LOGICA DE DECISION (PASO 3) ---
                 if ($imageState -eq "NonRepairable") {
-                    # CASO CRiTICO: ABORTAR
                     Write-Host "`n[!] ALERTA DE SEGURIDAD" -ForegroundColor Red
-                    Write-Warning "La imagen es IRREPARABLE. Deteniendo secuencia para evitar daños mayores."
-                    Write-Log -LogLevel ERROR -Message "LIMPIEZA: Abortado. Estado NonRepairable."
+                    Write-Warning "La imagen es IRREPARABLE. Deteniendo secuencia."
                     [System.Windows.Forms.MessageBox]::Show("La imagen esta en estado 'NonRepairable'.`nLa secuencia se detendra.", "Error Fatal", 'OK', 'Error')
-                    Pause; return
+                    Pause; continue
                 }
                 elseif ($imageState -eq "Healthy") {
-                    # CASO OPTIMO: SALTAR REPARACIoN
                     Write-Host "`n[3/5] Reparando imagen..." -ForegroundColor DarkGray
                     Write-Host "   >>> OMITIDO: La imagen ya esta saludable." -ForegroundColor Green
-                    Write-Log -LogLevel INFO -Message "LIMPIEZA: (3/5) RestoreHealth omitido (Imagen Saludable)."
                 }
                 else {
-                    # CASO REPARABLE O DESCONOCIDO: EJECUTAR
                     Write-Host "`n[3/5] Reparando imagen..." -ForegroundColor Yellow
                     Invoke-RestoreHealthWithFallback -MountDir $Script:MOUNT_DIR -IsSequence
                 }
 
                 # --- PASO 4 ---
                 Write-Host "`n[4/5] Verificando archivos (SFC)..." -ForegroundColor Yellow
-                Write-Log -LogLevel ACTION -Message "LIMPIEZA: (4/5) SFC Offline..."
-
                 $sfcBoot = $Script:MOUNT_DIR
                 if (-not $sfcBoot.EndsWith("\")) { $sfcBoot += "\" }
                 $sfcWin = Join-Path -Path $Script:MOUNT_DIR -ChildPath "Windows"
-
                 SFC /scannow /offbootdir="$sfcBoot" /offwindir="$sfcWin"
-                if ($LASTEXITCODE -ne 0) { Write-Warning "SFC encontro errores o no pudo completar."}
 
                 # --- PASO 5 ---
                 Write-Host "`n[5/5] Analizando/Limpiando componentes..." -ForegroundColor Yellow
-                Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Analyze/Cleanup..."
-                
                 $cleanupRecommended = "No"
                 try {
                     $analysis = DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /AnalyzeComponentStore
@@ -2952,989 +2887,28 @@ function Limpieza-Menu {
                     if ($recommendLine -and ($recommendLine.Line -split ':', 2)[1].Trim() -eq "Yes") { $cleanupRecommended = "Yes" }
                 } catch { Write-Warning "No se pudo analizar el almacen de componentes." }
 
-                if ($cleanupRecommended -eq "Yes") {
-                    Write-Host "Limpieza recomendada. Procediendo..." -ForegroundColor Cyan;
-                    Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Limpieza recomendada. Ejecutando..."
-                    DISM /Cleanup-Image /Image:$Script:MOUNT_DIR /StartComponentCleanup /ResetBase /ScratchDir:$Script:Scratch_DIR
+                if ($cleanupRecommended -eq "Yes" -or $imageState -eq "Unknown") {
+                    Write-Host "Procediendo con la limpieza..." -ForegroundColor Cyan;
+                    
+                    # --- NUEVA LOGICA DE SECUENCIA: Aplicar elección de /ResetBase ---
+                    if ($resetBaseFlag) {
+                        Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Ejecutando limpieza CON /ResetBase."
+                        DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /StartComponentCleanup /ResetBase /ScratchDir:$Script:Scratch_DIR
+                    } else {
+                        Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Ejecutando limpieza SIN /ResetBase."
+                        DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /StartComponentCleanup /ScratchDir:$Script:Scratch_DIR
+                    }
                 } else {
-                    Write-Host "La limpieza del almacen de componentes no es necesaria." -ForegroundColor Green;
+                    Write-Host "La limpieza del almacen de componentes no es estrictamente necesaria (Omitida)." -ForegroundColor Green;
                 }
                 
-                Write-Host "[OK] Secuencia completada." -ForegroundColor Green
+                Write-Host "`n[OK] Secuencia completada." -ForegroundColor Green
                 Pause
             }
             "V" { return }
             default { Write-Warning "Opcion invalida."; Start-Sleep 1 }
         }
     }
-}
-
-# =================================================================
-#  Modulo GUI de Metadatos
-# =================================================================
-function Show-WimMetadata-GUI {
-    
-    # 1. Cargar dependencias
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-    Add-Type -AssemblyName System.Xml
-    Add-Type -AssemblyName System.Xml.Linq
-
-    # 2. Motor C#
-    $wimEngineSource = @"
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-using System.ComponentModel;
-using System.Xml.Linq; 
-using System.Linq;
-using System.IO;
-
-public class WimMasterEngine
-{
-    private const uint WIM_GENERIC_READ  = 0x80000000;
-    private const uint WIM_GENERIC_WRITE = 0x40000000;
-    private const uint WIM_OPEN_EXISTING = 3;
-    
-    [DllImport("wimgapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr WIMCreateFile(string pszWimPath, uint dwDesiredAccess, uint dwCreationDisposition, uint dwFlagsAndAttributes, uint dwCompressionType, out uint pdwCreationResult);
-
-    [DllImport("wimgapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool WIMSetTemporaryPath(IntPtr hWim, string pszPath);
-
-    [DllImport("wimgapi.dll", SetLastError = true)]
-    private static extern IntPtr WIMLoadImage(IntPtr hWim, uint dwImageIndex);
-
-    [DllImport("wimgapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool WIMGetImageInformation(IntPtr hImage, out IntPtr pInfoHdr, out uint dwcbInfoHdr);
-
-    [DllImport("wimgapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool WIMSetImageInformation(IntPtr hImage, IntPtr pInfoHdr, uint cbInfoHdr);
-
-    [DllImport("wimgapi.dll", SetLastError = true)]
-    private static extern bool WIMCloseHandle(IntPtr hObject);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr LocalFree(IntPtr hMem);
-
-    private static void SetElementValue(XElement parent, string elementName, string value)
-    {
-        XElement el = parent.Element(elementName);
-        if (el == null) {
-            if (!string.IsNullOrEmpty(value)) parent.Add(new XElement(elementName, value));
-        } else {
-            el.Value = value ?? "";
-        }
-    }
-
-    // Usar ruta temporal del sistema
-    private static void ForceSafeTempPath(IntPtr hWim)
-    {
-        try {
-            string sysTemp = Path.GetTempPath(); 
-            WIMSetTemporaryPath(hWim, sysTemp);
-        } catch { }
-    }
-
-    public static string GetImageXml(string wimPath, int index)
-    {
-        GC.Collect(); GC.WaitForPendingFinalizers();
-        IntPtr hWim = IntPtr.Zero; IntPtr hImg = IntPtr.Zero; IntPtr pInfo = IntPtr.Zero;
-
-        try {
-            uint res;
-            hWim = WIMCreateFile(wimPath, WIM_GENERIC_READ, WIM_OPEN_EXISTING, 0, 0, out res);
-            if (hWim == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
-            ForceSafeTempPath(hWim);
-
-            hImg = WIMLoadImage(hWim, (uint)index);
-            if (hImg == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
-
-            uint size;
-            if (!WIMGetImageInformation(hImg, out pInfo, out size))
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-
-            string xmlRaw = Marshal.PtrToStringUni(pInfo);
-            if (xmlRaw.StartsWith("\uFEFF")) xmlRaw = xmlRaw.Substring(1);
-            return xmlRaw;
-        }
-        finally {
-            if (pInfo != IntPtr.Zero) LocalFree(pInfo);
-            if (hImg != IntPtr.Zero) WIMCloseHandle(hImg);
-            if (hWim != IntPtr.Zero) WIMCloseHandle(hWim);
-        }
-    }
-
-    public static void WriteImageMetadata(string wimPath, int index, string name, string desc, string dispName, string dispDesc, string editionId)
-    {
-        GC.Collect(); GC.WaitForPendingFinalizers();
-        IntPtr hWim = IntPtr.Zero; IntPtr hImg = IntPtr.Zero; IntPtr pXmlBuffer = IntPtr.Zero;
-
-        try {
-            uint res;
-            // Abrimos con permisos de Escritura
-            hWim = WIMCreateFile(wimPath, WIM_GENERIC_WRITE | WIM_GENERIC_READ, WIM_OPEN_EXISTING, 0, 0, out res);
-            if (hWim == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
-            ForceSafeTempPath(hWim);
-
-            hImg = WIMLoadImage(hWim, (uint)index);
-            if (hImg == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
-
-            // 1. Leer XML Actual
-            IntPtr pInfo; uint size;
-            if (!WIMGetImageInformation(hImg, out pInfo, out size)) throw new Win32Exception(Marshal.GetLastWin32Error());
-            string currentXml = Marshal.PtrToStringUni(pInfo);
-            LocalFree(pInfo);
-            if (currentXml.StartsWith("\uFEFF")) currentXml = currentXml.Substring(1);
-
-            // 2. Modificar XML en memoria
-            XDocument doc = XDocument.Parse(currentXml);
-            XElement root = doc.Root; 
-            SetElementValue(root, "NAME", name);
-            SetElementValue(root, "DESCRIPTION", desc);
-            SetElementValue(root, "DISPLAYNAME", dispName);
-            SetElementValue(root, "DISPLAYDESCRIPTION", dispDesc);
-
-            XElement windowsNode = root.Element("WINDOWS");
-            if (windowsNode == null) { windowsNode = new XElement("WINDOWS"); root.Add(windowsNode); }
-            SetElementValue(windowsNode, "EDITIONID", editionId);
-
-            StringBuilder sb = new StringBuilder();
-            using (StringWriter writer = new StringWriter(sb)) { doc.Save(writer, SaveOptions.None); }
-            string newXmlString = sb.ToString();
-
-            // 3. Escribir XML nuevo (Esto guarda los cambios en el Header inmediatamente)
-            pXmlBuffer = Marshal.StringToHGlobalUni(newXmlString);
-            if (!WIMSetImageInformation(hImg, pXmlBuffer, (uint)(newXmlString.Length * 2)))
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-        }
-        finally {
-            if (pXmlBuffer != IntPtr.Zero) Marshal.FreeHGlobal(pXmlBuffer);
-            if (hImg != IntPtr.Zero) WIMCloseHandle(hImg);
-            if (hWim != IntPtr.Zero) WIMCloseHandle(hWim);
-            GC.Collect();
-        }
-    }
-    
-    public static int GetImageCount(string wimPath)
-    {
-         GC.Collect(); IntPtr hWim = IntPtr.Zero;
-         try {
-            uint res;
-            hWim = WIMCreateFile(wimPath, WIM_GENERIC_READ, WIM_OPEN_EXISTING, 0, 0, out res);
-            if (hWim == IntPtr.Zero) return 0;
-            ForceSafeTempPath(hWim); 
-            return GetImageCountNative(hWim);
-         }
-         catch { return 0; }
-         finally { if(hWim != IntPtr.Zero) WIMCloseHandle(hWim); }
-    }
-
-    [DllImport("wimgapi.dll", EntryPoint="WIMGetImageCount")]
-    private static extern int GetImageCountNative(IntPtr hWim);
-}
-"@
-
-    # 3. Compilacion
-    try {
-        if (-not ([System.Management.Automation.PSTypeName]'WimMasterEngine').Type) {
-            $refs = @("System.Xml", "System.Xml.Linq", "System.Core")
-            Add-Type -TypeDefinition $wimEngineSource -Language CSharp -ReferencedAssemblies $refs
-        }
-    } catch {
-        [System.Windows.Forms.MessageBox]::Show("Error compilacion C#:`n$($_.Exception.Message)", "Error Critico", 'OK', 'Error'); return
-    }
-
-    # 4. GUI
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Editor Metadatos WIM"
-    $form.Size = New-Object System.Drawing.Size(850, 600)
-    $form.StartPosition = "CenterScreen"
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $form.ForeColor = [System.Drawing.Color]::White
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
-
-    $lblFile = New-Object System.Windows.Forms.Label
-	$lblFile.Text = "WIM:"
-	$lblFile.Location = "20, 20"
-	$lblFile.AutoSize = $true; $form.Controls.Add($lblFile)
-    $txtPath = New-Object System.Windows.Forms.TextBox
-	$txtPath.Location = "80, 18"
-	$txtPath.Size = "600, 23"; $txtPath.ReadOnly=$true
-	$txtPath.BackColor = [System.Drawing.Color]::FromArgb(50,50,50)
-	$txtPath.ForeColor=[System.Drawing.Color]::White
-	$form.Controls.Add($txtPath)
-    $btnBrowse = New-Object System.Windows.Forms.Button
-	$btnBrowse.Text="..."
-	$btnBrowse.Location="690, 17"
-	$btnBrowse.Size="40, 25"
-	$btnBrowse.BackColor=[System.Drawing.Color]::Gray
-	$btnBrowse.FlatStyle="Flat"
-	$form.Controls.Add($btnBrowse)
-
-    $lblIdx = New-Object System.Windows.Forms.Label
-	$lblIdx.Text = "Index:"
-	$lblIdx.Location = "20, 60"
-	$lblIdx.AutoSize = $true; $form.Controls.Add($lblIdx)
-    $cmbIndex = New-Object System.Windows.Forms.ComboBox
-	$cmbIndex.Location = "80, 58"
-	$cmbIndex.Size = "600, 25"
-	$cmbIndex.DropDownStyle="DropDownList"
-	$cmbIndex.BackColor=[System.Drawing.Color]::FromArgb(50,50,50)
-	$cmbIndex.ForeColor=[System.Drawing.Color]::White
-	$form.Controls.Add($cmbIndex)
-
-    # Aumentamos Size del Grid
-    $dgv = New-Object System.Windows.Forms.DataGridView
-	$dgv.Location = "20, 100"
-	$dgv.Size = "790, 380"
-	$dgv.AllowUserToAddRows=$false
-	$dgv.AllowUserToDeleteRows=$false
-	$dgv.RowHeadersVisible=$false
-	$dgv.AutoSizeColumnsMode="Fill"
-	$dgv.BackgroundColor=[System.Drawing.Color]::FromArgb(40,40,40)
-	$dgv.GridColor=[System.Drawing.Color]::Gray
-    $dgv.DefaultCellStyle.BackColor=[System.Drawing.Color]::FromArgb(40,40,40)
-	$dgv.DefaultCellStyle.ForeColor=[System.Drawing.Color]::White
-	$dgv.DefaultCellStyle.SelectionBackColor=[System.Drawing.Color]::SteelBlue
-    $dgv.Columns.Add("Prop","Propiedad")|Out-Null
-	$dgv.Columns.Add("Val","Valor")|Out-Null
-	$dgv.Columns[0].ReadOnly=$true
-	$dgv.Columns[0].FillWeight=30
-	$form.Controls.Add($dgv)
-
-    $btnSave = New-Object System.Windows.Forms.Button
-	$btnSave.Text="GUARDAR (Commit)"
-	$btnSave.Location="550, 500"
-	$btnSave.Size="260, 40"
-	$btnSave.BackColor=[System.Drawing.Color]::SeaGreen
-	$btnSave.ForeColor=[System.Drawing.Color]::White
-	$btnSave.FlatStyle="Flat"
-	$btnSave.Enabled=$false
-	$form.Controls.Add($btnSave)
-    $lblStatus = New-Object System.Windows.Forms.Label
-	$lblStatus.Location="20, 510"
-	$lblStatus.Size="500, 25"
-	$lblStatus.ForeColor=[System.Drawing.Color]::Yellow
-	$lblStatus.Text="Listo."
-	$form.Controls.Add($lblStatus)
-
-    # --- EVENTO CARGAR ---
-    $btnBrowse.Add_Click({
-        $ofd = New-Object System.Windows.Forms.OpenFileDialog; $ofd.Filter = "WIM|*.wim"
-        if ($ofd.ShowDialog() -eq 'OK') {
-            $txtPath.Text = $ofd.FileName
-			$cmbIndex.Items.Clear()
-			$dgv.Rows.Clear()
-			$btnSave.Enabled=$false
-            $lblStatus.Text = "Escaneando nombres..."
-            $form.Refresh()
-
-            try {
-                $count = [WimMasterEngine]::GetImageCount($ofd.FileName)
-                if ($count -gt 0) { 
-                    for ($i=1; $i -le $count; $i++) {
-                        $name = "Desconocido"
-                        try {
-                            $xmlRaw = [WimMasterEngine]::GetImageXml($ofd.FileName, $i)
-                            $xml = [System.Xml.Linq.XDocument]::Parse($xmlRaw)
-                            $nameEl = $xml.Root.Element("NAME")
-                            if ($null -ne $nameEl) { $name = $nameEl.Value }
-                        } catch {}
-                        $cmbIndex.Items.Add("[$i] $name") 
-                    }
-                    $cmbIndex.SelectedIndex=0; $lblStatus.Text="WIM Cargado." 
-                }
-            } catch { [System.Windows.Forms.MessageBox]::Show("Error: $_") }
-        }
-    })
-
-    # --- EVENTO SELECCION (Muestra Metadatos Extendidos) ---
-    $cmbIndex.Add_SelectedIndexChanged({
-        if ($txtPath.Text) {
-            $idx = $cmbIndex.SelectedIndex + 1; $dgv.Rows.Clear()
-            try {
-                $xml = [System.Xml.Linq.XDocument]::Parse([WimMasterEngine]::GetImageXml($txtPath.Text, $idx))
-                $img = $xml.Root
-                
-                # --- Funcion Helper Interna ---
-                function Get-NodeVal($el, $name) { 
-                    $x = $el.Element($name)
-                    if ($null -ne $x) { return $x.Value } else { return "" }
-                }
-                
-                # --- 1. Datos Editables ---
-                $dgv.Rows.Add("Nombre", (Get-NodeVal $img "NAME")) | Out-Null
-                $dgv.Rows.Add("Descripcion", (Get-NodeVal $img "DESCRIPTION")) | Out-Null
-                $dgv.Rows.Add("Nombre Mostrado", (Get-NodeVal $img "DISPLAYNAME")) | Out-Null
-                $dgv.Rows.Add("Descripcion Mostrada", (Get-NodeVal $img "DISPLAYDESCRIPTION")) | Out-Null
-                
-                $winNode = $img.Element("WINDOWS")
-                $editionId = ""
-                if ($null -ne $winNode) { $editionId = Get-NodeVal $winNode "EDITIONID" }
-                $dgv.Rows.Add("ID de Edicion", $editionId) | Out-Null
-
-                # --- 2. Datos Solo Lectura (Calculados) ---
-                
-                # A) Arquitectura
-                $archVal = ""
-                if ($null -ne $winNode) { $archVal = Get-NodeVal $winNode "ARCH" }
-                $archStr = switch ($archVal) { "0" {"x86"} "9" {"x64"} "12" {"ARM64"} default {$archVal} }
-                $rowArch = $dgv.Rows.Add("Arquitectura", $archStr)
-
-                # B) Version
-                $verStr = ""
-                if ($null -ne $winNode) {
-                    $vNode = $winNode.Element("VERSION")
-                    if ($null -ne $vNode) {
-                        $maj = Get-NodeVal $vNode "MAJOR"
-                        $min = Get-NodeVal $vNode "MINOR"
-                        $bld = Get-NodeVal $vNode "BUILD"
-                        $spb = Get-NodeVal $vNode "SPBUILD"
-                        $verStr = "$maj.$min.$bld.$spb"
-                    }
-                }
-                $rowVer = $dgv.Rows.Add("Version", $verStr)
-
-                # C) Size (Bytes -> GB)
-                $bytesStr = Get-NodeVal $img "TOTALBYTES"
-                $sizeDisplay = ""
-                if ($bytesStr -match "^\d+$") {
-                    $gb = [math]::Round([long]$bytesStr / 1GB, 2)
-                    $sizeDisplay = "$gb GB"
-                }
-                $rowSize = $dgv.Rows.Add("Size", $sizeDisplay)
-
-                # D) Fecha Creacion
-                $dateStr = ""
-                $cTime = $img.Element("CREATIONTIME")
-                if ($null -ne $cTime) {
-                    try {
-                        # Convertir estructura High/Low a DateTime
-                        $high = [long](Get-NodeVal $cTime "HIGHPART")
-                        $low = [long](Get-NodeVal $cTime "LOWPART")
-                        # Combinar bits
-                        $combined = ($high -shl 32) -bor ($low -band 0xFFFFFFFFL)
-                        $dateObj = [DateTime]::FromFileTime($combined)
-                        $dateStr = $dateObj.ToString("yyyy-MM-dd HH:mm")
-                    } catch { $dateStr = "Desconocida" }
-                }
-                $rowDate = $dgv.Rows.Add("Fecha de Creacion", $dateStr)
-
-                # E) Idioma(s) Instalado(s)
-                $langStr = "Desconocido"
-                if ($null -ne $winNode) {
-                    $langsNode = $winNode.Element("LANGUAGES")
-                    if ($null -ne $langsNode) {
-                        $langList = @()
-                        # Extraer todos los lenguajes instalados
-                        foreach ($lNode in $langsNode.Elements("LANGUAGE")) {
-                            $langList += $lNode.Value
-                        }
-                        
-                        $defaultLang = Get-NodeVal $langsNode "DEFAULT"
-                        
-                        if ($langList.Count -gt 0) {
-                            $langStr = $langList -join ", "
-                            # Indicar cual es el predeterminado si hay varios
-                            if (-not [string]::IsNullOrWhiteSpace($defaultLang)) {
-                                $langStr += " (Predeterminado: $defaultLang)"
-                            }
-                        }
-                    }
-                }
-                $rowLang = $dgv.Rows.Add("Idioma(s)", $langStr)
-
-                # --- 3. Aplicar Estilo Solo Lectura ---
-                # Agregamos la variable $rowLang al array de celdas bloqueadas
-                foreach ($rIndex in @($rowArch, $rowVer, $rowSize, $rowDate, $rowLang)) {
-                    $dgv.Rows[$rIndex].ReadOnly = $true
-                    $dgv.Rows[$rIndex].DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60) # Gris oscuro
-                    $dgv.Rows[$rIndex].DefaultCellStyle.ForeColor = [System.Drawing.Color]::Silver
-                }
-
-                $btnSave.Enabled = $true
-            } catch { 
-                $lblStatus.Text="Error Lectura."
-                [System.Windows.Forms.MessageBox]::Show("Error: $_")
-            }
-        }
-    })
-
-    # --- EVENTO GUARDAR ---
-    $btnSave.Add_Click({
-        $path=$txtPath.Text; $idx=$cmbIndex.SelectedIndex+1
-        
-        # Diccionario simple para mapear nombre de fila -> valor
-        $d=@{}
-        foreach($r in $dgv.Rows){ $d[$r.Cells[0].Value]=$r.Cells[1].Value }
-        
-        Write-Log -LogLevel ACTION -Message "WimMetadataManager: Iniciando reescritura de metadatos XML para el WIM [$path] (Indice: $idx)."
-        Write-Log -LogLevel INFO -Message "WimMetadataManager: Valores a inyectar -> Nombre: [$($d['Nombre'])] | Edicion: [$($d['ID de Edicion'])]"
-
-        $form.Cursor=[System.Windows.Forms.Cursors]::WaitCursor
-        $lblStatus.Text="Guardando..."
-        $form.Refresh()
-        $btnSave.Enabled=$false
-        $success = $false
-
-        try {
-            # Llamada al motor nativo C#
-            [WimMasterEngine]::WriteImageMetadata(
-                $path, 
-                $idx, 
-                $d["Nombre"], 
-                $d["Descripcion"], 
-                $d["Nombre Mostrado"], 
-                $d["Descripcion Mostrada"], 
-                $d["ID de Edicion"]
-            )
-            
-            $success = $true
-            $lblStatus.Text="OK"
-            Write-Log -LogLevel INFO -Message "WimMetadataManager: Metadatos guardados exitosamente. El archivo WIM ha sido actualizado."
-            [System.Windows.Forms.MessageBox]::Show("Guardado Exitoso", "OK", 'OK', 'Information')
-
-        } catch { 
-            if (-not $success) {
-                $lblStatus.Text="Error"
-                $errMsg = $_.Exception.Message
-                Write-Log -LogLevel ERROR -Message "WimMetadataManager: Falla critica al escribir metadatos usando la API .NET - $errMsg"
-                [System.Windows.Forms.MessageBox]::Show("Error al guardar: $errMsg", "Error", 'OK', 'Error')
-            }
-        } finally { 
-            $form.Cursor=[System.Windows.Forms.Cursors]::Default; $btnSave.Enabled=$true 
-            # Actualizamos la lista desplegable con el nuevo nombre
-            if ($success) { 
-                $cmbIndex.Items[$idx - 1] = "[$idx] " + $d["Nombre"] 
-                Write-Log -LogLevel INFO -Message "WimMetadataManager: UI y lista de indices actualizados con el nuevo nombre."
-            }
-        }
-    })
-
-    $form.ShowDialog() | Out-Null
-	$form.Dispose()
-	$form = $null
-    [GC]::Collect()
-    [GC]::WaitForPendingFinalizers()
-    Start-Sleep -Milliseconds 500
-}
-
-# =================================================================
-#  Modulo GUI de Drivers
-# =================================================================
-function Show-Drivers-GUI {
-    param()
-    
-    # 1. Validaciones
-    if ($Script:IMAGE_MOUNTED -eq 0) { 
-        Add-Type -AssemblyName System.Windows.Forms
-        [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
-        return 
-    }
-
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-
-    # 2. Configuracion del Formulario
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Inyector de Drivers - (Offline)"
-    $form.Size = New-Object System.Drawing.Size(1000, 650)
-    $form.StartPosition = "CenterScreen"
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $form.ForeColor = [System.Drawing.Color]::White
-
-    # Titulo
-    $lblTitle = New-Object System.Windows.Forms.Label
-    $lblTitle.Text = "Gestion de Drivers"
-    $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-    $lblTitle.Location = New-Object System.Drawing.Point(20, 15)
-    $lblTitle.AutoSize = $true
-    $form.Controls.Add($lblTitle)
-
-    # Botones Superiores
-    $btnLoadFolder = New-Object System.Windows.Forms.Button
-    $btnLoadFolder.Text = "[CARPETA] Cargar..."
-    $btnLoadFolder.Location = New-Object System.Drawing.Point(600, 12)
-    $btnLoadFolder.Size = New-Object System.Drawing.Size(160, 30)
-    $btnLoadFolder.BackColor = [System.Drawing.Color]::FromArgb(70, 70, 70)
-    $btnLoadFolder.ForeColor = [System.Drawing.Color]::White
-    $btnLoadFolder.FlatStyle = "Flat"
-    $form.Controls.Add($btnLoadFolder)
-
-    $btnAddFile = New-Object System.Windows.Forms.Button
-    $btnAddFile.Text = "+ Agregar Archivo .INF"
-    $btnAddFile.Location = New-Object System.Drawing.Point(770, 12)
-    $btnAddFile.Size = New-Object System.Drawing.Size(180, 30)
-    $btnAddFile.BackColor = [System.Drawing.Color]::RoyalBlue
-    $btnAddFile.ForeColor = [System.Drawing.Color]::White
-    $btnAddFile.FlatStyle = "Flat"
-    $form.Controls.Add($btnAddFile)
-
-    # Leyenda
-    $lblLegend = New-Object System.Windows.Forms.Label
-    $lblLegend.Text = "Amarillo = Ya instalado | Blanco = Nuevo"
-    $lblLegend.Location = New-Object System.Drawing.Point(20, 45)
-    $lblLegend.AutoSize = $true
-    $lblLegend.ForeColor = [System.Drawing.Color]::Gold
-    $form.Controls.Add($lblLegend)
-
-    # ListView
-    $listView = New-Object System.Windows.Forms.ListView
-    $listView.Location = New-Object System.Drawing.Point(20, 70)
-    $listView.Size = New-Object System.Drawing.Size(940, 470)
-    $listView.View = [System.Windows.Forms.View]::Details
-    $listView.CheckBoxes = $true
-    $listView.FullRowSelect = $true
-    $listView.GridLines = $true
-    $listView.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
-    $listView.ForeColor = [System.Drawing.Color]::White
-    
-    # Columnas
-    $listView.Columns.Add("Estado", 100) | Out-Null
-    $listView.Columns.Add("Archivo INF", 180) | Out-Null
-    $listView.Columns.Add("Clase", 100) | Out-Null
-    $listView.Columns.Add("Version", 120) | Out-Null
-    $listView.Columns.Add("Ruta Completa", 400) | Out-Null
-
-    $form.Controls.Add($listView)
-
-    # Estado
-    $lblStatus = New-Object System.Windows.Forms.Label
-    $lblStatus.Text = "Listo."
-    $lblStatus.Location = New-Object System.Drawing.Point(20, 550)
-    $lblStatus.AutoSize = $true
-    $lblStatus.ForeColor = [System.Drawing.Color]::Cyan
-    $form.Controls.Add($lblStatus)
-
-    # Botones Inferiores
-    $btnInstall = New-Object System.Windows.Forms.Button
-    $btnInstall.Text = "INYECTAR SELECCIONADOS"
-    $btnInstall.Location = New-Object System.Drawing.Point(760, 560)
-    $btnInstall.Size = New-Object System.Drawing.Size(200, 35)
-    $btnInstall.BackColor = [System.Drawing.Color]::SeaGreen
-    $btnInstall.ForeColor = [System.Drawing.Color]::White
-    $btnInstall.FlatStyle = "Flat"
-    $form.Controls.Add($btnInstall)
-
-    $btnSelectNew = New-Object System.Windows.Forms.Button
-    $btnSelectNew.Text = "Seleccionar Solo Nuevos"
-    $btnSelectNew.Location = New-Object System.Drawing.Point(20, 580)
-    $btnSelectNew.Size = New-Object System.Drawing.Size(150, 25)
-    $btnSelectNew.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
-    $btnSelectNew.FlatStyle = "Flat"
-    $form.Controls.Add($btnSelectNew)
-
-    # Cache Global
-    $script:cachedInstalledDrivers = @()
-
-    # --- HELPER: PROCESAMIENTO ROBUSTO DE INF ---
-    $Script:ProcessInfFile = {
-        param($fileObj)
-        
-        $classType = "Desconocido"; $localVersion = "---"
-        $statusText = "Nuevo"; $isInstalled = $false
-
-        try {
-            # Optimizacion masiva: Uso de StreamReader nativo de .NET
-            $stream = [System.IO.StreamReader]::new($fileObj.FullName)
-            $linesRead = 0
-            
-            while ($null -ne ($line = $stream.ReadLine()) -and $linesRead -lt 300) {
-                # Buscar Clase
-                if ($line -match "^Class\s*=\s*(.*)") {
-                    $classType = $matches[1].Trim()
-                }
-                # Buscar Version (DriverVer = fecha, version)
-                if ($line -match "DriverVer\s*=\s*.*?,([0-9\.\s]+)") {
-                    $localVersion = $matches[1].Trim()
-                }
-
-                # Optimizacion: Si ya encontramos ambos, salimos del bucle
-                if ($classType -ne "Desconocido" -and $localVersion -ne "---") { break }
-                
-                $linesRead++
-            }
-        } catch {
-            # Silencioso en caso de error de lectura (ej. archivo bloqueado)
-        } finally {
-            # CRITICO: Liberar el handle del archivo siempre
-            if ($null -ne $stream) {
-                $stream.Close()
-                $stream.Dispose()
-            }
-        }
-
-        # Logica de Comparacion
-        $foundByName = $script:cachedInstalledDrivers | Where-Object { [System.IO.Path]::GetFileName($_.OriginalFileName) -eq $fileObj.Name }
-        
-        if ($foundByName) {
-            $isInstalled = $true; $statusText = "INSTALADO"
-        } 
-        elseif ($localVersion -ne "---") {
-            # Comparar version exacta + clase
-            $foundByVer = $script:cachedInstalledDrivers | Where-Object { $_.Version -eq $localVersion -and $_.ClassName -eq $classType }
-            if ($foundByVer) { $isInstalled = $true; $statusText = "INSTALADO" }
-        }
-
-        # Crear Item
-        $item = New-Object System.Windows.Forms.ListViewItem($statusText)
-        $item.SubItems.Add($fileObj.Name) | Out-Null
-        $item.SubItems.Add($classType) | Out-Null
-        $item.SubItems.Add($localVersion) | Out-Null
-        $item.SubItems.Add($fileObj.FullName) | Out-Null
-        $item.Tag = $fileObj.FullName
-        
-        if ($isInstalled) {
-            $item.BackColor = [System.Drawing.Color]::FromArgb(60, 50, 0)
-            $item.ForeColor = [System.Drawing.Color]::Gold
-            $item.Checked = $false
-        } else {
-            $item.Checked = $true
-        }
-        return $item
-    }
-
-    # 3. EVENTO LOAD
-    $form.Add_Shown({
-        $form.Refresh(); $listView.BeginUpdate()
-        $lblStatus.Text = "Analizando drivers instalados en WIM..."
-        $form.Refresh()
-        
-        try {
-            $dismDrivers = Get-WindowsDriver -Path $Script:MOUNT_DIR -ErrorAction SilentlyContinue
-            if ($dismDrivers) { $script:cachedInstalledDrivers = $dismDrivers }
-        } catch {}
-
-        $listView.EndUpdate()
-        $lblStatus.Text = "Listo. Usa los botones superiores."
-        $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
-    })
-
-    # Botones de Carga
-    $btnLoadFolder.Add_Click({
-        $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
-        $fbd.Description = "Buscar drivers recursivamente"
-        if ($fbd.ShowDialog() -eq 'OK') {
-            $selPath = $fbd.SelectedPath
-            $lblStatus.Text = "Escaneando..."
-            $form.Refresh()
-            $listView.BeginUpdate()
-            $files = Get-ChildItem -Path $selPath -Filter "*.inf" -Recurse
-            foreach ($f in $files) {
-                $newItem = & $Script:ProcessInfFile -fileObj $f
-                $listView.Items.Add($newItem) | Out-Null
-            }
-            $listView.EndUpdate()
-            $lblStatus.Text = "Drivers cargados: $($listView.Items.Count)"
-        }
-    })
-
-    $btnAddFile.Add_Click({
-        $ofd = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "Archivos INF (*.inf)|*.inf"; $ofd.Multiselect = $true
-        if ($ofd.ShowDialog() -eq 'OK') {
-            $listView.BeginUpdate()
-            foreach ($fn in $ofd.FileNames) {
-                try {
-                    $newItem = & $Script:ProcessInfFile -fileObj (Get-Item $fn)
-                    $listView.Items.Add($newItem) | Out-Null
-                } catch {}
-            }
-            $listView.EndUpdate()
-        }
-    })
-
-    # Resto de logica
-    $btnSelectNew.Add_Click({
-        foreach ($item in $listView.Items) {
-            if ($item.Text -match "Nuevo") { $item.Checked = $true } else { $item.Checked = $false }
-        }
-    })
-
-    $btnInstall.Add_Click({
-        $checkedItems = $listView.CheckedItems
-        if ($checkedItems.Count -eq 0) { 
-            Write-Log -LogLevel WARN -Message "Driver_Injector: Intento de instalacion sin drivers seleccionados en la GUI."
-            return 
-        }
-
-        if ([System.Windows.Forms.MessageBox]::Show("Inyectar $($checkedItems.Count) drivers?", "Confirmar", 'YesNo') -eq 'Yes') {
-            Write-Log -LogLevel ACTION -Message "Driver_Injector: Iniciando inyeccion masiva de $($checkedItems.Count) controladores en la imagen."
-            $btnInstall.Enabled = $false
-            
-            $count = 0
-            $errs = 0
-            $total = $checkedItems.Count
-            $success = 0
-
-            foreach ($item in $checkedItems) {
-                $count++
-                $driverName = $item.SubItems[1].Text
-                $driverPath = $item.Tag
-                
-                $lblStatus.Text = "Instalando ($count/$total): $driverName..."
-                $form.Refresh()
-                
-                Write-Log -LogLevel INFO -Message "Driver_Injector: Procesando [$count/$total] -> $driverPath"
-                
-                try {
-                    # Comando de inyeccion
-                    dism /Image:$Script:MOUNT_DIR /Add-Driver /Driver:"$driverPath" /ForceUnsigned | Out-Null
-                    
-                    if ($LASTEXITCODE -eq 0) {
-                        # Feedback Visual Inmediato
-                        $item.BackColor = [System.Drawing.Color]::DarkGreen
-                        $item.Text = "INSTALADO"
-                        $item.Checked = $false
-                        $success++
-                        Write-Log -LogLevel INFO -Message "Driver_Injector: Exito. Controlador inyectado correctamente."
-                    } else { 
-                        throw "DISM rechazo el controlador. LASTEXITCODE: $LASTEXITCODE" 
-                    }
-                } catch { 
-                    $errs++
-                    $item.BackColor = [System.Drawing.Color]::DarkRed
-                    $item.Text = "ERROR"
-                    Write-Log -LogLevel ERROR -Message "Driver_Injector: Falla critica inyectando [$driverName] - $($_.Exception.Message)"
-                }
-            }
-
-            Write-Log -LogLevel ACTION -Message "Driver_Injector: Ciclo de inyeccion finalizado. Exitos: $success | Errores: $errs"
-
-            $lblStatus.Text = "Actualizando base de datos de drivers... Por favor espera."
-            $form.Refresh()
-            
-            Write-Log -LogLevel INFO -Message "Driver_Injector: Consultando a DISM para reconstruir la cache interna de drivers instalados..."
-            
-            try {
-                # Forzamos la relectura de lo que realmente quedo instalado en la imagen
-                $dismDrivers = Get-WindowsDriver -Path $Script:MOUNT_DIR -ErrorAction SilentlyContinue
-                if ($dismDrivers) { 
-                    $script:cachedInstalledDrivers = $dismDrivers 
-                    Write-Log -LogLevel INFO -Message "Driver_Injector: Cache recargada exitosamente. Se encontraron $($dismDrivers.Count) controladores en la imagen."
-                } else {
-                    Write-Log -LogLevel WARN -Message "Driver_Injector: Get-WindowsDriver no devolvio resultados al recargar la cache."
-                }
-            } catch {
-                Write-Log -LogLevel ERROR -Message "Driver_Injector: Fallo al ejecutar Get-WindowsDriver durante la recarga de cache - $($_.Exception.Message)"
-                Write-Warning "No se pudo actualizar la cache de drivers."
-            }
-
-            $btnInstall.Enabled = $true
-            $lblStatus.Text = "Proceso terminado. Errores: $errs"
-            
-            [System.Windows.Forms.MessageBox]::Show("Proceso terminado.`nErrores: $errs`n`nLa lista de drivers instalados se ha actualizado internamente.", "Info", 'OK', 'Information')
-        } else {
-            Write-Log -LogLevel INFO -Message "Driver_Injector: El usuario cancelo la inyeccion en el cuadro de confirmacion."
-        }
-    })
-	
-	# Cierre Seguro
-    $form.Add_FormClosing({ 
-        $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Seguro que quieres cerrar esta ventana?", 
-            "Confirmar", 
-            [System.Windows.Forms.MessageBoxButtons]::YesNo, 
-            [System.Windows.Forms.MessageBoxIcon]::Question
-        )
-
-        if ($confirm -eq 'No') {
-            $_.Cancel = $true
-        }
-    })
-
-    $form.ShowDialog() | Out-Null
-    $form.Dispose()
-}
-
-# =================================================================
-#  Modulo GUI de Desinstalacion de Drivers
-# =================================================================
-function Show-Uninstall-Drivers-GUI {
-    param()
-    
-    # 1. Validaciones
-    if ($Script:IMAGE_MOUNTED -eq 0) { 
-        [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
-        return 
-    }
-
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-
-    # 2. Configuracion del Formulario
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Eliminar Drivers de la Imagen - $Script:MOUNT_DIR"
-    $form.Size = New-Object System.Drawing.Size(850, 600)
-    $form.StartPosition = "CenterScreen"
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $form.ForeColor = [System.Drawing.Color]::White
-
-    # Titulo
-    $lblTitle = New-Object System.Windows.Forms.Label
-    $lblTitle.Text = "Drivers de Terceros Instalados (OEM)"
-    $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-    $lblTitle.Location = New-Object System.Drawing.Point(20, 15)
-    $lblTitle.AutoSize = $true
-    $form.Controls.Add($lblTitle)
-
-    # Advertencia
-    $lblWarn = New-Object System.Windows.Forms.Label
-    $lblWarn.Text = "CUIDADO: No elimines drivers de arranque (Disco/USB) o la imagen no iniciara."
-    $lblWarn.Location = New-Object System.Drawing.Point(350, 20)
-    $lblWarn.AutoSize = $true
-    $lblWarn.ForeColor = [System.Drawing.Color]::Salmon
-    $form.Controls.Add($lblWarn)
-
-    # ListView
-    $listView = New-Object System.Windows.Forms.ListView
-    $listView.Location = New-Object System.Drawing.Point(20, 50)
-    $listView.Size = New-Object System.Drawing.Size(790, 450)
-    $listView.View = [System.Windows.Forms.View]::Details
-    $listView.CheckBoxes = $true
-    $listView.FullRowSelect = $true
-    $listView.GridLines = $true
-    $listView.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
-    $listView.ForeColor = [System.Drawing.Color]::White
-    
-    # Columnas
-    $listView.Columns.Add("Nombre Publicado (ID)", 150) | Out-Null
-    $listView.Columns.Add("Archivo Original", 200) | Out-Null
-    $listView.Columns.Add("Clase", 120) | Out-Null
-    $listView.Columns.Add("Proveedor", 150) | Out-Null
-    $listView.Columns.Add("Version", 100) | Out-Null
-
-    $form.Controls.Add($listView)
-
-    # Estado
-    $lblStatus = New-Object System.Windows.Forms.Label
-    $lblStatus.Text = "Leyendo almacen de drivers..."
-    $lblStatus.Location = New-Object System.Drawing.Point(20, 510)
-    $lblStatus.AutoSize = $true
-    $lblStatus.ForeColor = [System.Drawing.Color]::Cyan
-    $form.Controls.Add($lblStatus)
-
-    # Botones
-    $btnDelete = New-Object System.Windows.Forms.Button
-    $btnDelete.Text = "ELIMINAR SELECCIONADOS"
-    $btnDelete.Location = New-Object System.Drawing.Point(560, 520)
-    $btnDelete.Size = New-Object System.Drawing.Size(250, 35)
-    $btnDelete.BackColor = [System.Drawing.Color]::Crimson
-    $btnDelete.ForeColor = [System.Drawing.Color]::White
-    $btnDelete.FlatStyle = "Flat"
-    $form.Controls.Add($btnDelete)
-
-    $btnSelectAll = New-Object System.Windows.Forms.Button
-    $btnSelectAll.Text = "Marcar Todo"
-    $btnSelectAll.Location = New-Object System.Drawing.Point(20, 530)
-    $btnSelectAll.Size = New-Object System.Drawing.Size(100, 25)
-    $btnSelectAll.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
-    $btnSelectAll.FlatStyle = "Flat"
-    $form.Controls.Add($btnSelectAll)
-
-    # 4. Logica de Carga (Get-WindowsDriver)
-    $form.Add_Shown({
-        $form.Refresh()
-        $listView.BeginUpdate()
-        
-        try {
-            # Obtenemos solo drivers de terceros (sin -All) para evitar borrar drivers de sistema Microsoft
-            $drivers = Get-WindowsDriver -Path $Script:MOUNT_DIR -ErrorAction Stop
-            
-            foreach ($drv in $drivers) {
-                # El "Published Name" (ej. oem1.inf) es lo que DISM necesita para borrar
-                $oemName = $drv.Driver 
-                
-                $item = New-Object System.Windows.Forms.ListViewItem($oemName)
-                $item.SubItems.Add($drv.OriginalFileName) | Out-Null
-                $item.SubItems.Add($drv.ClassName) | Out-Null
-                $item.SubItems.Add($drv.ProviderName) | Out-Null
-                $item.SubItems.Add($drv.Version) | Out-Null
-                
-                # Guardamos el nombre OEM en el Tag para usarlo al borrar
-                $item.Tag = $oemName 
-                
-                $listView.Items.Add($item) | Out-Null
-            }
-            $lblStatus.Text = "Drivers encontrados: $($listView.Items.Count)"
-            $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
-        }
-        catch {
-            $lblStatus.Text = "Error al leer drivers: $_"
-            $lblStatus.ForeColor = [System.Drawing.Color]::Red
-        }
-        $listView.EndUpdate()
-    })
-
-    # 5. Eventos de Botones
-    $btnSelectAll.Add_Click({
-        foreach ($item in $listView.Items) { $item.Checked = $true }
-    })
-
-    $btnDelete.Add_Click({
-        $checkedItems = $listView.CheckedItems
-        if ($checkedItems.Count -eq 0) { return }
-
-        $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a ELIMINAR PERMANENTEMENTE $($checkedItems.Count) drivers.`nEstas seguro?", "Confirmar Eliminacion", 'YesNo', 'Warning')
-        if ($confirm -eq 'Yes') {
-            $btnDelete.Enabled = $false
-
-            $count = 0
-            $total = $checkedItems.Count
-            $errors = 0
-
-            foreach ($item in $checkedItems) {
-                $count++
-                $oemInf = $item.Tag
-                $origName = $item.SubItems[1].Text
-                
-                $lblStatus.Text = "Eliminando ($count/$total): $origName ($oemInf)..."
-                $form.Refresh()
-
-                Write-Log -LogLevel ACTION -Message "DRIVER_REMOVE: Eliminando $oemInf ($origName)"
-                
-                try {
-                    # Comando de eliminacion
-                    dism /Image:$Script:MOUNT_DIR /Remove-Driver /Driver:"$oemInf" | Out-Null
-                    
-                    if ($LASTEXITCODE -ne 0) { throw "Error DISM $LASTEXITCODE" }
-                    
-                    # Feedback Visual
-                    $item.BackColor = [System.Drawing.Color]::Gray
-                    $item.ForeColor = [System.Drawing.Color]::Black
-                    $item.Text += " [BORRADO]"
-                    $item.Checked = $false
-                } catch {
-                    $errors++
-                    $item.BackColor = [System.Drawing.Color]::DarkRed
-                    Write-Log -LogLevel ERROR -Message "Fallo al eliminar $oemInf"
-                }
-            }
-
-            $btnDelete.Enabled = $true
-            $lblStatus.Text = "Proceso finalizado. Errores: $errors"
-            [System.Windows.Forms.MessageBox]::Show("Proceso completado.`nEliminados: $($total - $errors)`nErrores: $errors", "Resultado", 'OK', 'Information')
-        }
-    })
-	
-	# Cierre Seguro
-    $form.Add_FormClosing({ 
-        $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Seguro que quieres cerrar esta ventana?", 
-            "Confirmar", 
-            [System.Windows.Forms.MessageBoxButtons]::YesNo, 
-            [System.Windows.Forms.MessageBoxIcon]::Question
-        )
-
-        if ($confirm -eq 'No') {
-            $_.Cancel = $true
-        }
-    })
-
-    $form.ShowDialog() | Out-Null
-    $form.Dispose()
 }
 
 # =================================================================
@@ -4159,7 +3133,16 @@ function Show-Bloatware-GUI {
     })
 
     $form.ShowDialog() | Out-Null
+    # 1. Destrucción explícita del control pesado
+    if ($null -ne $listView) {
+        $listView.Dispose()
+    }
+    # 2. Destrucción del formulario
     $form.Dispose()
+    # 3. Forzar limpieza profunda
+    [GC]::Collect()
+	$script:cachedApps = $null
+    [GC]::WaitForPendingFinalizers()
 }
 
 # =================================================================
@@ -4527,1709 +3510,583 @@ function Show-Services-Offline-GUI {
     })
 
     $form.ShowDialog() | Out-Null
+
+    # 1. Destrucción explícita de objetos GDI y controles pesados
+    if ($null -ne $globalListViews) {
+        foreach ($lv in $globalListViews) {
+            # Si el ListView tiene un ImageList asociado, destrúyelo primero
+            if ($null -ne $lv.SmallImageList) { 
+                $lv.SmallImageList.Dispose() 
+            }
+            # Destruir el control
+            $lv.Dispose()
+        }
+        $globalListViews.Clear()
+        $globalListViews = $null
+    }
+
+    # 2. Destrucción del formulario padre
     $form.Dispose()
-    $globalListViews.Clear()
-    $globalListViews = $null
+
+    # 3. Forzar limpieza profunda de memoria
     [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
+
 }
 
 # =================================================================
-#  Modulo GUI de Caracteristicas de Windows Offline
+#  MODULO DE INYECCION DE ADDONS (.WIM, .TPK, .BPK, .REG,)
 # =================================================================
-function Show-Features-GUI {
-    param()
-    
-    if ($Script:IMAGE_MOUNTED -eq 0) { 
-        [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
-        return 
+# --- HELPER 1: Importador de Registro Silencioso (Headless) ---
+function Import-OfflineReg {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$FilePath
+    )
+
+    Write-Log -LogLevel INFO -Message "Procesando Registro Automatizado: $FilePath"
+
+    $lines         = [System.IO.File]::ReadAllLines($FilePath)
+    $cleanLines    = New-Object System.Collections.Generic.List[string]
+    $keysToProcess = New-Object System.Collections.Generic.HashSet[string]
+
+    # Hives bloqueados: CBS/DISM (COMPONENTS), seguridad (SECURITY, SAM)
+    $SHIELDED_HIVES = "COMPONENTS|TK_COMPONENTS|SECURITY|TK_SECURITY|SAM|TK_SAM"
+
+    $componentsSkipped  = 0
+    $skipCurrentSection = $false
+    $isFirst            = $true
+
+    foreach ($line in $lines) {
+
+        # ── PASO 1: Primera línea — BOM y cabecera del archivo
+        if ($isFirst) {
+            $line = $line.TrimStart([char]0xFEFF, [char]0xEF, [char]0xBB, [char]0xBF)
+            if ($line -match 'Windows Registry Editor Version 5\.00') {
+                $line = 'Windows Registry Editor Version 5.00'
+            }
+            $isFirst = $false
+            $cleanLines.Add($line)
+            continue
+        }
+
+        # ── PASO 2: Detección de cabecera de clave
+        if ($line -match '^\[-?(?:HKEY_LOCAL_MACHINE|HKEY_CURRENT_USER|HKEY_CLASSES_ROOT|HKLM|HKCU|HKCR)\\') {
+
+            $rawKeyPath = $line -replace '^\[-?', '' -replace '\].*$', ''
+
+            # ── ESCUDO DE INTEGRIDAD — evaluar sobre ruta SIN traducir
+            if ($rawKeyPath -match '(?i)^(?:HKEY_LOCAL_MACHINE|HKLM)\\(?:' + $SHIELDED_HIVES + ')') {
+                $skipCurrentSection = $true
+                $componentsSkipped++
+                Write-Log -LogLevel WARN -Message "Import-OfflineReg: [ESCUDO] Seccion bloqueada -> $line"
+                continue
+            }
+            $skipCurrentSection = $false
+
+            # ── TRADUCCIÓN DE RUTAS
+            # Bloque 1: TK_CLASSES bajo HKLM — debe ir ANTES que el bloque SOFTWARE
+            # para evitar que HKLM\TK_CLASSES sea ignorado por la guarda de HKCR.
+            $line = $line -replace '(?i)(?:HKEY_LOCAL_MACHINE|HKLM)\\TK_CLASSES', `
+                                   'HKEY_LOCAL_MACHINE\OfflineSoftware\Classes'
+
+            # Bloque 2: HKEY_CLASSES_ROOT / HKCR — solo si la línea NO es ya HKLM
+            # (evita doble sustitución tras el reemplazo de TK_CLASSES de arriba)
+            if ($line -notmatch '(?i)HKEY_LOCAL_MACHINE') {
+                $line = $line -replace '(?i)HKEY_CLASSES_ROOT', `
+                                       'HKEY_LOCAL_MACHINE\OfflineSoftware\Classes' `
+                              -replace '(?i)^\[-?HKCR\\', `
+                                       '[HKEY_LOCAL_MACHINE\OfflineSoftware\Classes\'
+            }
+
+            # Bloque 3: SYSTEM — CurrentControlSet ANTES que SYSTEM genérico
+            $controlSet = Get-OfflineControlSet
+            $line = $line -replace '(?i)(?:HKEY_LOCAL_MACHINE|HKLM)\\(?:SYSTEM|TK_SYSTEM)\\CurrentControlSet', `
+                                   "HKEY_LOCAL_MACHINE\OfflineSystem\$controlSet" `
+                          -replace '(?i)(?:HKEY_LOCAL_MACHINE|HKLM)\\(?:SYSTEM|TK_SYSTEM)', `
+                                   'HKEY_LOCAL_MACHINE\OfflineSystem'
+
+            # Bloque 4: SOFTWARE
+            $line = $line -replace '(?i)(?:HKEY_LOCAL_MACHINE|HKLM)\\(?:SOFTWARE|TK_SOFTWARE)', `
+                                   'HKEY_LOCAL_MACHINE\OfflineSoftware'
+
+            # Bloque 5: HKCU\Software\Classes — ANTES que HKCU genérico
+            $line = $line -replace '(?i)(?:HKEY_CURRENT_USER|HKCU)\\(?:Software|TK_SOFTWARE)\\Classes', `
+                                   'HKEY_LOCAL_MACHINE\OfflineUserClasses' `
+                          -replace '(?i)^\[-?HKCU\\Software\\Classes', `
+                                   '[HKEY_LOCAL_MACHINE\OfflineUserClasses'
+
+            # Bloque 6: HKCU genérico — DESPUÉS del bloque de Classes
+            $line = $line -replace '(?i)(?:HKEY_CURRENT_USER|HKEY_LOCAL_MACHINE\\TK_USER)', `
+                                   'HKEY_LOCAL_MACHINE\OfflineUser' `
+                          -replace '(?i)^\[-?HKCU\\', `
+                                   '[HKEY_LOCAL_MACHINE\OfflineUser\'
+        }
+
+        # ── PASO 3: Escudo activo — descartar valores de secciones bloqueadas
+        if ($skipCurrentSection) { continue }
+
+        # ── PASO 4: Registrar clave traducida para desbloqueo SDDL
+        if ($line -match '^\[-?(HKEY_LOCAL_MACHINE\\[^\]]+)\]$') {
+            $null = $keysToProcess.Add($matches[1].Trim())
+        }
+
+        # ── PASO 5: Línea validada → buffer limpio
+        $cleanLines.Add($line)
     }
 
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-
-    # --- Configuracion del Formulario ---
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Caracteristicas de Windows (Features) - $Script:MOUNT_DIR"
-    $form.Size = New-Object System.Drawing.Size(900, 700)
-    $form.StartPosition = "CenterScreen"
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $form.ForeColor = [System.Drawing.Color]::White
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
-
-    # Tooltip para descripciones
-    $toolTip = New-Object System.Windows.Forms.ToolTip
-    $toolTip.AutoPopDelay = 10000
-    $toolTip.InitialDelay = 500
-    $toolTip.ReshowDelay = 500
-
-    # Titulo
-    $lblTitle = New-Object System.Windows.Forms.Label
-    $lblTitle.Text = "Gestor de Caracteristicas"
-    $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-    $lblTitle.Location = "20, 10"
-	$lblTitle.AutoSize = $true
-    $form.Controls.Add($lblTitle)
-
-    # --- BARRA DE BUSQUEDA ---
-    $lblSearch = New-Object System.Windows.Forms.Label
-    $lblSearch.Text = "Buscar:"
-	$lblSearch.Location = "20, 45"
-	$lblSearch.AutoSize=$true
-    $form.Controls.Add($lblSearch)
-
-    $txtSearch = New-Object System.Windows.Forms.TextBox
-    $txtSearch.Location = "70, 42"
-	$txtSearch.Size = "600, 23"
-    $txtSearch.BackColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
-    $txtSearch.ForeColor = [System.Drawing.Color]::White
-    $form.Controls.Add($txtSearch)
-
-    # ListView
-    $lv = New-Object System.Windows.Forms.ListView
-    $lv.Location = "20, 80"
-    $lv.Size = "840, 480"
-    $lv.View = "Details"
-    $lv.CheckBoxes = $true
-    $lv.FullRowSelect = $true
-    $lv.GridLines = $true
-    $lv.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
-    $lv.ForeColor = [System.Drawing.Color]::White
-    $lv.ShowItemToolTips = $true
-    
-    $lv.Columns.Add("Caracteristica", 350) | Out-Null
-    $lv.Columns.Add("Estado", 150) | Out-Null
-    $lv.Columns.Add("Nombre Interno", 300) | Out-Null
-
-    $form.Controls.Add($lv)
-
-    # Estado y Botones
-    $lblStatus = New-Object System.Windows.Forms.Label
-    $lblStatus.Text = "Cargando datos... (La interfaz puede congelarse unos segundos)"
-    $lblStatus.Location = "20, 570"
-	$lblStatus.AutoSize = $true
-    $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
-    $form.Controls.Add($lblStatus)
-
-    # NUEVO BOTÓN: Integracion Offline de .NET 3.5
-    $btnNetFx3 = New-Object System.Windows.Forms.Button
-    $btnNetFx3.Text = "INTEGRAR .NET 3.5 (SXS)"
-    $btnNetFx3.Location = "400, 600"
-    $btnNetFx3.Size = "220, 40"
-    $btnNetFx3.BackColor = [System.Drawing.Color]::DodgerBlue
-    $btnNetFx3.ForeColor = [System.Drawing.Color]::White
-    $btnNetFx3.FlatStyle = "Flat"
-    $btnNetFx3.Enabled = $false
-    $toolTip.SetToolTip($btnNetFx3, "Instala .NET Framework 3.5 buscando la carpeta 'sxs' localmente.")
-    $form.Controls.Add($btnNetFx3)
-
-    $btnApply = New-Object System.Windows.Forms.Button
-    $btnApply.Text = "APLICAR CAMBIOS"
-    $btnApply.Location = "640, 600"
-	$btnApply.Size = "220, 40"
-    $btnApply.BackColor = [System.Drawing.Color]::SeaGreen
-	$btnApply.ForeColor = [System.Drawing.Color]::White
-    $btnApply.FlatStyle = "Flat"
-    $btnApply.Enabled = $false
-    $form.Controls.Add($btnApply)
-
-    # Variable Global para Cache
-    $script:cachedFeatures = @()
-
-    # --- FUNCION HELPER PARA LLENAR LA LISTA ---
-    $PopulateList = {
-        param($FilterText)
-        $lv.BeginUpdate()
-        $lv.Items.Clear()
-        
-        foreach ($feat in $script:cachedFeatures) {
-            $displayName = $feat.DisplayName
-            if ([string]::IsNullOrWhiteSpace($displayName)) {
-                $displayName = $feat.FeatureName
-            }
-
-            if (-not [string]::IsNullOrWhiteSpace($FilterText)) {
-                if ($displayName -notmatch $FilterText -and $feat.FeatureName -notmatch $FilterText) {
-                    continue 
-                }
-            }
-
-            $item = New-Object System.Windows.Forms.ListViewItem($displayName)
-            
-            # --- CORRECCIÓN CRÍTICA: Forzar a string para evitar el error del Enum ---
-            $stateString = $feat.State.ToString()
-            $stateDisplay = $stateString
-            $color = [System.Drawing.Color]::White
-
-            switch ($stateString) {
-                "Enabled" { 
-                    $stateDisplay = "Habilitado"
-                    $color = [System.Drawing.Color]::Cyan
-                    $item.Checked = $true
-                }
-                "Disabled" { 
-                    $stateDisplay = "Deshabilitado" 
-                    $item.Checked = $false
-                }
-                "DisabledWithPayloadRemoved" {
-                    $stateDisplay = "Removido (Requiere Source)"
-                    $color = [System.Drawing.Color]::Salmon
-                    $item.Checked = $false
-                }
-                "EnablePending" {
-                    $stateDisplay = "Pendiente (Habilitar)"
-                    $color = [System.Drawing.Color]::Yellow
-                    $item.Checked = $true
-                }
-                "DisablePending" {
-                    $stateDisplay = "Pendiente (Deshabilitar)"
-                    $color = [System.Drawing.Color]::Orange
-                    $item.Checked = $false
-                }
-                Default {
-                    # Fallback de seguridad: si aparece otro estado raro de DISM
-                    $stateDisplay = $stateString 
-                }
-            }
-
-            # Aseguramos el cast explícito a [string] al añadir los subitems a WinForms
-            $item.SubItems.Add([string]$stateDisplay) | Out-Null
-            $item.SubItems.Add([string]$feat.FeatureName) | Out-Null
-            
-            $item.ForeColor = $color
-            $item.ToolTipText = $feat.Description
-            $item.Tag = $feat
-
-            $lv.Items.Add($item) | Out-Null
-        }
-        $lv.EndUpdate()
+    if ($componentsSkipped -gt 0) {
+        Write-Log -LogLevel WARN -Message "Import-OfflineReg: [ESCUDO] $componentsSkipped secciones bloqueadas (COMPONENTS/SECURITY/SAM) en '$([System.IO.Path]::GetFileName($FilePath))'."
     }
 
-    # --- EVENTO DE CARGA INICIAL ---
-    $form.Add_Shown({
-        $form.Refresh()
-        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-        
-        try {
-            $script:cachedFeatures = Get-WindowsOptionalFeature -Path $Script:MOUNT_DIR
-            & $PopulateList -FilterText ""
-            
-            $lblStatus.Text = "Total: $($script:cachedFeatures.Count). Listo para filtrar o aplicar."
-            $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
-            $btnApply.Enabled = $true
-            $btnNetFx3.Enabled = $true # Habilitamos el nuevo boton
-        } catch {
-            $lblStatus.Text = "Error critico al leer features: $_"
-            $lblStatus.ForeColor = [System.Drawing.Color]::Red
-            Write-Log -LogLevel ERROR -Message "FEATURES_GUI: Error carga inicial: $_"
-        } finally {
-            $form.Cursor = [System.Windows.Forms.Cursors]::Default
-        }
-    })
+    # Archivo temporal con nombre trazable + GUID corto (evita colisiones)
+    $safeName = ([System.IO.Path]::GetFileNameWithoutExtension($FilePath)) -replace '[\\/:*?"<>|]', '_'
+    $tempReg  = Join-Path $Script:Scratch_DIR "Temp_${safeName}_$([System.Guid]::NewGuid().ToString('N').Substring(0, 8)).reg"
+    [System.IO.File]::WriteAllLines($tempReg, $cleanLines, [System.Text.Encoding]::Unicode)
 
-    # --- EVENTO DE BUSQUEDA ---
-    $txtSearch.Add_TextChanged({ & $PopulateList -FilterText $txtSearch.Text })
+    # Desbloqueo SDDL de todas las claves a modificar
+    foreach ($targetKey in $keysToProcess) {
+        Unlock-OfflineKey -KeyPath $targetKey
+    }
 
-    # --- LOGICA DEL BOTON .NET 3.5 ---
-    $btnNetFx3.Add_Click({
-        $sxsPath = $null
-        
-        # 1. Busqueda automatica
-        $pathLocal = Join-Path $PSScriptRoot "sxs"
-        if (Test-Path $pathLocal) { 
-            $sxsPath = $pathLocal 
-        } else {
-            # 2. Busqueda interactiva
-            $res = [System.Windows.Forms.MessageBox]::Show(
-                "No se detecto la carpeta 'sxs' en la raiz del script automaticamente.`n`nDeseas seleccionarla manualmente?", 
-                "Buscar Origen (.NET 3.5)", 
-                'YesNo', 
-                'Question'
-            )
-            
-            if ($res -eq 'Yes') {
-                $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
-                $fbd.Description = "Selecciona la carpeta 'sxs' (Puede ser la original del ISO de Windows)"
-                if ($fbd.ShowDialog() -eq 'OK') {
-                    $sxsPath = $fbd.SelectedPath
-                } else { return }
-            } else { return }
-        }
+    # INYECCIÓN BLINDADA
+    $procInfo                        = New-Object System.Diagnostics.ProcessStartInfo
+    $procInfo.FileName               = "reg.exe"
+    $procInfo.Arguments              = "import `"$tempReg`""
+    $procInfo.RedirectStandardError  = $true
+    $procInfo.UseShellExecute        = $false
+    $procInfo.CreateNoWindow         = $true
 
-        if ($sxsPath) {
-            # 3. FILTRO INTELIGENTE DE PAQUETES
-            $cabFiles = Get-ChildItem -Path $sxsPath -Filter "*netfx3*.cab" -ErrorAction SilentlyContinue
-            
-            if (-not $cabFiles -or $cabFiles.Count -eq 0) {
-                [System.Windows.Forms.MessageBox]::Show("No se encontro ningun paquete de .NET 3.5 (*netfx3*.cab) en la ruta seleccionada.`n`nPor favor verifica la carpeta.", "Origen Invalido", 'OK', 'Warning')
-                return
-            }
+    $errBuilder = New-Object System.Text.StringBuilder
+    $process    = [System.Diagnostics.Process]::Start($procInfo)
 
-            $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-            $btnNetFx3.Enabled = $false
-            $btnApply.Enabled = $false
-            
-            $lblStatus.Text = "Aislando paquetes NetFx3 para instalacion rapida..."
-            $lblStatus.ForeColor = [System.Drawing.Color]::Cyan
-            $form.Refresh()
+    # Lectura asíncrona del stderr para evitar deadlock con buffers grandes
+    $errEvent = Register-ObjectEvent -InputObject $process `
+        -EventName "ErrorDataReceived" `
+        -Action { if ($Event.SourceEventArgs.Data) { $errBuilder.AppendLine($Event.SourceEventArgs.Data) | Out-Null } }
 
-            try {
-                # A. Crear Entorno Esteril (Staging)
-                $isolatedSxs = Join-Path $Script:Scratch_DIR "NetFx3_Staging"
-                if (Test-Path $isolatedSxs) { Remove-Item $isolatedSxs -Recurse -Force -ErrorAction SilentlyContinue }
-                New-Item -Path $isolatedSxs -ItemType Directory -Force | Out-Null
+    $process.BeginErrorReadLine()
+    $process.WaitForExit()
 
-                # B. Copiar solo los paquetes relevantes y auditar tipos
-                $neutralCount = 0
-                $langCount = 0
+    Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
+    $errOut = $errBuilder.ToString().Trim()
 
-                foreach ($cab in $cabFiles) {
-                    Copy-Item -Path $cab.FullName -Destination $isolatedSxs -Force
-                    
-                    if ($cab.Name -match "~~.cab$") { $neutralCount++ }
-                    else { $langCount++ }
-                }
+    # Restaurar permisos originales (SDDL) y limpiar el diccionario
+    foreach ($path in @($Script:SDDL_Backups.Keys)) {
+        Restore-KeyOwner -KeyPath "HKLM:\$path"
+    }
+    if ($null -ne $Script:SDDL_Backups) { $Script:SDDL_Backups.Clear() }
 
-                Write-Log -LogLevel ACTION -Message "Smart SXS: Aislados $neutralCount paquetes neutros y $langCount de idioma en $isolatedSxs"
-                
-                # C. Ejecucion optimizada de DISM
-                $lblStatus.Text = "Instalando .NET 3.5..."
-                $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
-                $form.Refresh()
+    Remove-Item $tempReg -Force -ErrorAction SilentlyContinue
 
-                # Invocamos a DISM apuntando SOLO a la carpeta aislada, evitando que procese la basura del ISO
-                dism /Image:"$Script:MOUNT_DIR" /Enable-Feature /FeatureName:NetFx3 /All /LimitAccess /Source:"$isolatedSxs" | Out-Null
+    # Evaluación de resultado — stderr es más confiable que ExitCode en reg.exe
+    if ($process.ExitCode -ne 0 -or $errOut -match '(?i)ERROR|Access is denied|Acceso denegado') {
+        Write-Log -LogLevel ERROR -Message "Import-OfflineReg: reg.exe fallo (ExitCode: $($process.ExitCode)) | Detalle: $errOut"
+        throw "Error critico al inyectar el registro. Motor devolvio: $errOut"
+    }
 
-                if ($LASTEXITCODE -eq 0) {
-                    $lblStatus.Text = "Instalacion de .NET 3.5 exitosa."
-                    $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
-                    
-                    $msg = ".NET Framework 3.5 se integro correctamente.`n`nSe inyectaron:`n- $neutralCount Paquete(s) Base (Neutral)`n- $langCount Paquete(s) de Idioma (Satelite)"
-                    [System.Windows.Forms.MessageBox]::Show($msg, "Exito", 'OK', 'Information')
-                    
-                    # Refrescar cache de caracteristicas
-                    $script:cachedFeatures = Get-WindowsOptionalFeature -Path $Script:MOUNT_DIR
-                    & $PopulateList -FilterText $txtSearch.Text
-                } else {
-                    $lblStatus.Text = "Error al instalar .NET 3.5 (Codigo $LASTEXITCODE)."
-                    $lblStatus.ForeColor = [System.Drawing.Color]::Red
-                    [System.Windows.Forms.MessageBox]::Show("Fallo la instalacion.`nCodigo DISM: $LASTEXITCODE", "Error", 'OK', 'Error')
-                }
-            } catch {
-                [System.Windows.Forms.MessageBox]::Show("Excepcion inesperada: $_", "Error", 'OK', 'Error')
-            } finally {
-                # D. Limpieza del entorno esteril
-                if (Test-Path $isolatedSxs) { Remove-Item $isolatedSxs -Recurse -Force -ErrorAction SilentlyContinue }
-                
-                $form.Cursor = [System.Windows.Forms.Cursors]::Default
-                $btnNetFx3.Enabled = $true
-                $btnApply.Enabled = $true
-            }
-        }
-    })
-
-    # --- LOGICA DE APLICACION ESTANDAR ---
-    $btnApply.Add_Click({
-        if ($txtSearch.Text.Length -gt 0) {
-            $res = [System.Windows.Forms.MessageBox]::Show("Filtro activo. Solo se procesaran elementos visibles.`nContinuar?", "Advertencia", 'YesNo', 'Warning')
-            if ($res -ne 'Yes') { return }
-        }
-
-        $changes = 0
-        $errors = 0
-        
-        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-        $btnApply.Enabled = $false
-        $btnNetFx3.Enabled = $false
-
-        foreach ($item in $lv.Items) {
-            $feat = $item.Tag
-            $originalState = $feat.State
-            $isNowChecked = $item.Checked
-            
-            $shouldEnable = ($originalState -ne "Enabled" -and $isNowChecked)
-            $shouldDisable = ($originalState -eq "Enabled" -and -not $isNowChecked)
-
-            if ($shouldEnable -or $shouldDisable) {
-                
-                # Bloqueo de seguridad: Evitar que usen el boton estandar para .NET 3.5 si requiere source
-                if ($shouldEnable -and $feat.FeatureName -eq "NetFx3" -and $originalState -eq "DisabledWithPayloadRemoved") {
-                    [System.Windows.Forms.MessageBox]::Show("Para habilitar .NET Framework 3.5, por favor usa el boton azul dedicado 'INTEGRAR .NET 3.5 (SXS)'.", "Aviso", 'OK', 'Information')
-                    $item.Checked = $false
-                    continue
-                }
-
-                $action = if ($shouldEnable) { "Enable" } else { "Disable" }
-                $lblStatus.Text = "Procesando: $action $($feat.FeatureName)..."
-                $form.Refresh()
-
-                try {
-                    Write-Log -LogLevel ACTION -Message "FEATURES: $action $($feat.FeatureName)"
-                    
-                    if ($shouldEnable) {
-                        Enable-WindowsOptionalFeature -Path $Script:MOUNT_DIR -FeatureName $feat.FeatureName -All -NoRestart -ErrorAction Stop | Out-Null
-                        $item.SubItems[1].Text = "Habilitado"
-                        $item.ForeColor = [System.Drawing.Color]::Cyan
-                        $feat.State = "Enabled"
-                    } else {
-                        Disable-WindowsOptionalFeature -Path $Script:MOUNT_DIR -FeatureName $feat.FeatureName -NoRestart -ErrorAction Stop | Out-Null
-                        $item.SubItems[1].Text = "Deshabilitado"
-                        $item.ForeColor = [System.Drawing.Color]::White
-                        $feat.State = "Disabled"
-                    }
-                    $changes++
-                } catch {
-                    $errors++
-                    Write-Log -LogLevel ERROR -Message "Fallo $action feature $($feat.FeatureName): $_"
-                    $item.ForeColor = [System.Drawing.Color]::Red
-                    $item.SubItems[1].Text = "ERROR"
-                }
-            }
-        }
-        
-        $form.Cursor = [System.Windows.Forms.Cursors]::Default
-        $btnApply.Enabled = $true
-        $btnNetFx3.Enabled = $true
-        $lblStatus.Text = "Proceso finalizado."
-        [System.Windows.Forms.MessageBox]::Show("Operacion completada.`nCambios: $changes`nErrores: $errors", "Informe", 'OK', 'Information')
-    })
-
-    $form.ShowDialog() | Out-Null
-    $form.Dispose()
-    $script:cachedFeatures = $null
-    [GC]::Collect()
+    Write-Log -LogLevel INFO -Message "Import-OfflineReg: Registro inyectado exitosamente."
 }
 
-# =================================================================
-#  Modulo GUI de Gestor OOBE Offline
-# =================================================================
-function Show-Unattend-GUI {
-    param()
+# --- HELPER 2: Extractor Inteligente por Analisis de Cabecera ---
+function Expand-AddonArchive {
+    param([string]$FilePath, [string]$DestPath, [int]$WimIndex = 1)
     
-    # 1. Validacion de Seguridad
-    if ($Script:IMAGE_MOUNTED -eq 0) { 
-        [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error Montaje", 'OK', 'Error')
-        return 
-    }
+    # 1. Validar Firma Binaria
+    $stream = New-Object System.IO.FileStream($FilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    $buffer = New-Object byte[] 4
+    $stream.Read($buffer, 0, 4) | Out-Null
+    $stream.Close()
+    $hexSignature = [BitConverter]::ToString($buffer) -replace '-'
 
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
+    if (-not (Test-Path $DestPath)) { New-Item -Path $DestPath -ItemType Directory -Force | Out-Null }
 
-    # --- INTELIGENCIA DE SISTEMA: DETECTAR ARQUITECTURA ---
-    $detectedArch = "amd64"
-    try {
-        $imgInfo = Get-WindowsImage -Path $Script:MOUNT_DIR -ErrorAction Stop
-        switch ($imgInfo.Architecture) {
-            0  { $detectedArch = "x86" }
-            9  { $detectedArch = "amd64" }
-            12 { $detectedArch = "arm64" }
+    if ($hexSignature -match "^4D535749") { 
+        $actualIndexToExtract = $WimIndex
+
+        # 2. Contar índices usando DISM nativo (Ignora la extensión del archivo)
+        $dismInfo = dism.exe /Get-WimInfo /WimFile:"$FilePath" /English | Select-String "Index :"
+        $indexCount = @($dismInfo).Count
+
+        # 3. Lógica de Fallback Estricta
+        if ($indexCount -eq 1) {
+            $actualIndexToExtract = 1
+            Write-Log -LogLevel INFO -Message "Paquete de indice unico detectado ($indexCount). Forzando extraccion del Indice 1."
+        } elseif ($indexCount -eq 0) {
+            # Fallback por si la consola falla al leer
+            $actualIndexToExtract = 1
+            Write-Log -LogLevel WARN -Message "No se pudieron contar los indices. Forzando Indice 1 por seguridad."
         }
-    } catch {
-        Write-Log -LogLevel WARN -Message "No se pudo detectar arquitectura. Usando amd64 por defecto."
-    }
 
-    # 2. Setup del Formulario
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Gestor OOBE Inteligente ($detectedArch) - Integrado"
-    $form.Size = New-Object System.Drawing.Size(720, 880) # Formulario mas alto para los nuevos menus
-    $form.StartPosition = "CenterScreen"
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $form.ForeColor = [System.Drawing.Color]::White
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
+        Write-Log -LogLevel INFO -Message "Firma detectada: WIM (MSWI). Extrayendo payload (Indice $actualIndexToExtract)..."
 
-    # Sistema de Pestanas
-    $tabControl = New-Object System.Windows.Forms.TabControl
-    $tabControl.Location = "10, 10"
-    $tabControl.Size = "685, 820"
-    $form.Controls.Add($tabControl)
-
-    # =========================================================
-    # PESTANA 1: GENERADOR AVANZADO
-    # =========================================================
-    $tabBasic = New-Object System.Windows.Forms.TabPage
-    $tabBasic.Text = " Generador Avanzado "
-    $tabBasic.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
-    $tabControl.TabPages.Add($tabBasic)
-
-    # --- GRUPO USUARIO ---
-    $grpUser = New-Object System.Windows.Forms.GroupBox
-    $grpUser.Text = " Usuario Admin Local (Opcional) "
-    $grpUser.Location = "20, 15"
-    $grpUser.Size = "620, 110"
-    $grpUser.ForeColor = [System.Drawing.Color]::White
-    $tabBasic.Controls.Add($grpUser)
-
-    $chkInteractiveUser = New-Object System.Windows.Forms.CheckBox
-    $chkInteractiveUser.Text = "Forzar creacion manual de usuario (Mostrar pantalla OOBE)"
-    $chkInteractiveUser.Location = "20, 25"
-    $chkInteractiveUser.AutoSize = $true
-    $chkInteractiveUser.Checked = $true
-    $chkInteractiveUser.ForeColor = [System.Drawing.Color]::Yellow
-    $grpUser.Controls.Add($chkInteractiveUser)
-
-    $lblUser = New-Object System.Windows.Forms.Label
-    $lblUser.Text = "Usuario:"
-    $lblUser.Location = "20, 55"
-    $lblUser.AutoSize = $true
-    $grpUser.Controls.Add($lblUser)
-
-    $txtUser = New-Object System.Windows.Forms.TextBox
-    $txtUser.Location = "80, 53"
-    $txtUser.Text = "Admin"
-    $txtUser.Enabled = $false
-    $grpUser.Controls.Add($txtUser)
-
-    $lblPass = New-Object System.Windows.Forms.Label
-    $lblPass.Text = "Clave:"
-    $lblPass.Location = "250, 55"
-    $lblPass.AutoSize = $true
-    $grpUser.Controls.Add($lblPass)
-
-    $txtPass = New-Object System.Windows.Forms.TextBox
-    $txtPass.Location = "300, 53"
-    $txtPass.Text = "1234"
-    $txtPass.PasswordChar = "*"
-    $txtPass.Enabled = $false
-    $grpUser.Controls.Add($txtPass)
-
-    $chkInteractiveUser.Add_CheckedChanged({
-        if ($chkInteractiveUser.Checked) {
-            $txtUser.Enabled = $false; $txtPass.Enabled = $false
-        } else {
-            $txtUser.Enabled = $true; $txtPass.Enabled = $true
-        }
-    })
-
-    # --- GRUPO HACKS ---
-    $grpHacks = New-Object System.Windows.Forms.GroupBox
-    $grpHacks.Text = " Hacks y Bypass (Universal Win10/Win11) "
-    $grpHacks.Location = "20, 135"
-    $grpHacks.Size = "620, 145" # Mas alto para el omitir wifi
-    $grpHacks.ForeColor = [System.Drawing.Color]::Cyan
-    $tabBasic.Controls.Add($grpHacks)
-
-    $chkBypass = New-Object System.Windows.Forms.CheckBox
-    $chkBypass.Text = "Bypass Requisitos (TPM 2.0, SecureBoot, RAM) - Ignorado en Win10"
-    $chkBypass.Location = "20, 25"
-    $chkBypass.AutoSize = $true
-    $chkBypass.Checked = $true
-    $grpHacks.Controls.Add($chkBypass)
-
-    $chkNet = New-Object System.Windows.Forms.CheckBox
-    $chkNet.Text = "Saltar Cuenta Microsoft (Forzar Local) + Saltar EULA"
-    $chkNet.Location = "20, 55"
-    $chkNet.AutoSize = $true
-    $chkNet.Checked = $true
-    $grpHacks.Controls.Add($chkNet)
-
-    $chkNRO = New-Object System.Windows.Forms.CheckBox
-    $chkNRO.Text = "Permitir instalacion sin Internet (BypassNRO)"
-    $chkNRO.Location = "20, 85"
-    $chkNRO.AutoSize = $true
-    $chkNRO.Checked = $true
-    $chkNRO.ForeColor = [System.Drawing.Color]::LightGreen
-    $grpHacks.Controls.Add($chkNRO)
-
-    # NUEVO: Omitir WiFi
-    $chkHideWifi = New-Object System.Windows.Forms.CheckBox
-    $chkHideWifi.Text = "Omitir la configuracion de red Wi-Fi (HideWirelessSetupInOOBE)"
-    $chkHideWifi.Location = "20, 115"
-    $chkHideWifi.AutoSize = $true
-    $chkHideWifi.Checked = $true
-    $chkHideWifi.ForeColor = [System.Drawing.Color]::LightGreen
-    $grpHacks.Controls.Add($chkHideWifi)
-
-    # --- NUEVO GRUPO: IDIOMA Y TECLADO ---
-    $grpLang = New-Object System.Windows.Forms.GroupBox
-    $grpLang.Text = " Elija las preferencias de idioma y la distribucion del teclado "
-    $grpLang.Location = "20, 290"
-    $grpLang.Size = "620, 215"
-    $grpLang.ForeColor = [System.Drawing.Color]::PaleGoldenrod
-    $tabBasic.Controls.Add($grpLang)
-
-    $chkInteractiveLang = New-Object System.Windows.Forms.CheckBox
-    $chkInteractiveLang.Text = "Seleccionar la configuracion de idioma de forma interactiva durante la instalacion de Windows"
-    $chkInteractiveLang.Location = "20, 25"
-    $chkInteractiveLang.AutoSize = $true
-    $chkInteractiveLang.Checked = $true
-    $chkInteractiveLang.ForeColor = [System.Drawing.Color]::Yellow
-    $grpLang.Controls.Add($chkInteractiveLang)
-
-    # Sub-Bloque 1: Idioma UI
-    $lblLangH1 = New-Object System.Windows.Forms.Label
-    $lblLangH1.Text = "Instale Windows utilizando esta configuracion de idioma:"
-    $lblLangH1.Location = "20, 55"
-    $lblLangH1.AutoSize = $true
-    $lblLangH1.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-    $grpLang.Controls.Add($lblLangH1)
-
-    $lblSetupLang = New-Object System.Windows.Forms.Label
-    $lblSetupLang.Text = "Idioma de visualizacion de Windows:"
-    $lblSetupLang.Location = "20, 80"
-    $lblSetupLang.AutoSize = $true
-    $grpLang.Controls.Add($lblSetupLang)
-
-    $cmbSetupLang = New-Object System.Windows.Forms.ComboBox
-    $cmbSetupLang.Location = "240, 78"
-    $cmbSetupLang.Size = "220, 23"
-    $cmbSetupLang.DropDownStyle = "DropDownList"
-    $cmbSetupLang.Items.AddRange(@("en-US (English - United States)", "es-ES (Spanish - Spain)", "es-MX (Spanish - Mexico)"))
-    $cmbSetupLang.SelectedIndex = 0
-    $cmbSetupLang.Enabled = $false
-    $grpLang.Controls.Add($cmbSetupLang)
-
-    # Sub-Bloque 2: Region y Teclado
-    $lblLangH2 = New-Object System.Windows.Forms.Label
-    $lblLangH2.Text = "Especifique el primer idioma y la distribucion del teclado:"
-    $lblLangH2.Location = "20, 115"
-    $lblLangH2.AutoSize = $true
-    $lblLangH2.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-    $grpLang.Controls.Add($lblLangH2)
-
-    $lblSysLang = New-Object System.Windows.Forms.Label
-    $lblSysLang.Text = "Idioma:"
-    $lblSysLang.Location = "20, 140"
-    $lblSysLang.AutoSize = $true
-    $grpLang.Controls.Add($lblSysLang)
-
-    $cmbSysLang = New-Object System.Windows.Forms.ComboBox
-    $cmbSysLang.Location = "80, 138"
-    $cmbSysLang.Size = "220, 23"
-    $cmbSysLang.DropDownStyle = "DropDownList"
-    $cmbSysLang.Items.AddRange(@("en-US (English - United States)", "es-ES (Spanish - Spain)", "es-MX (Spanish - Mexico)"))
-    $cmbSysLang.SelectedIndex = 0
-    $cmbSysLang.Enabled = $false
-    $grpLang.Controls.Add($cmbSysLang)
-
-    $lblKeyboard = New-Object System.Windows.Forms.Label
-    $lblKeyboard.Text = "Distribucion del teclado / Editor de metodos de entrada:"
-    $lblKeyboard.Location = "20, 175"
-    $lblKeyboard.AutoSize = $true
-    $grpLang.Controls.Add($lblKeyboard)
-
-    $cmbKeyboard = New-Object System.Windows.Forms.ComboBox
-    $cmbKeyboard.Location = "330, 173"
-    $cmbKeyboard.Size = "260, 23"
-    $cmbKeyboard.DropDownStyle = "DropDownList"
-    $cmbKeyboard.Items.AddRange(@(
-        "0409:00000409 (US)",
-        "0409:00020409 (United States-International)", 
-        "040A:0000040A (Spanish)", 
-        "080A:0000080A (Latin America)"
-    ))
-    $cmbKeyboard.SelectedIndex = 1
-    $cmbKeyboard.Enabled = $false
-    $grpLang.Controls.Add($cmbKeyboard)
-
-    # Logica de Interaccion Idioma
-    $chkInteractiveLang.Add_CheckedChanged({
-        if ($chkInteractiveLang.Checked) {
-            $cmbSetupLang.Enabled = $false
-            $cmbSysLang.Enabled = $false
-            $cmbKeyboard.Enabled = $false
-        } else {
-            $cmbSetupLang.Enabled = $true
-            $cmbSysLang.Enabled = $true
-            $cmbKeyboard.Enabled = $true
-        }
-    })
-
-    # --- GRUPO TWEAKS ---
-    $grpTweaks = New-Object System.Windows.Forms.GroupBox
-    $grpTweaks.Text = " Optimizacion, Visual y Privacidad "
-    $grpTweaks.Location = "20, 515"
-    $grpTweaks.Size = "620, 220"
-    $grpTweaks.ForeColor = [System.Drawing.Color]::Orange
-    $tabBasic.Controls.Add($grpTweaks)
-
-    $chkVisuals = New-Object System.Windows.Forms.CheckBox
-    $chkVisuals.Text = "Estilo Win10: Barra Izquierda + Menu Contextual Clasico"
-    $chkVisuals.Location = "20, 30"
-    $chkVisuals.AutoSize = $true
-    $chkVisuals.Checked = $true
-    $grpTweaks.Controls.Add($chkVisuals)
-
-    $chkExt = New-Object System.Windows.Forms.CheckBox
-    $chkExt.Text = "Explorador: Mostrar Extensiones y Rutas Largas"
-    $chkExt.Location = "20, 60"
-    $chkExt.AutoSize = $true
-    $chkExt.Checked = $true
-    $grpTweaks.Controls.Add($chkExt)
-    
-    $chkBloat = New-Object System.Windows.Forms.CheckBox
-    $chkBloat.Text = "Debloat: Desactivar Copilot, Widgets y Sugerencias"
-    $chkBloat.Location = "20, 90"
-    $chkBloat.AutoSize = $true
-    $chkBloat.Checked = $true
-    $grpTweaks.Controls.Add($chkBloat)
-
-    $chkHidePS = New-Object System.Windows.Forms.CheckBox
-    $chkHidePS.Text = "Ocultar cualquier ventana de PowerShell durante la instalacion"
-    $chkHidePS.Location = "20, 120"
-    $chkHidePS.AutoSize = $true
-    $chkHidePS.Checked = $true
-    $grpTweaks.Controls.Add($chkHidePS)
-
-    $chkCtt = New-Object System.Windows.Forms.CheckBox
-    $chkCtt.Text = "Extra: Anadir Menu Clic Derecho 'Optimizar Sistema' (ChrisTitus)"
-    $chkCtt.Location = "20, 150"
-    $chkCtt.AutoSize = $true
-    $chkCtt.Checked = $true
-    $chkCtt.ForeColor = [System.Drawing.Color]::LightGreen
-    $grpTweaks.Controls.Add($chkCtt)
-
-    $chkTelemetry = New-Object System.Windows.Forms.CheckBox
-    $chkTelemetry.Text = "Privacidad: Desactivar Telemetria Total (DiagTrack y Rastreo MS)"
-    $chkTelemetry.Location = "20, 180"
-    $chkTelemetry.AutoSize = $true
-    $chkTelemetry.Checked = $true
-    $chkTelemetry.ForeColor = [System.Drawing.Color]::LightCoral
-    $grpTweaks.Controls.Add($chkTelemetry)
-
-    $btnGen = New-Object System.Windows.Forms.Button
-    $btnGen.Text = "GENERAR E INYECTAR XML"
-    $btnGen.Location = "180, 745" # Boton movido hacia abajo
-    $btnGen.Size = "300, 45"
-    $btnGen.BackColor = [System.Drawing.Color]::SeaGreen
-    $btnGen.ForeColor = [System.Drawing.Color]::White
-    $btnGen.FlatStyle = "Flat"
-    $btnGen.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $tabBasic.Controls.Add($btnGen)
-
-    # =========================================================
-    # PESTANA 2: IMPORTAR
-    # =========================================================
-    $tabImport = New-Object System.Windows.Forms.TabPage
-    $tabImport.Text = " Importar Externo "
-    $tabImport.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
-    $tabControl.TabPages.Add($tabImport)
-    
-    $lblImp = New-Object System.Windows.Forms.Label
-    $lblImp.Text = "Selecciona un XML existente:"
-    $lblImp.Location="20,20"
-    $lblImp.AutoSize=$true
-    $tabImport.Controls.Add($lblImp)
-
-    $txtImpPath = New-Object System.Windows.Forms.TextBox
-    $txtImpPath.Location="20,50"
-    $txtImpPath.Size="500,23"
-    $tabImport.Controls.Add($txtImpPath)
-
-    $btnBrowse = New-Object System.Windows.Forms.Button
-    $btnBrowse.Text="..."
-    $btnBrowse.Location="530,48"
-    $btnBrowse.Size="40,25"
-    $tabImport.Controls.Add($btnBrowse)
-    
-    # Enlace Web
-    $lnkWeb = New-Object System.Windows.Forms.LinkLabel
-    $lnkWeb.Text = "Generador Online Recomendado (schneegans.de)"
-    $lnkWeb.Location = "20, 85"
-    $lnkWeb.AutoSize = $true
-    $lnkWeb.LinkColor = [System.Drawing.Color]::Yellow
-    $tabImport.Controls.Add($lnkWeb)
-    
-    # Estado Validacion
-    $lblValid = New-Object System.Windows.Forms.Label
-    $lblValid.Text = "Estado: Esperando archivo..."
-    $lblValid.Location = "20, 120"
-    $lblValid.AutoSize=$true
-    $lblValid.ForeColor = [System.Drawing.Color]::Silver
-    $tabImport.Controls.Add($lblValid)
-
-    $btnInjectImp = New-Object System.Windows.Forms.Button
-    $btnInjectImp.Text="VALIDAR E INYECTAR"
-    $btnInjectImp.Location="150,160"
-    $btnInjectImp.Size="200,40"
-    $btnInjectImp.BackColor=[System.Drawing.Color]::Orange
-    $btnInjectImp.Enabled=$false
-    $tabImport.Controls.Add($btnInjectImp)
-
-    # --- LOGICA DE GENERACION ---
-    $InjectXmlLogic = {
-        param($Content, $Desc)
+        # 4. Extraer usando DISM nativo
+        $proc = Start-Process "dism.exe" -ArgumentList "/Apply-Image /ImageFile:`"$FilePath`" /Index:$actualIndexToExtract /ApplyDir:`"$DestPath`"" -Wait -NoNewWindow -PassThru
         
-        # 1. Inyectar en el WIM (Para la fase OOBE/Specialize)
-        $pantherDir = Join-Path $Script:MOUNT_DIR "Windows\Panther"
-        if (-not (Test-Path $pantherDir)) { New-Item -Path $pantherDir -ItemType Directory -Force | Out-Null }
-        $destFile = Join-Path $pantherDir "unattend.xml"
-        
-        try {
-            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-            [System.IO.File]::WriteAllText($destFile, $Content, $utf8NoBom)
-            
-            # 2. Ofrecer guardar una copia para la raíz del USB/ISO (Para la fase WinPE/Idioma)
-            $msg = "El archivo se inyecto en el WIM (Windows\Panther\unattend.xml) para la fase de configuracion OOBE.`n`n"
-            $msg += "Sin embargo, para que funcionen la Seleccion de Idioma inicial y los Bypasses de TPM, "
-            $msg += "DEBES colocar una copia de este archivo en la RAIZ de tu USB/ISO bajo el nombre 'autounattend.xml'.`n`n"
-            $msg += "Deseas guardar una copia en tu PC ahora mismo?"
-
-            $res = [System.Windows.Forms.MessageBox]::Show($msg, "Inyeccion Parcial Exitosa", 'YesNo', 'Information')
-            
-            if ($res -eq 'Yes') {
-                $sfd = New-Object System.Windows.Forms.SaveFileDialog
-                $sfd.Filter = "Archivo Autounattend (*.xml)|*.xml"
-                $sfd.FileName = "autounattend.xml"
-                $sfd.Title = "Guardar copia para la raiz del USB/ISO"
-                
-                if ($sfd.ShowDialog() -eq 'OK') {
-                    [System.IO.File]::WriteAllText($sfd.FileName, $Content, $utf8NoBom)
-                    [System.Windows.Forms.MessageBox]::Show("Copia guardada en:`n$($sfd.FileName)", "Exito", 'OK', 'Information')
-                }
-            }
-            $form.Close()
-        } catch { 
-            [System.Windows.Forms.MessageBox]::Show("Error: $_", "Error", 'OK', 'Error') 
+        if ($proc.ExitCode -ne 0) {
+            throw "DISM /Apply-Image fallo al extraer el paquete (Codigo de salida: $($proc.ExitCode))."
         }
     }
-
-    $btnGen.Add_Click({
-        # 1. Fase windowsPE (Bypass Requisitos, Idiomas y Teclado)
-        $wpeRunSync = New-Object System.Collections.Generic.List[string]
-        $wpeOrder = 1
-
-        if ($chkBypass.Checked) {
-            $wpeRunSync.Add("<RunSynchronousCommand wcm:action=""add""><Order>$wpeOrder</Order><Path>reg.exe add ""HKLM\SYSTEM\Setup\LabConfig"" /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path></RunSynchronousCommand>"); $wpeOrder++
-            $wpeRunSync.Add("<RunSynchronousCommand wcm:action=""add""><Order>$wpeOrder</Order><Path>reg.exe add ""HKLM\SYSTEM\Setup\LabConfig"" /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path></RunSynchronousCommand>"); $wpeOrder++
-            $wpeRunSync.Add("<RunSynchronousCommand wcm:action=""add""><Order>$wpeOrder</Order><Path>reg.exe add ""HKLM\SYSTEM\Setup\LabConfig"" /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path></RunSynchronousCommand>"); $wpeOrder++
-        }
-
-        $wpeSetupBlock = ""
-        if ($wpeRunSync.Count -gt 0) {
-            $wpeSetupBlock = @"
-        <component name="Microsoft-Windows-Setup" processorArchitecture="$detectedArch" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-            <RunSynchronous>
-                $($wpeRunSync -join "`n                ")
-            </RunSynchronous>
-            <UserData>
-                <ProductKey><Key>00000-00000-00000-00000-00000</Key><WillShowUI>OnError</WillShowUI></ProductKey>
-                <AcceptEula>true</AcceptEula>
-            </UserData>
-        </component>
-"@
-        }
-
-        # Procesamiento de Componente Internacional/Idioma (Solo si NO es interactivo)
-        $wpeIntlBlock = ""
-        if (-not $chkInteractiveLang.Checked) {
-            $sLang = ($cmbSetupLang.Text -split ' ')[0]
-            $sysL = ($cmbSysLang.Text -split ' ')[0]
-            $kL = ($cmbKeyboard.Text -split ' ')[0]
-
-            $wpeIntlBlock = @"
-        <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="$detectedArch" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-            <SetupUILanguage>
-                <UILanguage>$sLang</UILanguage>
-            </SetupUILanguage>
-            <InputLocale>$kL</InputLocale>
-            <SystemLocale>$sysL</SystemLocale>
-            <UILanguage>$sysL</UILanguage>
-            <UserLocale>$sysL</UserLocale>
-        </component>
-"@
-        }
-
-        # Ensamblar windowsPE
-        $wpeBlock = ""
-        if ($wpeSetupBlock -ne "" -or $wpeIntlBlock -ne "") {
-            $wpeBlock = @"
-    <settings pass="windowsPE">
-$wpeIntlBlock
-$wpeSetupBlock
-    </settings>
-"@
-        }
-
-        # 2. Fase specialize (BypassNRO - Sin Internet)
-        $specializeBlock = ""
-        if ($chkNRO.Checked) {
-            $specializeBlock = @"
-    <settings pass="specialize">
-        <component name="Microsoft-Windows-Deployment" processorArchitecture="$detectedArch" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-            <RunSynchronous>
-                <RunSynchronousCommand wcm:action="add">
-                    <Order>1</Order>
-                    <Path>reg.exe add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v BypassNRO /t REG_DWORD /d 1 /f</Path>
-                </RunSynchronousCommand>
-            </RunSynchronous>
-        </component>
-    </settings>
-"@
-        }
-
-        # 3. Fase oobeSystem (Usuario, Omitir WiFi y Tweaks)
-        
-        # A. Comandos de Logueo (FirstLogon)
-        $cmds = New-Object System.Collections.Generic.List[string]
-        $order = 1
-        $psPrefix = "powershell.exe -NoProfile -Command"
-        if ($chkHidePS.Checked) { $psPrefix = "powershell.exe -WindowStyle Hidden -NoProfile -Command" }
-
-        if ($chkTelemetry.Checked) {
-            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection"" /v AllowTelemetry /t REG_DWORD /d 0 /f</CommandLine></SynchronousCommand>"); $order++
-            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SYSTEM\CurrentControlSet\Services\DiagTrack"" /v Start /t REG_DWORD /d 4 /f</CommandLine></SynchronousCommand>"); $order++
-            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SYSTEM\CurrentControlSet\Services\dmwappushservice"" /v Start /t REG_DWORD /d 4 /f</CommandLine></SynchronousCommand>"); $order++
-        }
-
-        if ($chkCtt.Checked) {
-            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SOFTWARE\Classes\DesktopBackground\Shell\OptimizarSistema"" /v ""MUIVerb"" /t REG_SZ /d ""Optimizar el sistema"" /f</CommandLine></SynchronousCommand>"); $order++
-            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SOFTWARE\Classes\DesktopBackground\Shell\OptimizarSistema"" /v ""icon"" /t REG_SZ /d ""powershell.exe"" /f</CommandLine></SynchronousCommand>"); $order++
-            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SOFTWARE\Classes\DesktopBackground\Shell\OptimizarSistema\command"" /ve /t REG_SZ /d ""$psPrefix Start-Process powershell.exe -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command irm christitus.com/win | iex' -Verb RunAs"" /f</CommandLine></SynchronousCommand>"); $order++
-        }
-
-        if ($chkVisuals.Checked) {
-            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"" /v TaskbarAl /t REG_DWORD /d 0 /f</CommandLine></SynchronousCommand>"); $order++
-            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKCU\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"" /ve /f</CommandLine></SynchronousCommand>"); $order++
-        }
-
-        if ($chkExt.Checked) {
-             $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"" /v HideFileExt /t REG_DWORD /d 0 /f</CommandLine></SynchronousCommand>"); $order++
-             $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SYSTEM\CurrentControlSet\Control\FileSystem"" /v LongPathsEnabled /t REG_DWORD /d 1 /f</CommandLine></SynchronousCommand>"); $order++
-        }
-
-        if ($chkBloat.Checked) {
-             $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKCU\Software\Policies\Microsoft\Windows\WindowsCopilot"" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f</CommandLine></SynchronousCommand>"); $order++
-             $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SOFTWARE\Policies\Microsoft\Dsh"" /v AllowNewsAndInterests /t REG_DWORD /d 0 /f</CommandLine></SynchronousCommand>"); $order++
-             $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent"" /v DisableWindowsConsumerFeatures /t REG_DWORD /d 1 /f</CommandLine></SynchronousCommand>"); $order++
-        }
-
-        $logonCommandsBlock = ""
-        if ($cmds.Count -gt 0) {
-            $logonCommandsBlock = "<FirstLogonCommands>`n" + ($cmds -join "`n") + "`n            </FirstLogonCommands>"
-        }
-
-        # B. Inteligencia de Cuentas (Interactivo vs Automatico)
-        $userAccountsBlock = ""
-        $isInteractive = $chkInteractiveUser.Checked -or [string]::IsNullOrWhiteSpace($txtUser.Text)
-        $hideWifiXmlVal = if ($chkHideWifi.Checked) { "true" } else { "false" }
-
-        if ($isInteractive) {
-            $hideLocal = "false"
-        } else {
-            $hideLocal = "true"
-            $userAccountsBlock = @"
-            <UserAccounts>
-                <LocalAccounts>
-                    <LocalAccount wcm:action="add">
-                        <Password>
-                            <Value>$($txtPass.Text)</Value>
-                            <PlainText>true</PlainText>
-                        </Password>
-                        <Description>Admin Local</Description>
-                        <DisplayName>$($txtUser.Text)</DisplayName>
-                        <Group>Administrators</Group>
-                        <Name>$($txtUser.Text)</Name>
-                    </LocalAccount>
-                </LocalAccounts>
-            </UserAccounts>
-            <AutoLogon>
-                <Password>
-                    <Value>$($txtPass.Text)</Value>
-                    <PlainText>true</PlainText>
-                </Password>
-                <Enabled>true</Enabled>
-                <LogonCount>1</LogonCount>
-                <Username>$($txtUser.Text)</Username>
-            </AutoLogon>
-"@
-        }
-
-        # 4. Ensamblar XML Final
-        $xmlContent = @"
-<?xml version="1.0" encoding="utf-8"?>
-<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-    $wpeBlock
-    $specializeBlock
-    <settings pass="oobeSystem">
-        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="$detectedArch" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-            $userAccountsBlock
-            <OOBE>
-                <HideEULAPage>true</HideEULAPage>
-                <HideLocalAccountScreen>$hideLocal</HideLocalAccountScreen>
-                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
-                <HideWirelessSetupInOOBE>$hideWifiXmlVal</HideWirelessSetupInOOBE>
-                <ProtectYourPC>3</ProtectYourPC>
-            </OOBE>
-            $logonCommandsBlock
-        </component>
-    </settings>
-</unattend>
-"@
-        & $InjectXmlLogic -Content $xmlContent -Desc "XML Generado Localmente"
-    })
-
-    # Eventos de Importacion
-    $lnkWeb.Add_Click({ Start-Process "https://schneegans.de/windows/unattend-generator/" })
-    
-    $btnBrowse.Add_Click({
-        $ofd = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "XML (*.xml)|*.xml"
-        if($ofd.ShowDialog() -eq 'OK'){ 
-            $txtImpPath.Text = $ofd.FileName 
-            try {
-                $check = [xml](Get-Content $ofd.FileName)
-                if ($check.unattend) {
-                    $lblValid.Text = "XML Valido detectado."
-                    $lblValid.ForeColor = [System.Drawing.Color]::LightGreen
-                    $btnInjectImp.Enabled=$true
-                } else { throw }
-            } catch {
-                $lblValid.Text = "Archivo invalido."
-                $lblValid.ForeColor = [System.Drawing.Color]::Salmon
-                $btnInjectImp.Enabled=$false
-            }
-        }
-    })
-    $btnInjectImp.Add_Click({
-        if(Test-Path $txtImpPath.Text){ & $InjectXmlLogic -Content (Get-Content $txtImpPath.Text -Raw) -Desc "XML Importado" }
-    })
-
-    $form.ShowDialog() | Out-Null
-    $form.Dispose()
+    else {
+        throw "Formato no reconocido (Firma: $hexSignature). No es un empaquetado valido."
+    }
 }
 
-# =================================================================
-#  Modulo GUI OEM Branding
-# =================================================================
-function Show-OEMBranding-GUI {
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
+# --- MOTOR PRINCIPAL: Inyector de Addons ---
+function Install-OfflineAddon {
+    param([string]$FilePath, [int]$WimIndex = 1)
+    
+    $ext = [System.IO.Path]::GetExtension($FilePath).ToLower()
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($FilePath)
+    
+    if ($ext -eq '.reg') {
+        Import-OfflineReg -FilePath $FilePath
+        return "Registro inyectado exitosamente."
+    }
 
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "OEM Branding - Personalizacion Universal"
-    $form.Size = New-Object System.Drawing.Size(600, 560)
-    $form.StartPosition = "CenterScreen"
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $form.ForeColor = [System.Drawing.Color]::White
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
-
-    $lblTitle = New-Object System.Windows.Forms.Label
-    $lblTitle.Text = "Inyeccion de Branding y Propiedades del Sistema"
-    $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-    $lblTitle.Location = "20, 15"
-	$lblTitle.AutoSize = $true
-    $form.Controls.Add($lblTitle)
-
-    # --- GRUPO 1: IMAGENES Y FONDOS ---
-    $grpImages = New-Object System.Windows.Forms.GroupBox
-    $grpImages.Text = " Politicas de Imagen (Fondos) "
-    $grpImages.Location = "20, 50"
-    $grpImages.Size = "540, 140"
-    $grpImages.ForeColor = [System.Drawing.Color]::Cyan
-    $form.Controls.Add($grpImages)
-
-    $lblWall = New-Object System.Windows.Forms.Label
-    $lblWall.Text = "Fondo de Escritorio (JPG/PNG):"
-    $lblWall.Location = "15, 30"
-	$lblWall.AutoSize = $true
-	$lblWall.ForeColor = [System.Drawing.Color]::White
-    $grpImages.Controls.Add($lblWall)
-
-    $txtWall = New-Object System.Windows.Forms.TextBox
-    $txtWall.Location = "15, 50"
-	$txtWall.Size = "420, 23"
-    $txtWall.BackColor = [System.Drawing.Color]::FromArgb(50,50,50)
-	$txtWall.ForeColor = [System.Drawing.Color]::White
-    $txtWall.ReadOnly = $true
-    $grpImages.Controls.Add($txtWall)
-
-    $btnWall = New-Object System.Windows.Forms.Button
-    $btnWall.Text = "Examinar..."
-    $btnWall.Location = "445, 48"
-	$btnWall.Size = "80, 26"
-    $btnWall.BackColor = [System.Drawing.Color]::Gray
-	$btnWall.FlatStyle = "Flat"
-    $grpImages.Controls.Add($btnWall)
-
-    $lblLock = New-Object System.Windows.Forms.Label
-    $lblLock.Text = "Pantalla de Bloqueo (Opcional):"
-    $lblLock.Location = "15, 80"
-	$lblLock.AutoSize = $true; $lblLock.ForeColor = [System.Drawing.Color]::White
-    $grpImages.Controls.Add($lblLock)
-
-    $txtLock = New-Object System.Windows.Forms.TextBox
-    $txtLock.Location = "15, 100"
-	$txtLock.Size = "420, 23"
-    $txtLock.BackColor = [System.Drawing.Color]::FromArgb(50,50,50)
-	$txtLock.ForeColor = [System.Drawing.Color]::White
-    $txtLock.ReadOnly = $true
-    $grpImages.Controls.Add($txtLock)
-
-    $btnLock = New-Object System.Windows.Forms.Button
-    $btnLock.Text = "Examinar..."
-    $btnLock.Location = "445, 98"; $btnLock.Size = "80, 26"
-    $btnLock.BackColor = [System.Drawing.Color]::Gray
-	$btnLock.FlatStyle = "Flat"
-    $grpImages.Controls.Add($btnLock)
-
-    # --- GRUPO 2: INFORMACION OEM (PROPIEDADES DEL SISTEMA) ---
-    $grpOem = New-Object System.Windows.Forms.GroupBox
-    $grpOem.Text = " Informacion del Ensamblador (OEM) "
-    $grpOem.Location = "20, 200"
-    $grpOem.Size = "540, 230"
-    $grpOem.ForeColor = [System.Drawing.Color]::Orange
-    $form.Controls.Add($grpOem)
-
-    # Fila 1: Fabricante y Modelo
-    $lblFab = New-Object System.Windows.Forms.Label
-    $lblFab.Text = "Fabricante:"
-	$lblFab.Location = "15, 30"
-	$lblFab.AutoSize = $true
-	$lblFab.ForeColor = [System.Drawing.Color]::White
-    $grpOem.Controls.Add($lblFab)
-    $txtFab = New-Object System.Windows.Forms.TextBox
-    $txtFab.Location = "90, 27"
-	$txtFab.Size = "160, 23"
-    $grpOem.Controls.Add($txtFab)
-
-    $lblMod = New-Object System.Windows.Forms.Label
-    $lblMod.Text = "Modelo:"
-	$lblMod.Location = "270, 30"
-	$lblMod.AutoSize = $true
-	$lblMod.ForeColor = [System.Drawing.Color]::White
-    $grpOem.Controls.Add($lblMod)
-    $txtMod = New-Object System.Windows.Forms.TextBox
-    $txtMod.Location = "330, 27"
-	$txtMod.Size = "195, 23"
-    $grpOem.Controls.Add($txtMod)
-
-    # Fila 2: URL de Soporte
-    $lblUrl = New-Object System.Windows.Forms.Label
-    $lblUrl.Text = "URL Web:"
-	$lblUrl.Location = "15, 70"
-	$lblUrl.AutoSize = $true
-	$lblUrl.ForeColor = [System.Drawing.Color]::White
-    $grpOem.Controls.Add($lblUrl)
-    $txtUrl = New-Object System.Windows.Forms.TextBox
-    $txtUrl.Location = "90, 67"
-	$txtUrl.Size = "435, 23"
-    $grpOem.Controls.Add($txtUrl)
-
-    # Fila 3 Telefono y Horario
-    $lblPhone = New-Object System.Windows.Forms.Label
-    $lblPhone.Text = "Telefono:"
-	$lblPhone.Location = "15, 110"
-	$lblPhone.AutoSize = $true
-	$lblPhone.ForeColor = [System.Drawing.Color]::White
-    $grpOem.Controls.Add($lblPhone)
-    $txtPhone = New-Object System.Windows.Forms.TextBox
-    $txtPhone.Location = "90, 107"
-	$txtPhone.Size = "160, 23"
-    $grpOem.Controls.Add($txtPhone)
-
-    $lblHours = New-Object System.Windows.Forms.Label
-    $lblHours.Text = "Horario:"
-	$lblHours.Location = "270, 110"
-	$lblHours.AutoSize = $true
-	$lblHours.ForeColor = [System.Drawing.Color]::White
-    $grpOem.Controls.Add($lblHours)
-    $txtHours = New-Object System.Windows.Forms.TextBox
-    $txtHours.Location = "330, 107"
-	$txtHours.Size = "195, 23"
-    $grpOem.Controls.Add($txtHours)
-
-    # Fila 4: Logo
-    $lblLogo = New-Object System.Windows.Forms.Label
-    $lblLogo.Text = "Logo OEM (Obligatorio formato .BMP, ideal 120x120px):"
-    $lblLogo.Location = "15, 150"
-	$lblLogo.AutoSize = $true; $lblLogo.ForeColor = [System.Drawing.Color]::White
-    $grpOem.Controls.Add($lblLogo)
-
-    $txtLogo = New-Object System.Windows.Forms.TextBox
-    $txtLogo.Location = "15, 170"
-	$txtLogo.Size = "420, 23"
-    $txtLogo.BackColor = [System.Drawing.Color]::FromArgb(50,50,50); $txtLogo.ForeColor = [System.Drawing.Color]::White
-    $txtLogo.ReadOnly = $true
-    $grpOem.Controls.Add($txtLogo)
-
-    $btnLogo = New-Object System.Windows.Forms.Button
-    $btnLogo.Text = "Examinar..."
-    $btnLogo.Location = "445, 168"
-	$btnLogo.Size = "80, 26"
-    $btnLogo.BackColor = [System.Drawing.Color]::Gray
-	$btnLogo.FlatStyle = "Flat"
-    $grpOem.Controls.Add($btnLogo)
-
-    # --- BOTON DE APLICACION ---
-    $btnApply = New-Object System.Windows.Forms.Button
-    $btnApply.Text = "APLICAR BRANDING A LA IMAGEN"
-    $btnApply.Location = "120, 450"
-	$btnApply.Size = "340, 45"
-    $btnApply.BackColor = [System.Drawing.Color]::SeaGreen
-    $btnApply.FlatStyle = "Flat"
-    $btnApply.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $form.Controls.Add($btnApply)
-
-    # --- EVENTOS DE EXAMINAR ---
-    $btnWall.Add_Click({
-        $ofd = New-Object System.Windows.Forms.OpenFileDialog; $ofd.Filter = "Imagenes (*.jpg;*.jpeg;*.png)|*.jpg;*.jpeg;*.png"
-        if ($ofd.ShowDialog() -eq 'OK') { $txtWall.Text = $ofd.FileName }
-    })
-    $btnLock.Add_Click({
-        $ofd = New-Object System.Windows.Forms.OpenFileDialog; $ofd.Filter = "Imagenes (*.jpg;*.jpeg;*.png)|*.jpg;*.jpeg;*.png"
-        if ($ofd.ShowDialog() -eq 'OK') { $txtLock.Text = $ofd.FileName }
-    })
-    $btnLogo.Add_Click({
-        $ofd = New-Object System.Windows.Forms.OpenFileDialog; $ofd.Filter = "Imagen Bitmap (*.bmp)|*.bmp"
-        if ($ofd.ShowDialog() -eq 'OK') { $txtLogo.Text = $ofd.FileName }
-    })
-
-    # --- LOGICA DE APLICACION ---
-    $btnApply.Add_Click({
-        if (-not $txtWall.Text -and -not $txtFab.Text -and -not $txtLock.Text) { 
-            Write-Log -LogLevel WARN -Message "OEM_Branding: El usuario intento aplicar sin seleccionar imagenes o metadatos. Abortando."
-            [System.Windows.Forms.MessageBox]::Show("Selecciona al menos un fondo o configura los datos del fabricante.", "Aviso", 'OK', 'Warning')
-            return 
-        }
-        
-        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-        $btnApply.Enabled = $false
-
-        Write-Log -LogLevel ACTION -Message "OEM_Branding: Iniciando motor de inyeccion de Branding y Metadatos OEM."
+    if ($ext -match '\.(wim|tpk|bpk)$') {
+        $tempExtract = Join-Path $Script:Scratch_DIR "Addon_$baseName"
 
         try {
-            Write-Log -LogLevel INFO -Message "OEM_Branding: Solicitando montaje de colmenas de registro (Mount-Hives)..."
-            if (-not (Mount-Hives)) { throw "No se pudieron cargar los hives del registro." }
+            # Extraemos el payload usando nuestro extractor blindado
+            Expand-AddonArchive -FilePath $FilePath -DestPath $tempExtract -WimIndex $WimIndex
+
+            # --- FASE A: Inyeccion de Archivos (Mapeo de Estructura Blindado) ---
+            $hasFiles = $false
             
-            try {
-                # 1. AUTO-DETECCION DE EDICION
-                $editionId = "Desconocida"
-                $regCurrentVer = "HKLM:\OfflineSoftware\Microsoft\Windows NT\CurrentVersion"
-                $editionData = Get-ItemProperty -Path $regCurrentVer -Name "EditionID" -ErrorAction SilentlyContinue
-                if ($editionData) { $editionId = $editionData.EditionID }
-
-                $isGpoSupported = ($editionId -match "Enterprise|Education|Server")
-                Write-Log -LogLevel INFO -Message "OEM_Branding: Inteligencia de Edicion -> [$editionId]. Soporte GPO: $isGpoSupported"
-
+            # Verificamos si hay ALGO en la raiz extraida (Excluyendo los .reg)
+            $payloadFiles = Get-ChildItem -Path $tempExtract -Force | Where-Object { $_.Extension -ne '.reg' }
+            
+            if ($payloadFiles) {
+                Write-Log -LogLevel ACTION -Message "Inyectando estructura de archivos completa hacia $Script:MOUNT_DIR"
+                
+                # Activamos privilegios (SeBackup / SeRestore)
                 Enable-Privileges
 
-                # 2. PROCESAMIENTO DE FONDOS
-                if ($txtWall.Text -or $txtLock.Text) {
-                    if ($isGpoSupported) {
-                        # --- METODO 1: GPO (Enterprise / Education / Server) ---
-                        Write-Log -LogLevel ACTION -Message "OEM_Branding: Iniciando inyeccion de fondos usando Metodo 1 (Directivas GPO)."
-                        
-                        $oemDir = Join-Path $Script:MOUNT_DIR "Windows\Web\Wallpaper\OEM"
-                        if (-not (Test-Path $oemDir)) { New-Item -Path $oemDir -ItemType Directory -Force | Out-Null }
-                        
-                        $polPath = "OfflineSoftware\Policies\Microsoft\Windows\Personalization"
-                        Unlock-Single-Key -SubKeyPath $polPath
-                        
-                        $psPolPath = "HKLM:\$polPath"
-                        if (-not (Test-Path $psPolPath)) { New-Item -Path $psPolPath -Force | Out-Null }
+                $safeMountDir = $Script:MOUNT_DIR.TrimEnd('\', '/')
 
-                        if ($txtWall.Text) {
-                            Write-Log -LogLevel INFO -Message "OEM_Branding: Procesando Fondo (GPO) -> $($txtWall.Text)"
-                            $ext = [System.IO.Path]::GetExtension($txtWall.Text)
-                            $destFile = Join-Path $oemDir "Fondo_OEM$ext"
-                            Copy-Item -Path $txtWall.Text -Destination $destFile -Force
-                            Set-ItemProperty -Path $psPolPath -Name "DesktopImage" -Value "C:\Windows\Web\Wallpaper\OEM\Fondo_OEM$ext" -Type String -Force
-                        }
-                        if ($txtLock.Text) {
-                            Write-Log -LogLevel INFO -Message "OEM_Branding: Procesando LockScreen (GPO) -> $($txtLock.Text)"
-                            $ext = [System.IO.Path]::GetExtension($txtLock.Text)
-                            $destFile = Join-Path $oemDir "Lock_OEM$ext"
-                            Copy-Item -Path $txtLock.Text -Destination $destFile -Force
-                            Set-ItemProperty -Path $psPolPath -Name "LockScreenImage" -Value "C:\Windows\Web\Wallpaper\OEM\Lock_OEM$ext" -Type String -Force
-                        }
-
-                        Restore-KeyOwner -KeyPath $psPolPath
-                    } 
-                    else {
-                        # --- METODO 2: THEMES OVERRIDE Y CSP (Home / Pro / Core) ---
-                        Write-Log -LogLevel ACTION -Message "OEM_Branding: Iniciando inyeccion de fondos usando Metodo 2 (Themes Override & CSP)."
-                        
-                        $oemDir = Join-Path $Script:MOUNT_DIR "Windows\Web\Wallpaper\OEM"
-                        if (-not (Test-Path $oemDir)) { New-Item -Path $oemDir -ItemType Directory -Force | Out-Null }
-
-                        # A. Procesamiento del Fondo de Escritorio (Vía .theme)
-                        if ($txtWall.Text) {
-                            Write-Log -LogLevel INFO -Message "OEM_Branding: Procesando Fondo (.theme) -> $($txtWall.Text)"
-                            $ext = [System.IO.Path]::GetExtension($txtWall.Text)
-                            $destWall = Join-Path $oemDir "Fondo_OEM$ext"
-                            Copy-Item -Path $txtWall.Text -Destination $destWall -Force
-
-                            # Generar archivo de Tema (.theme) completo
-                            $themeContent = @"
-; Copyright (c) Microsoft Corp. / OEM Modified
-
-[Theme]
-DisplayName=OEM Custom Theme
-SetLogonBackground=0
-
-; Computer
-[CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\DefaultIcon]
-DefaultValue=%SystemRoot%\System32\imageres.dll,-109
-
-; UsersFiles
-[CLSID\{59031A47-3F72-44A7-89C5-5595FE6B30EE}\DefaultIcon]
-DefaultValue=%SystemRoot%\System32\imageres.dll,-123
-
-; Network
-[CLSID\{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}\DefaultIcon]
-DefaultValue=%SystemRoot%\System32\imageres.dll,-25
-
-; Recycle Bin
-[CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\DefaultIcon]
-Full=%SystemRoot%\System32\imageres.dll,-54
-Empty=%SystemRoot%\System32\imageres.dll,-55
-
-[Control Panel\Cursors]
-AppStarting=%SystemRoot%\cursors\aero_working.ani
-Arrow=%SystemRoot%\cursors\aero_arrow.cur
-Crosshair=
-Hand=%SystemRoot%\cursors\aero_link.cur
-Help=%SystemRoot%\cursors\aero_helpsel.cur
-IBeam=
-No=%SystemRoot%\cursors\aero_unavail.cur
-NWPen=%SystemRoot%\cursors\aero_pen.cur
-SizeAll=%SystemRoot%\cursors\aero_move.cur
-SizeNESW=%SystemRoot%\cursors\aero_nesw.cur
-SizeNS=%SystemRoot%\cursors\aero_ns.cur
-SizeNWSE=%SystemRoot%\cursors\aero_nwse.cur
-SizeWE=%SystemRoot%\cursors\aero_ew.cur
-UpArrow=%SystemRoot%\cursors\aero_up.cur
-Wait=%SystemRoot%\cursors\aero_busy.ani
-DefaultValue=Windows Default
-DefaultValue.MUI=@main.cpl,-1020
-
-[Control Panel\Desktop]
-Wallpaper=C:\Windows\Web\Wallpaper\OEM\Fondo_OEM$ext
-TileWallpaper=0
-WallpaperStyle=10
-Pattern=
-
-[VisualStyles]
-Path=%ResourceDir%\Themes\Aero\Aero.msstyles
-ColorStyle=NormalColor
-Size=NormalSize
-AutoColorization=0
-ColorizationColor=0XC40078D4
-SystemMode=Dark
-AppMode=Dark
-
-[boot]
-SCRNSAVE.EXE=
-
-[MasterThemeSelector]
-MTSM=RJSPBS
-
-[Sounds]
-SchemeName=@%SystemRoot%\System32\mmres.dll,-800
-"@
-                            $themeDir = Join-Path $Script:MOUNT_DIR "Windows\Resources\Themes"
-                            if (-not (Test-Path $themeDir)) { New-Item -Path $themeDir -ItemType Directory -Force | Out-Null }
-                            
-                            $themeFile = Join-Path $themeDir "oem.theme"
-                            
-                            # Escribir UTF-8 Puro sin BOM usando .NET
-                            Write-Log -LogLevel INFO -Message "OEM_Branding: Escribiendo archivo oem.theme puro (sin BOM)."
-                            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-                            [System.IO.File]::WriteAllText($themeFile, $themeContent, $utf8NoBom)
-
-                            # Inyectar el tema como predeterminado en el registro
-                            $themeRegPath = "OfflineSoftware\Microsoft\Windows\CurrentVersion\Themes"
-                            Unlock-OfflineKey -KeyPath $themeRegPath
-                            if (-not (Test-Path "HKLM:\$themeRegPath")) { New-Item -Path "HKLM:\$themeRegPath" -Force | Out-Null }
-                            
-                            Set-ItemProperty -Path "HKLM:\$themeRegPath" -Name "InstallTheme" -Value "%SystemRoot%\Resources\Themes\oem.theme" -Type String -Force
-							Set-ItemProperty -Path "HKLM:\$themeRegPath" -Name "InstallThemeDark" -Value "%SystemRoot%\Resources\Themes\oem.theme" -Type String -Force
-                            Set-ItemProperty -Path "HKLM:\$themeRegPath" -Name "InstallThemeLight" -Value "%SystemRoot%\Resources\Themes\oem.theme" -Type String -Force
-                            Restore-KeyOwner -KeyPath "HKLM:\$themeRegPath"
-                        }
-
-                        # B. Procesamiento de la Pantalla de Bloqueo (Vía PersonalizationCSP)
-                        if ($txtLock.Text) {
-                            Write-Log -LogLevel INFO -Message "OEM_Branding: Procesando LockScreen (CSP) -> $($txtLock.Text)"
-                            $ext = [System.IO.Path]::GetExtension($txtLock.Text)
-                            $destLock = Join-Path $oemDir "Lock_OEM$ext"
-                            Copy-Item -Path $txtLock.Text -Destination $destLock -Force
-
-                            # Inyectar LockScreen usando el proveedor CSP
-                            $cspRegPath = "OfflineSoftware\Microsoft\Windows\CurrentVersion\PersonalizationCSP"
-                            Unlock-Single-Key -SubKeyPath $cspRegPath
-                            if (-not (Test-Path "HKLM:\$cspRegPath")) { New-Item -Path "HKLM:\$cspRegPath" -Force | Out-Null }
-
-                            $internalLockPath = "C:\Windows\Web\Wallpaper\OEM\Lock_OEM$ext"
-                            Set-ItemProperty -Path "HKLM:\$cspRegPath" -Name "LockScreenImagePath" -Value $internalLockPath -Type String -Force
-                            Set-ItemProperty -Path "HKLM:\$cspRegPath" -Name "LockScreenImageUrl" -Value $internalLockPath -Type String -Force
-                            Set-ItemProperty -Path "HKLM:\$cspRegPath" -Name "LockScreenImageStatus" -Value 1 -Type DWord -Force
-                            
-                            Restore-KeyOwner -KeyPath "HKLM:\$cspRegPath"
-                        }
-                    }
-                }
-
-                # 3. METADATOS OEM CON GESTION DE CLAVES PROPIA
-                if ($txtFab.Text -or $txtMod.Text -or $txtLogo.Text -or $txtPhone.Text -or $txtHours.Text -or $txtUrl.Text) {
-                    Write-Log -LogLevel ACTION -Message "OEM_Branding: Inyectando metadatos de informacion del fabricante (OEMInformation)."
-                    $infoSubPath = "OfflineSoftware\Microsoft\Windows\CurrentVersion\OEMInformation"
-                    Unlock-Single-Key -SubKeyPath $infoSubPath
-                    
-                    $psInfoPath = "HKLM:\$infoSubPath"
-                    if (-not (Test-Path $psInfoPath)) { New-Item -Path $psInfoPath -Force | Out-Null }
-
-                    if ($txtFab.Text)   { Set-ItemProperty -Path $psInfoPath -Name "Manufacturer" -Value $txtFab.Text -Type String -Force }
-                    if ($txtMod.Text)   { Set-ItemProperty -Path $psInfoPath -Name "Model"        -Value $txtMod.Text -Type String -Force }
-                    if ($txtUrl.Text)   { Set-ItemProperty -Path $psInfoPath -Name "SupportURL"   -Value $txtUrl.Text -Type String -Force }
-                    if ($txtPhone.Text) { Set-ItemProperty -Path $psInfoPath -Name "SupportPhone" -Value $txtPhone.Text -Type String -Force }
-                    if ($txtHours.Text) { Set-ItemProperty -Path $psInfoPath -Name "SupportHours" -Value $txtHours.Text -Type String -Force }
-                    
-                    if ($txtLogo.Text) { 
-                        Write-Log -LogLevel INFO -Message "OEM_Branding: Procesando Logo OEM -> $($txtLogo.Text)"
-                        $oemInfoDir = Join-Path $Script:MOUNT_DIR "Windows\System32\oem"
-                        if (-not (Test-Path $oemInfoDir)) { New-Item -Path $oemInfoDir -ItemType Directory -Force | Out-Null }
-                        $destFile = Join-Path $oemInfoDir "oemlogo.bmp"
-                        Copy-Item -Path $txtLogo.Text -Destination $destFile -Force
-                        Set-ItemProperty -Path $psInfoPath -Name "Logo" -Value "C:\Windows\System32\oem\oemlogo.bmp" -Type String -Force 
-                    }
-
-                    Restore-KeyOwner -KeyPath $psInfoPath
+				# Usamos Robocopy en Modo Backup (/B) para ignorar permisos de TrustedInstaller
+                # /E = Recursivo | /B = Backup Mode | /IS = Sobrescribir iguales | /IT = Sobrescribir modificados
+                # /R:0 /W:0 = Sin reintentos | /NJH /NJS /NDL /NC /NS /NP = Totalmente silencioso
+                $roboArgs = "`"$tempExtract`" `"$safeMountDir`" /E /B /IS /IT /R:0 /W:0 /NJH /NJS /NDL /NC /NS /NP"
+                
+                $proc = Start-Process robocopy.exe -ArgumentList $roboArgs -Wait -PassThru -WindowStyle Hidden
+                
+                # Evaluamos el bitmask de Robocopy (8 o superior es fallo critico)
+                if ($proc.ExitCode -ge 8) {
+                    Write-Log -LogLevel ERROR -Message "Robocopy fallo al inyectar la carga util (Codigo: $($proc.ExitCode))"
+                    throw "Robocopy fallo en $safeMountDir. Bug de sintaxis o bloqueo de archivos. (Codigo: $($proc.ExitCode))"
                 }
                 
-                $msg = "Branding inyectado correctamente.`n`nEdicion detectada: $editionId"
-                if ($txtWall.Text -or $txtLock.Text) { $msg += "`nMetodo de aplicacion: $(if($isGpoSupported){'Directiva de Grupo (GPO)'}else{'Themes Override & CSP'})" }
-                
-                Write-Log -LogLevel INFO -Message "OEM_Branding: Operacion completada con exito."
-                [System.Windows.Forms.MessageBox]::Show($msg, "Exito", 'OK', 'Information')
-                $form.Close()
-
-            } finally {
-                Write-Log -LogLevel INFO -Message "OEM_Branding: Ejecutando limpieza y desmontaje de colmenas de registro..."
-                Unmount-Hives
+                $hasFiles = $true
             }
-        } catch {
-            Write-Log -LogLevel ERROR -Message "OEM_Branding: Fallo critico durante la inyeccion - $($_.Exception.Message)"
-            [System.Windows.Forms.MessageBox]::Show("Error al aplicar Branding: $_", "Error", 'OK', 'Error')
-        } finally {
-            $form.Cursor = [System.Windows.Forms.Cursors]::Default
-            $btnApply.Enabled = $true
-        }
-    })
 
-    $form.ShowDialog() | Out-Null
-    $form.Dispose()
-    [GC]::Collect()
+            # --- FASE B: Inyección de Registro ---
+            $regFiles = Get-ChildItem -Path $tempExtract -Filter "*.reg" -Recurse
+            foreach ($reg in $regFiles) {
+                Write-Log -LogLevel ACTION -Message "Inyectando registro adjunto: $($reg.Name)"
+                Import-OfflineReg -FilePath $reg.FullName
+            }
+
+            $msg = "Inyectado: "
+            if ($hasFiles) { $msg += "[Archivos] " }
+            if ($regFiles) { $msg += "[Registro] " }
+            return $msg.Trim()
+
+        } finally {
+            # Limpieza absoluta garantizada
+            if (Test-Path $tempExtract) { Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    throw "Formato no soportado para inyeccion automatica."
 }
 
-# =================================================================
-#  Modulo GUI Inyector y Actualizador de Apps Modernas
-# =================================================================
-function Show-AppxInjector-GUI {
+# --- INTERFAZ GRÁFICA DEL GESTOR DE ADDONS ---
+function Show-Addons-GUI {
     if ($Script:IMAGE_MOUNTED -eq 0) { 
         [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
         return 
     }
 
+    if (-not (Mount-Hives)) { return }
+
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Aprovisionamiento de Apps Modernas (APPX / MSIX) - $Script:MOUNT_DIR"
-    $form.Size = New-Object System.Drawing.Size(850, 580) # Ensanchado para la nueva columna
+    $form.Text = "Instalador de Addons y Paquetes Avanzados (.WIM .TPK, .BPK, .REG)"
+    $form.Size = New-Object System.Drawing.Size(950, 640)
     $form.StartPosition = "CenterScreen"
     $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
     $form.ForeColor = [System.Drawing.Color]::White
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
 
-    $toolTip = New-Object System.Windows.Forms.ToolTip
-
+    # --- TÍTULO Y BOTÓN DE CARGA ---
     $lblTitle = New-Object System.Windows.Forms.Label
-    $lblTitle.Text = "Gestor Inteligente de Aplicaciones Universales (UWP/WinUI)"
+    $lblTitle.Text = "Integracion de Paquetes de Terceros"
     $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
     $lblTitle.Location = "20, 15"; $lblTitle.AutoSize = $true
     $form.Controls.Add($lblTitle)
 
-    # --- VARIABLE GLOBAL PARA CACHE DE APPS ---
-    $script:cachedAppx = @()
-	$script:detectedLicense = $null
+    # NUEVO: Botón de Información / Ayuda
+    $btnHelp = New-Object System.Windows.Forms.Button
+    $btnHelp.Text = "?"
+    $btnHelp.Location = "630, 12"
+    $btnHelp.Size = "30, 30"
+    $btnHelp.BackColor = [System.Drawing.Color]::DarkOrange
+    $btnHelp.FlatStyle = "Flat"
+    $btnHelp.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+    $form.Controls.Add($btnHelp)
 
-    # --- HELPER INTELIGENTE DE DETECCION ---
-    $CheckAppExists = {
-        param([string]$FilePath)
-        $fileName = [System.IO.Path]::GetFileNameWithoutExtension($FilePath)
-        
-        # El estandar de Windows usa "_" para separar Nombre, Version y Hash
-        $baseName = $fileName.Split('_')[0]
-        
-        # Buscar coincidencias en la imagen montada
-        $match = $script:cachedAppx | Where-Object { $_.DisplayName -match [regex]::Escape($baseName) -or $_.PackageName -match [regex]::Escape($baseName) }
-        
-        if ($match) {
-            return $match[0].Version # Retorna la version instalada actualmente
-        }
-        return $null
+    $btnAddFiles = New-Object System.Windows.Forms.Button
+    $btnAddFiles.Text = "+ Agregar Addons (.wim, .tpk, .bpk, .reg)..."
+    $btnAddFiles.Location = "670, 12"
+    $btnAddFiles.Size = "240, 30"
+    $btnAddFiles.BackColor = [System.Drawing.Color]::RoyalBlue
+    $btnAddFiles.FlatStyle = "Flat"
+    $form.Controls.Add($btnAddFiles)
+
+    # NUEVO: Label de advertencia de nomenclatura (Texto Rápido)
+    $lblNomenclatura = New-Object System.Windows.Forms.Label
+    $lblNomenclatura.Text = "Aviso: Usa los sufijos _x64, _x86 en el nombre del archivo para activar el Escudo de Arquitectura.`nY para los Paquetes principales debe incluir _main al final del nombre es MUY IMPORTANTE"
+    $lblNomenclatura.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
+    $lblNomenclatura.ForeColor = [System.Drawing.Color]::White
+    $lblNomenclatura.Location = "20, 42"
+    $lblNomenclatura.AutoSize = $true
+    $form.Controls.Add($lblNomenclatura)
+
+    # --- DETECCIÓN INTELIGENTE DE ARQUITECTURA (INSTANTÁNEA) ---
+    $defaultIdx = 1 # Asumimos x86 por defecto
+    if (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysWOW64")) {
+        $defaultIdx = 2 # Si existe SysWOW64, es un Windows x64 garantizado
     }
 
-    # --- GRUPO 1: PAQUETE PRINCIPAL ---
-    $grpMain = New-Object System.Windows.Forms.GroupBox
-    $grpMain.Text = " 1. Paquete Principal (App) "
-    $grpMain.Location = "20, 50"
-    $grpMain.Size = "790, 90"
-    $grpMain.ForeColor = [System.Drawing.Color]::Cyan
-    $form.Controls.Add($grpMain)
+    # --- SELECTOR DE ARQUITECTURA (GRUPO) ---
+    $grpArch = New-Object System.Windows.Forms.GroupBox
+    $grpArch.Text = " Arquitectura del Addon (Solo aplica para desempaquetar .wim/.tpk/.bpk) "
+    $grpArch.Location = "20, 65" 
+    $grpArch.Size = "890, 55"
+    $grpArch.ForeColor = [System.Drawing.Color]::Orange
+    $form.Controls.Add($grpArch)
 
-    $lblMain = New-Object System.Windows.Forms.Label
-    $lblMain.Text = "Archivo (.appx, .msix, .appxbundle, .msixbundle):"
-    $lblMain.Location = "15, 25"; $lblMain.AutoSize = $true; $lblMain.ForeColor = [System.Drawing.Color]::White
-    $grpMain.Controls.Add($lblMain)
+    $radX86 = New-Object System.Windows.Forms.RadioButton
+    $radX86.Text = "x86 / 32-bits"
+    $radX86.Location = "20, 22"
+    $radX86.AutoSize = $true
+    $radX86.ForeColor = [System.Drawing.Color]::White
+    if ($defaultIdx -eq 1) { $radX86.Checked = $true }
+    $grpArch.Controls.Add($radX86)
 
-    $txtMain = New-Object System.Windows.Forms.TextBox
-    $txtMain.Location = "15, 45"; $txtMain.Size = "670, 23"
-    $txtMain.BackColor = [System.Drawing.Color]::FromArgb(50,50,50); $txtMain.ForeColor = [System.Drawing.Color]::White
-    $txtMain.ReadOnly = $true
-    $grpMain.Controls.Add($txtMain)
+    $radX64 = New-Object System.Windows.Forms.RadioButton
+    $radX64.Text = "x64 / 64-bits"
+    $radX64.Location = "200, 22"
+    $radX64.AutoSize = $true
+    $radX64.ForeColor = [System.Drawing.Color]::White
+    if ($defaultIdx -eq 2) { $radX64.Checked = $true }
+    $grpArch.Controls.Add($radX64)
 
-    $btnMain = New-Object System.Windows.Forms.Button
-    $btnMain.Text = "Buscar..."
-    $btnMain.Location = "695, 43"; $btnMain.Size = "80, 26"
-    $btnMain.BackColor = [System.Drawing.Color]::Gray; $btnMain.FlatStyle = "Flat"
-    $grpMain.Controls.Add($btnMain)
-
-    # --- GRUPO 2: DEPENDENCIAS ---
-    $grpDeps = New-Object System.Windows.Forms.GroupBox
-    $grpDeps.Text = " 2. Dependencias (Frameworks, VCLibs, etc.) "
-    $grpDeps.Location = "20, 150"
-    $grpDeps.Size = "790, 250"
-    $grpDeps.ForeColor = [System.Drawing.Color]::Orange
-    $form.Controls.Add($grpDeps)
-
-    $lblDepInfo = New-Object System.Windows.Forms.Label
-    $lblDepInfo.Text = "Añade las librerias necesarias. El sistema verificara si ya estan integradas."
-    $lblDepInfo.Location = "15, 25"; $lblDepInfo.AutoSize = $true; $lblDepInfo.ForeColor = [System.Drawing.Color]::DarkGray
-    $grpDeps.Controls.Add($lblDepInfo)
-
-    $lvDeps = New-Object System.Windows.Forms.ListView
-    $lvDeps.Location = "15, 50"
-    $lvDeps.Size = "760, 140"
-    $lvDeps.View = "Details"
-    $lvDeps.FullRowSelect = $true
-    $lvDeps.GridLines = $true
-    $lvDeps.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
-    $lvDeps.ForeColor = [System.Drawing.Color]::White
+    # --- LISTVIEW (DESPLAZADO HACIA ABAJO) ---
+    $lv = New-Object System.Windows.Forms.ListView
+    $lv.Location = "20, 135"
+    $lv.Size = "890, 360"
+    $lv.View = "Details"
+    $lv.FullRowSelect = $true
+    $lv.GridLines = $true
+    $lv.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
+    $lv.ForeColor = [System.Drawing.Color]::White
     
-    $lvDeps.Columns.Add("Estado / Version Actual", 180) | Out-Null
-    $lvDeps.Columns.Add("Archivo de Dependencia", 550) | Out-Null
-    $grpDeps.Controls.Add($lvDeps)
+    $lv.Columns.Add("Estado", 150) | Out-Null
+    $lv.Columns.Add("Archivo", 250) | Out-Null
+    $lv.Columns.Add("Tipo Detectado", 120) | Out-Null
+    $lv.Columns.Add("Ruta Completa", 360) | Out-Null
+    $form.Controls.Add($lv)
 
-    $btnAddDep = New-Object System.Windows.Forms.Button
-    $btnAddDep.Text = "+ Agregar Paquetes"
-    $btnAddDep.Location = "15, 200"; $btnAddDep.Size = "140, 30"
-    $btnAddDep.BackColor = [System.Drawing.Color]::RoyalBlue; $btnAddDep.FlatStyle = "Flat"
-    $grpDeps.Controls.Add($btnAddDep)
-
-    $btnRemDep = New-Object System.Windows.Forms.Button
-    $btnRemDep.Text = "- Quitar Seleccion"
-    $btnRemDep.Location = "165, 200"; $btnRemDep.Size = "130, 30"
-    $btnRemDep.BackColor = [System.Drawing.Color]::Crimson; $btnRemDep.FlatStyle = "Flat"
-    $grpDeps.Controls.Add($btnRemDep)
-
-    # --- ESTADO Y BOTON ACCION ---
+    # --- ESTADO Y BOTONES INFERIORES ---
     $lblStatus = New-Object System.Windows.Forms.Label
-    $lblStatus.Text = "Iniciando modulo..."
-    $lblStatus.Location = "20, 420"; $lblStatus.AutoSize = $true
-    $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
+    $lblStatus.Text = "Agrega los archivos a la cola de inyeccion."
+    $lblStatus.Location = "20, 505"
+    $lblStatus.AutoSize = $true
+    $lblStatus.ForeColor = [System.Drawing.Color]::Cyan
     $form.Controls.Add($lblStatus)
 
-    $btnApply = New-Object System.Windows.Forms.Button
-    $btnApply.Text = "PROCESAR (Inyectar / Actualizar)"
-    $btnApply.Location = "240, 470"; $btnApply.Size = "360, 50"
-    $btnApply.BackColor = [System.Drawing.Color]::SeaGreen
-    $btnApply.FlatStyle = "Flat"
-    $btnApply.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $btnApply.Enabled = $false
-    $form.Controls.Add($btnApply)
+    $btnRemoveItem = New-Object System.Windows.Forms.Button
+    $btnRemoveItem.Text = "Quitar de la lista"
+    $btnRemoveItem.Location = "20, 530"
+    $btnRemoveItem.Size = "150, 30"
+    $btnRemoveItem.BackColor = [System.Drawing.Color]::Crimson
+    $btnRemoveItem.FlatStyle = "Flat"
+    $form.Controls.Add($btnRemoveItem)
 
-    # --- EVENTO DE CARGA INICIAL (Auditoria de la Imagen) ---
-    $form.Add_Shown({
-        $form.Refresh()
-        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-        $lblStatus.Text = "Escaneando paquetes instalados en la imagen... (Esto tomara unos segundos)"
-        $form.Refresh()
-        
-        try {
-            $script:cachedAppx = Get-AppxProvisionedPackage -Path $Script:MOUNT_DIR -ErrorAction Stop
-            $lblStatus.Text = "Escaneo completado. $($script:cachedAppx.Count) apps detectadas. Listo para trabajar."
-            $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
-            $btnApply.Enabled = $true
-        } catch {
-            $lblStatus.Text = "Advertencia: No se pudieron cargar los paquetes instalados."
-            $lblStatus.ForeColor = [System.Drawing.Color]::Salmon
-            $btnApply.Enabled = $true # Habilitamos de todas formas
-        } finally {
-            $form.Cursor = [System.Windows.Forms.Cursors]::Default
-        }
+    $btnInstall = New-Object System.Windows.Forms.Button
+    $btnInstall.Text = "INYECTAR TODOS LOS ADDONS"
+    $btnInstall.Location = "640, 520"
+    $btnInstall.Size = "270, 40"
+    $btnInstall.BackColor = [System.Drawing.Color]::SeaGreen
+    $btnInstall.FlatStyle = "Flat"
+    $btnInstall.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+    $form.Controls.Add($btnInstall)
+
+    # --- EVENTO DEL BOTÓN DE AYUDA ---
+    $btnHelp.Add_Click({
+        $helpMsg = "INSTRUCCIONES DE NOMENCLATURA PARA ADDONS`n`n"
+        $helpMsg += "Para que el motor inteligente proteja tu imagen WIM de colapsos, "
+        $helpMsg += "los archivos deben indicar su arquitectura en el nombre ANTES de la extension.`n`n"
+        $helpMsg += "Ejemplos Correctos:`n"
+        $helpMsg += "  >  MiPaquetePrincipal_main.tpk`n"
+		$helpMsg += "  >  Registro_x64_main.reg`n"
+        $helpMsg += "  >  MiPaqueteIdioma_x64_es-mx.tpk`n"
+        $helpMsg += "  >  Herramienta_main.bpk`n`n"
+        $helpMsg += "Por que es importante?`n"
+        $helpMsg += "Si agregas una carpeta entera de Addons, el script leera estos sufijos y "
+        $helpMsg += "OMITIRA automaticamente los paquetes/Registro 'x86' o 'arm' si tu imagen de destino es 'x64', "
+        $helpMsg += "evitando pantallas azules y corrupcion en la instalacion."
+
+        [System.Windows.Forms.MessageBox]::Show($helpMsg, "Reglas de Empaquetado", 'OK', 'Information')
     })
 
-    # --- EVENTOS DE INTERFAZ ---
-    $btnMain.Add_Click({
+    # --- EVENTOS ---
+    $btnAddFiles.Add_Click({
         $ofd = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "Paquetes Modernos (*.appx;*.msix;*.appxbundle;*.msixbundle)|*.appx;*.msix;*.appxbundle;*.msixbundle"
-        if ($ofd.ShowDialog() -eq 'OK') { 
-            $txtMain.Text = $ofd.FileName 
-            $baseDir = Split-Path $ofd.FileName -Parent
-            
-            # --- AUTO-DISCOVERY DE DEPENDENCIAS ---
-            $lvDeps.BeginUpdate()
-            $lvDeps.Items.Clear() # Limpiamos por si habia algo antes
-            
-            # Buscar recursivamente todos los paquetes en esa carpeta y subcarpetas
-            $autoDeps = Get-ChildItem -Path $baseDir -Include "*.appx", "*.msix" -Recurse -File -ErrorAction SilentlyContinue
-            
-            $count = 0
-            foreach ($dep in $autoDeps) {
-                # Evitar meter el paquete principal como dependencia de si mismo
-                if ($dep.FullName -ne $ofd.FileName) {
-                    $item = New-Object System.Windows.Forms.ListViewItem("AUTO-DETECTADO")
-                    $item.ForeColor = [System.Drawing.Color]::Cyan
-                    $item.SubItems.Add($dep.Name) | Out-Null
-                    $item.Tag = $dep.FullName
-                    $lvDeps.Items.Add($item) | Out-Null
-                    $count++
-                }
-            }
-            $lvDeps.EndUpdate()
-
-            # --- AUTO-DISCOVERY DE LICENCIA ---
-            $script:detectedLicense = $null
-            $licFile = Get-ChildItem -Path $baseDir -Filter "*license*.xml" -File -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($licFile) {
-                $script:detectedLicense = $licFile.FullName
-            }
-
-            # --- CHEQUEO INTELIGENTE DE ACTUALIZACION ---
-            $existingVer = & $CheckAppExists -FilePath $ofd.FileName
-            
-            $statusStr = ""
-            if ($existingVer) {
-                $statusStr = "[ACTUALIZAR] (v$existingVer). "
-                $lblStatus.ForeColor = [System.Drawing.Color]::Orange
-            } else {
-                $statusStr = "[NUEVA]. "
-                $lblStatus.ForeColor = [System.Drawing.Color]::Cyan
-            }
-
-            $statusStr += "Autocargadas $count dependencias."
-            if ($script:detectedLicense) { $statusStr += " [Licencia XML OK]" }
-            
-            $lblStatus.Text = $statusStr
-        }
-    })
-
-    $btnAddDep.Add_Click({
-        $ofd = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "Paquetes Dependencia (*.appx;*.msix)|*.appx;*.msix"
+        $ofd.Filter = "Addons Windows (*.tpk;*.bpk;*.wim;*.reg;*)|*.tpk;*.bpk;*.wim;*.reg|Todos los archivos (*.*)|*.*"
         $ofd.Multiselect = $true
         if ($ofd.ShowDialog() -eq 'OK') {
-            $lvDeps.BeginUpdate()
+            $lv.BeginUpdate()
             foreach ($file in $ofd.FileNames) {
-                
-                # Evitar duplicados en la lista visual
-                $existsInList = $false
-                foreach ($item in $lvDeps.Items) { if ($item.Tag -eq $file) { $existsInList = $true; break } }
-                
-                if (-not $existsInList) {
-                    # Chequeo Inteligente contra la Imagen WIM
-                    $existingVer = & $CheckAppExists -FilePath $file
-                    
-                    $item = New-Object System.Windows.Forms.ListViewItem
-                    
-                    if ($existingVer) {
-                        $item.Text = "YA INSTALADO (v$existingVer)"
-                        $item.ForeColor = [System.Drawing.Color]::Orange
-                    } else {
-                        $item.Text = "NUEVO PAQUETE"
-                        $item.ForeColor = [System.Drawing.Color]::LightGreen
-                    }
-
-                    $item.SubItems.Add([System.IO.Path]::GetFileName($file)) | Out-Null
-                    $item.Tag = $file
-                    $lvDeps.Items.Add($item) | Out-Null
-                }
+                $item = New-Object System.Windows.Forms.ListViewItem("EN ESPERA")
+                $item.SubItems.Add([System.IO.Path]::GetFileName($file)) | Out-Null
+                $item.SubItems.Add([System.IO.Path]::GetExtension($file).ToUpper()) | Out-Null
+                $item.SubItems.Add($file) | Out-Null
+                $item.ForeColor = [System.Drawing.Color]::Yellow
+                $item.Tag = $file
+                $lv.Items.Add($item) | Out-Null
             }
-            $lvDeps.EndUpdate()
+            $lv.EndUpdate()
         }
     })
 
-    $btnRemDep.Add_Click({
-        foreach ($item in $lvDeps.SelectedItems) { $lvDeps.Items.Remove($item) }
+    $btnRemoveItem.Add_Click({
+        foreach ($item in $lv.SelectedItems) { $lv.Items.Remove($item) }
     })
 
-    # --- LOGICA DE APROVISIONAMIENTO (CORE) ---
-    $btnApply.Add_Click({
-        if (-not $txtMain.Text) {
-            [System.Windows.Forms.MessageBox]::Show("Debes seleccionar un paquete principal.", "Aviso", 'OK', 'Warning')
-            return
+    $btnInstall.Add_Click({
+        if ($lv.Items.Count -eq 0) { 
+            Write-Log -LogLevel WARN -Message "AddonInjector: Intento de ejecucion sin addons en la lista."
+            return 
+        }
+        $confirm = [System.Windows.Forms.MessageBox]::Show("Iniciar la inyeccion en lote? Esto fusionara archivos y claves de registro en el orden correcto.", "Confirmar", 'YesNo', 'Warning')
+        if ($confirm -ne 'Yes') { 
+            Write-Log -LogLevel INFO -Message "AddonInjector: Operacion cancelada por el usuario en el cuadro de confirmacion."
+            return 
         }
 
+        Write-Log -LogLevel ACTION -Message "AddonInjector: Iniciando motor de inyeccion inteligente de Addons."
+
+        $btnInstall.Enabled = $false
         $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-        $btnApply.Enabled = $false
-        $btnAddDep.Enabled = $false
-        $btnRemDep.Enabled = $false
-        $btnMain.Enabled = $false
+        $errors = 0; $success = 0; $skipped = 0
 
-        $lblStatus.Text = "Inyectando aplicacion y dependencias... Por favor espere."
-        $lblStatus.ForeColor = [System.Drawing.Color]::Cyan
+        # Capturamos la arquitectura de la UI
+        $selectedIndex = if ($radX86.Checked) { 1 } else { 2 }
+        $isX64 = $radX64.Checked
+        Write-Log -LogLevel INFO -Message "AddonInjector: Destino arquitectonico -> $(if($isX64){'x64'}else{'x86'}) | Indice WIM local: $selectedIndex"
+
+        # --- 1. EXTRAER ELEMENTOS PENDIENTES ---
+        $pendingItems = @()
+        foreach ($item in $lv.Items) {
+            if ($item.Text -eq "EN ESPERA") {
+                $pendingItems += $item
+            }
+        }
+
+        # --- 2. ORDENAMIENTO INTELIGENTE (Prioridad + Alfabeto) ---
+        $lblStatus.Text = "Calculando orden de inyeccion..."
         $form.Refresh()
 
-        try {
-            # Extraer array de rutas de dependencias
-            $depPaths = @()
-            foreach ($item in $lvDeps.Items) { $depPaths += $item.Tag }
-
-            Write-Log -LogLevel ACTION -Message "Inyectando Appx/MSIX: $($txtMain.Text) con $($depPaths.Count) dependencias."
+        $sortedItems = $pendingItems | Sort-Object {
+            $fileName = $_.SubItems[1].Text.ToLower()
+            $priority = 5 # Prioridad por defecto (otros)
             
-            # Parametros base
-            $params = @{
-                Path = $Script:MOUNT_DIR
-                PackagePath = $txtMain.Text
-                ErrorAction = 'Stop'
-            }
+            # Asignacion de pesos (1 es lo primero que se instala)
+            if ($fileName -match "_main\.(tpk|bpk|wim)$") { $priority = 1 } # Paquetes Principales
+            elseif ($fileName -match "_main\.reg$")               { $priority = 2 } # Registro Principal
+            elseif ($fileName -match "\.(tpk|bpk|wim)$")   { $priority = 3 } # Paquetes de Idioma / Extras
+            elseif ($fileName -match "\.reg$")                     { $priority = 4 } # Registros de Idioma / Extras
 
-            if ($depPaths.Count -gt 0) { $params.Add('DependencyPackagePath', $depPaths) }
-            
-            # Decision de Licencia
-            if ($script:detectedLicense) {
-                Write-Log -LogLevel INFO -Message "Utilizando archivo de licencia: $($script:detectedLicense)"
-                $params.Add('LicensePath', $script:detectedLicense)
-            } else {
-                Write-Log -LogLevel INFO -Message "Sin licencia. Usando -SkipLicense."
-                $params.Add('SkipLicense', $true)
-            }
-
-            # Ejecutar inyeccion (Splatting para codigo mas limpio)
-            Add-AppxProvisionedPackage @params | Out-Null
-
-            $lblStatus.Text = "Aplicacion inyectada exitosamente."
-            $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
-            [System.Windows.Forms.MessageBox]::Show("La aplicacion fue aprovisionada/actualizada correctamente en la imagen.", "Exito", 'OK', 'Information')
-            
-            # Limpiar la UI y recargar cache
-            $txtMain.Text = ""
-            $lvDeps.Items.Clear()
-            $script:detectedLicense = $null
-            $script:cachedAppx = Get-AppxProvisionedPackage -Path $Script:MOUNT_DIR -ErrorAction SilentlyContinue
-
-        } catch {
-            $lblStatus.Text = "Error al inyectar paquete."
-            $lblStatus.ForeColor = [System.Drawing.Color]::Red
-            Write-Log -LogLevel ERROR -Message "Fallo inyeccion Appx/MSIX: $_"
-            [System.Windows.Forms.MessageBox]::Show("Fallo el aprovisionamiento de la aplicacion.`n`nDetalle Tecnico: $_", "Error", 'OK', 'Error')
-        } finally {
-            $form.Cursor = [System.Windows.Forms.Cursors]::Default
-            $btnApply.Enabled = $true
-            $btnAddDep.Enabled = $true
-            $btnRemDep.Enabled = $true
-            $btnMain.Enabled = $true
+            # Al retornar "Prioridad-Nombre", PowerShell agrupa primero por fase y luego alfabeticamente
+            # Ej: "1-firefox_main.tpk" se procesara antes que "2-firefox_x64_main.reg"
+            "$priority-$fileName"
         }
+        Write-Log -LogLevel INFO -Message "AddonInjector: Fase 2 - $($sortedItems.Count) elementos ordenados por algoritmo de prioridad."
+
+        # --- 3. PROCESAMIENTO E INYECCION ---
+        foreach ($item in $sortedItems) {
+			[System.Windows.Forms.Application]::DoEvents()
+            $fileName = $item.SubItems[1].Text.ToLower()
+
+            # --- CONDICION 1: FILTRO DE ARQUITECTURA ---
+            # Busca variaciones como _x64, -x64, 64bit, 64-bit, amd64
+            $is64BitFile = $fileName -match "(\b|_|\.|-)(x64|64-?bit|amd64)(\b|_|\.|-)"
+            $is32BitFile = $fileName -match "(\b|_|\.|-)(x86|32-?bit)(\b|_|\.|-)"
+
+            if ($isX64 -and $is32BitFile) {
+                $item.Text = "OMITIDO (Arch)"
+                $item.SubItems[2].Text = "Ignorado (Solo x86)"
+                $item.ForeColor = [System.Drawing.Color]::DarkGray
+                $skipped++
+                Write-Log -LogLevel INFO -Message "AddonInjector: Omitiendo [$fileName] (Paquete de 32-bits en imagen destino x64)."
+                continue
+            }
+            if (-not $isX64 -and $is64BitFile) {
+                $item.Text = "OMITIDO (Arch)"
+                $item.SubItems[2].Text = "Ignorado (Solo x64)"
+                $item.ForeColor = [System.Drawing.Color]::DarkGray
+                $skipped++
+                Write-Log -LogLevel INFO -Message "AddonInjector: Omitiendo [$fileName] (Paquete de 64-bits en imagen destino x86)."
+                continue
+            }
+
+            # --- CONDICION 2: INYECCION EN ORDEN ---
+            $lblStatus.Text = "Inyectando: $($item.SubItems[1].Text)..."
+            $item.Text = "PROCESANDO..."
+            
+            # Hacemos auto-scroll en la UI para ver por donde va
+            $item.EnsureVisible()
+            $form.Refresh()
+
+            Write-Log -LogLevel INFO -Message "AddonInjector: Instalando -> [$fileName]"
+
+            try {
+                # Llamamos al motor pasandole la ruta y el indice WIM a usar
+                $resultado = Install-OfflineAddon -FilePath $item.Tag -WimIndex $selectedIndex
+                
+                $item.Text = "COMPLETADO"
+                $item.SubItems[2].Text = $resultado
+                $item.ForeColor = [System.Drawing.Color]::LightGreen
+                $success++
+                Write-Log -LogLevel INFO -Message "AddonInjector: Completado. Motor devolvio: $resultado"
+            } catch {
+                $item.Text = "ERROR"
+                $item.SubItems[2].Text = $_.Exception.Message
+                $item.ForeColor = [System.Drawing.Color]::Salmon
+                $errors++
+                Write-Log -LogLevel ERROR -Message "AddonInjector: Fallo critico instalando addon [$fileName] - $($_.Exception.Message)"
+            }
+        }
+
+        Write-Log -LogLevel ACTION -Message "AddonInjector: Ciclo de inyeccion finalizado. Exitos: $success | Errores: $errors | Omitidos (Arch): $skipped"
+
+        $form.Cursor = [System.Windows.Forms.Cursors]::Default
+        $btnInstall.Enabled = $true
+        $lblStatus.Text = "Proceso terminado."
+        [System.Windows.Forms.MessageBox]::Show("Inyeccion de Addons finalizada.`n`nExitos: $success`nErrores: $errors`nOmitidos (Arch): $skipped", "Reporte de Operacion", 'OK', 'Information')
     })
 
+    # Cierre seguro (Desmontar Hives de registro)
+    $form.Add_FormClosing({ Unmount-Hives })
+    
     $form.ShowDialog() | Out-Null
     $form.Dispose()
-    $script:cachedAppx = $null
     [GC]::Collect()
 }
 
@@ -6323,14 +4180,19 @@ function Mount-Hives {
 
 function Unmount-Hives {
     Write-Host "Guardando y descargando Hives..." -ForegroundColor Yellow
+    Write-Log -LogLevel INFO -Message "UNMOUNT_HIVES: Iniciando proceso de descarga de colmenas de registro."
     
-    # Garbage Collection forzada y limpieza de memoria para soltar handles de registro
+    # 1. TRUCO DE VETERANO: El "Doble Tap" al Recolector de Basura.
+    # Asegura que las referencias circulares de WinForms y COM se purguen completamente.
+    Write-Log -LogLevel INFO -Message "UNMOUNT_HIVES: Ejecutando recoleccion de basura (GC) agresiva para liberar handles."
     [GC]::Collect()
     [GC]::WaitForPendingFinalizers()
+    [GC]::Collect() 
     
-    # --- Pausa de seguridad para permitir que el kernel libere los archivos fisicos ---
+    # Pausa de seguridad para permitir que el kernel libere los archivos fisicos
     Write-Host "Esperando a que el sistema libere los manejadores de archivos..." -ForegroundColor DarkGray
-    Start-Sleep -Seconds 2 
+    Write-Log -LogLevel INFO -Message "UNMOUNT_HIVES: Pausa de seguridad de 5 segundos para liberar bloqueos del kernel."
+    Start-Sleep -Seconds 5
     
     # Lista ampliada de Hives a descargar
     $hives = @(
@@ -6342,33 +4204,65 @@ function Unmount-Hives {
     )
     
     foreach ($hive in $hives) {
-        if (Test-Path "Registry::$hive") {
+        # 2. EVITAMOS Test-Path: Usamos reg query silenciado para evitar que 
+        # el proveedor de PS mantenga un micro-bloqueo sobre la clave.
+        $isMounted = $false
+        reg query $hive 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { $isMounted = $true }
+
+        if ($isMounted) {
+            Write-Log -LogLevel INFO -Message "UNMOUNT_HIVES: Colmena detectada como montada -> $hive. Procediendo a descargar."
             $retries = 0; $done = $false
             while ($retries -lt 5 -and -not $done) {
+                
                 # Intentamos el desmontaje nativo
                 reg unload $hive 2>$null | Out-Null
+                
                 if ($LASTEXITCODE -eq 0) { 
                     $done = $true 
+                    Write-Log -LogLevel INFO -Message "UNMOUNT_HIVES: [EXITO] $hive desmontada correctamente en el intento $($retries + 1)."
                 } else { 
                     $retries++
-                    # Pequeña espera incremental entre reintentos si hay bloqueo
                     Write-Host "." -NoNewline -ForegroundColor Yellow
+                    Write-Log -LogLevel WARN -Message "UNMOUNT_HIVES: Intento $retries fallido al desmontar $hive. Reintentando..."
+                    
+                    # 3. RECOLECCIÓN DINÁMICA: Si falla, forzamos al GC *dentro* del bucle.
+                    # A veces un handle tardío se suelta justo aquí.
+                    [GC]::Collect()
+                    
+                    # Espera incremental entre reintentos
                     Start-Sleep -Milliseconds (500 * $retries) 
                 }
             }
             if (-not $done) { 
-                Write-Warning "`n [!] No se pudo desmontar $hive. Puede estar bloqueado por un proceso externo."
-                Write-Log -LogLevel WARN -Message "Fallo al desmontar $hive tras 5 intentos."
+                Write-Log -LogLevel ERROR -Message "UNMOUNT_HIVES: Fallo CRITICO al desmontar $hive tras 5 intentos. Archivo permanentemente bloqueado."
+                
+                # FRENO DE EMERGENCIA: Si no abortamos aquí, DISM corromperá la imagen (CONFIG_INITIALIZATION_FAILED)
+                $errMsg = "ERROR LETAL: La colmena $hive sigue bloqueada en memoria por un proceso externo o el Antivirus.`n`nSi la imagen se guarda (Commit) en este estado, QUEDARA CORRUPTA (Pantallazo Azul).`nCierra cualquier programa, pausa el Antivirus e inténtalo de nuevo."
+                
+                Add-Type -AssemblyName System.Windows.Forms
+                [System.Windows.Forms.MessageBox]::Show($errMsg, "Peligro de Corrupcion", 'OK', 'Error')
+                
+                throw $errMsg
             }
+        } else {
+            Write-Log -LogLevel INFO -Message "UNMOUNT_HIVES: La colmena $hive no estaba montada. Se omite."
         }
     }
     Write-Host " [Proceso Finalizado]" -ForegroundColor Green
+    Write-Log -LogLevel INFO -Message "UNMOUNT_HIVES: Proceso de descarga de colmenas finalizado sin errores."
 }
 
 function Translate-OfflinePath {
     param([string]$OnlinePath)
     
-    # 1. Limpieza inicial y normalizacion
+    # 1. Guardia de entrada defensiva (Bug 3)
+    if ([string]::IsNullOrWhiteSpace($OnlinePath)) {
+        Write-Log -LogLevel WARN -Message "Translate-OfflinePath: Se recibio una ruta nula o vacia. Se omite."
+        return $null
+    }
+    
+    # 2. Limpieza inicial y normalización
     $cleanPath = $OnlinePath -replace "^Registry::", "" 
     $cleanPath = $cleanPath -replace "^HKLM:", "HKEY_LOCAL_MACHINE"
     $cleanPath = $cleanPath -replace "^HKLM\\", "HKEY_LOCAL_MACHINE\"
@@ -6379,47 +4273,58 @@ function Translate-OfflinePath {
     $cleanPath = $cleanPath.Trim()
 
     # --- Mapeo de Clases de Usuario (UsrClass.dat) ---
-    if ($cleanPath -match "HKEY_CURRENT_USER\\Software\\Classes") {
-        # PARCHE INTELIGENTE: Si la colmena de clases del usuario no existe (típico en WIM offline),
-        # redirigimos el ajuste a nivel de maquina (HKLM\SOFTWARE\Classes) para que se aplique globalmente.
-        if (Test-Path "HKLM:\OfflineUserClasses") {
+    # Bug 2: Uso de grupos no capturadores (?:\\|$)
+    if ($cleanPath -match "HKEY_CURRENT_USER\\Software\\Classes(?:\\|$)") {
+        
+        # Bug 1: Caché de la comprobación Test-Path para evitar I/O redundante
+        if ($null -eq $Script:OfflineUserClassesPresent) {
+            $Script:OfflineUserClassesPresent = Test-Path "HKLM:\OfflineUserClasses"
+        }
+        
+        if ($Script:OfflineUserClassesPresent) {
             return $cleanPath -replace "HKEY_CURRENT_USER\\Software\\Classes", "HKLM\OfflineUserClasses"
         } else {
             return $cleanPath -replace "HKEY_CURRENT_USER\\Software\\Classes", "HKLM\OfflineSoftware\Classes"
         }
     }
 
-    # USUARIO (HKCU Generico - NTUSER.DAT)
-    if ($cleanPath -match "HKEY_CURRENT_USER") {
+    # USUARIO (HKCU Genérico - NTUSER.DAT)
+    if ($cleanPath -match "HKEY_CURRENT_USER(?:\\|$)") {
         return $cleanPath -replace "HKEY_CURRENT_USER", "HKLM\OfflineUser"
     }
 
     # SYSTEM (HKEY_LOCAL_MACHINE\SYSTEM)
-    if ($cleanPath -match "HKEY_LOCAL_MACHINE\\SYSTEM") {
+    if ($cleanPath -match "HKEY_LOCAL_MACHINE\\SYSTEM(?:\\|$)") {
         $newPath = $cleanPath -replace "HKEY_LOCAL_MACHINE\\SYSTEM", "HKLM\OfflineSystem"
         
-        # Reemplazo inteligente de CurrentControlSet
-        if ($newPath -match "CurrentControlSet") {
+        if ($newPath -match "CurrentControlSet|ControlSet\d{3}") {
             $dynamicSet = Get-OfflineControlSet
-            return $newPath -replace "CurrentControlSet", $dynamicSet
+            if (-not $dynamicSet) {
+                Write-Log -LogLevel ERROR -Message "Translate-OfflinePath: Imposible traducir, ControlSet es nulo para la ruta '$cleanPath'."
+                return $null
+            }
+            return $newPath -replace "CurrentControlSet|ControlSet\d{3}", $dynamicSet
         }
-        return $newPath -replace "ControlSet001", (Get-OfflineControlSet)
+        return $newPath
     }
 
     # SOFTWARE (HKEY_LOCAL_MACHINE\SOFTWARE)
-    if ($cleanPath -match "HKEY_LOCAL_MACHINE\\SOFTWARE") {
+    if ($cleanPath -match "HKEY_LOCAL_MACHINE\\SOFTWARE(?:\\|$)") {
         return $cleanPath -replace "HKEY_LOCAL_MACHINE\\SOFTWARE", "HKLM\OfflineSoftware"
     }
     
-    # CLASSES ROOT (Global) -> Lo mandamos a Software\Classes de la Maquina
-    if ($cleanPath -match "HKEY_CLASSES_ROOT") {
+    # CLASSES ROOT (Global)
+    if ($cleanPath -match "HKEY_CLASSES_ROOT(?:\\|$)") {
         return $cleanPath -replace "HKEY_CLASSES_ROOT", "HKLM\OfflineSoftware\Classes"
     }
-	
-    if ($cleanPath -match "HKEY_LOCAL_MACHINE\\COMPONENTS") {
+    
+    # COMPONENTS
+    if ($cleanPath -match "HKEY_LOCAL_MACHINE\\COMPONENTS(?:\\|$)") {
         return $cleanPath -replace "HKEY_LOCAL_MACHINE\\COMPONENTS", "HKLM\OfflineComponents"
     }
     
+    # Loguear colmenas huérfanas o no mapeadas
+    Write-Log -LogLevel WARN -Message "Translate-OfflinePath: Hive no reconocida o no mapeada para la ruta: '$cleanPath'. Se omite."
     return $null
 }
 
@@ -6493,164 +4398,82 @@ $Script:SDDL_Backups = @{}
 function Unlock-OfflineKey {
     param([string]$KeyPath)
     
-    # 1. Privilegios (Siempre lo primero)
     Enable-Privileges
 
-    # 2. Normalizar ruta
+    # Normalizar ruta
     $psPath = $KeyPath -replace "^(HKEY_LOCAL_MACHINE|HKLM|Registry::HKEY_LOCAL_MACHINE|Registry::HKLM)[:\\]*", ""
-    # Ahora $psPath es algo como "OfflineUser\Software\Microsoft..."
-    
-    # 3. IDENTIFICAR LA "RAiZ MAESTRA" (La Colmena)
-    # Si estamos tocando OfflineUser, la raiz es "OfflineUser".
-    $hiveName = $psPath.Split('\')[0] 
-    
-    if ($hiveName -in @("OfflineUser", "OfflineSoftware", "OfflineSystem", "OfflineComponents", "OfflineUserClasses")) {
-        $rootHivePath = $hiveName
-        
-        # DESBLOQUEAR LA RAiZ PRIMERO
-        Unlock-Single-Key -SubKeyPath $rootHivePath
-    }
-
-    # 4. Ahora intentamos desbloquear el ancestro mas cercano de la clave destino
-    # (Igual que antes, para casos especificos profundos)
     $finalSubKey = $psPath
     $rootHive = [Microsoft.Win32.Registry]::LocalMachine
     
+    # Buscar el ancestro más cercano que exista y esté bloqueado
     while ($true) {
+        $check = $null
         try {
-            # Check rapido de existencia
-            $check = $rootHive.OpenSubKey($finalSubKey, [System.Security.AccessControl.RegistryRights]::ReadPermissions)
-            if ($check) { $check.Close(); break }
-        } catch { break } # Si existe pero esta bloqueada, break para desbloquearla
+            # Intentamos abrir con permisos de ESCRITURA
+            $check = $rootHive.OpenSubKey($finalSubKey, [System.Security.AccessControl.RegistryRights]::WriteKey)
+            
+            if ($check) { 
+                # La clave existe y ya tenemos acceso de escritura. No hay nada que desbloquear.
+                return 
+            }
+            # Si llega aquí sin lanzar excepción, $check es $null (la clave NO existe aún).
+            # Debemos subir un nivel para evaluar al padre.
+        } catch [System.Security.SecurityException] {
+            # La clave existe, pero el acceso fue denegado. ¡Esta es la que debemos desbloquear!
+            break 
+        } catch {
+            # Otro tipo de error (ej. corrupción de colmena). Abortamos por seguridad.
+            Write-Log -LogLevel WARN -Message "Unlock-OfflineKey: Error inesperado en $finalSubKey - $($_.Exception.Message)"
+            return
+        } finally {
+            if ($null -ne $check) { $check.Dispose() }
+        }
         
         $lastSlash = $finalSubKey.LastIndexOf("\")
-        if ($lastSlash -lt 0) { return }
+        if ($lastSlash -lt 0) { return } # Evita intentar desbloquear la raíz si no existe
         $finalSubKey = $finalSubKey.Substring(0, $lastSlash)
     }
 
-    # Desbloquear la clave especifica encontrada
     Unlock-Single-Key -SubKeyPath $finalSubKey
 }
 
-# --- RESTAURAR PROPIEDAD Y HERENCIA ---
-function Restore-KeyOwner {
-    param([string]$KeyPath)
-    
-    Enable-Privileges 
-    $cleanPath = $KeyPath -replace "^Registry::", ""
-    $subPath = $cleanPath -replace "^(HKEY_LOCAL_MACHINE|HKLM|HKLM:|HKEY_LOCAL_MACHINE:)[:\\]+", ""
-    $hive = [Microsoft.Win32.Registry]::LocalMachine
-
-    # =========================================================
-    # RESTAURACIÓN QUIRÚRGICA VÍA SDDL (Prioridad 1)
-    # =========================================================
-    if ($Script:SDDL_Backups.ContainsKey($subPath)) {
-        try {
-            $originalSddl = $Script:SDDL_Backups[$subPath]
-            
-            # Pedimos permisos para devolver la propiedad (TakeOwnership) y los accesos (ChangePermissions)
-            $rights = [System.Security.AccessControl.RegistryRights]::ChangePermissions -bor [System.Security.AccessControl.RegistryRights]::TakeOwnership
-            $keyObj = $hive.OpenSubKey($subPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, $rights)
-            
-            if ($keyObj) {
-                $aclRestored = New-Object System.Security.AccessControl.RegistrySecurity
-                $aclRestored.SetSecurityDescriptorSddlForm($originalSddl)
-                $keyObj.SetAccessControl($aclRestored)
-                $keyObj.Close()
-                
-                Write-Log -LogLevel INFO -Message "Restauracion SDDL Limpia: $subPath"
-                $Script:SDDL_Backups.Remove($subPath) # Liberar memoria RAM
-                return # SALIMOS: La clave quedo identica a fabrica
-            }
-        } catch {
-            Write-Log -LogLevel WARN -Message "Fallo restauracion SDDL puro en $subPath. Aplicando Fallback clasico."
-        }
-    }
-
-    # =========================================================
-    # RESTAURACIÓN CLÁSICA / FALLBACK (Si no se logro respaldar el SDDL)
-    # =========================================================
-    $sidAdmin   = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
-    $sidTrusted = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")
-    
-    $isUserHive = $subPath -match "OfflineUser"
-    $targetOwner = if ($isUserHive) { $sidAdmin } else { $sidTrusted }
-
-    try {
-        # Paso 1: Administradores toman el control para poder editar
-        $keyObj = $hive.OpenSubKey($subPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]::TakeOwnership)
-        if ($keyObj) {
-            $acl = $keyObj.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner)
-            $acl.SetOwner($sidAdmin) 
-            $keyObj.SetAccessControl($acl)
-            $keyObj.Close()
-        }
-
-        # Paso 2: Resetear la herencia de permisos
-        $keyObj = $hive.OpenSubKey($subPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]::ChangePermissions)
-        if ($keyObj) {
-            $acl = $keyObj.GetAccessControl()
-            if (-not $isUserHive) {
-                $acl.SetAccessRuleProtection($false, $false)
-            }
-            $keyObj.SetAccessControl($acl)
-            $keyObj.Close()
-            Write-Log -LogLevel INFO -Message "Restaurado (Herencia Reseteada): $subPath"
-        }
-
-        # Paso 3: Devolver a TrustedInstaller (Si es de sistema)
-        if (-not $isUserHive) {
-            $keyObj = $hive.OpenSubKey($subPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]::TakeOwnership)
-            if ($keyObj) {
-                $acl = $keyObj.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner)
-                $acl.SetOwner($targetOwner)
-                $keyObj.SetAccessControl($acl)
-                $keyObj.Close()
-            }
-        }
-    } catch {
-        Write-Log -LogLevel ERROR -Message "Fallo en Restore-KeyOwner ($subPath): $($_.Exception.Message)"
-    }
-}
-
-# --- LA FUNCIoN DE DESBLOQUEO ---
 function Unlock-Single-Key {
     param([string]$SubKeyPath)
     
-    # Filtro de seguridad para raices (No tocar bajo ningun concepto)
+    # Protección absoluta de las raíces de las colmenas
     if ($SubKeyPath -match "^(OfflineSystem|OfflineSoftware|OfflineUser|OfflineUserClasses|OfflineComponents)$") { return }
     
-    # Asegurar privilegios de Administrador (SeTakeOwnership)
     Enable-Privileges
     $rootKey = [Microsoft.Win32.Registry]::LocalMachine
-
-    # --- VERIFICACION PREVIA ---
-    # Si podemos abrirla con 'WriteKey', no hace falta desbloquear nada.
-    try {
-        $testKey = $rootKey.OpenSubKey($SubKeyPath, [System.Security.AccessControl.RegistryRights]::WriteKey)
-        if ($testKey) {
-            $testKey.Close()
-            return # SALIR: Ya tenemos permisos, no tocamos nada.
-        }
-    } catch { }
+    $keyOwner = $null; $keyPerms = $null
 
     $sidAdmin = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
     $success = $false
 
-    # --- PASO 1: TOMAR POSESION (Dueño) ---
+    # --- PASO 1: RESPALDAR SDDL Y TOMAR POSESIÓN ---
     try {
-        # Usamos ReadWriteSubTree para puentear bloqueos de API
-        $keyOwner = $rootKey.OpenSubKey($SubKeyPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]::TakeOwnership)
+        $rights = [System.Security.AccessControl.RegistryRights]::TakeOwnership -bor [System.Security.AccessControl.RegistryRights]::ReadPermissions
+        $keyOwner = $rootKey.OpenSubKey($SubKeyPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, $rights)
+        
         if ($keyOwner) {
+            if (-not $Script:SDDL_Backups.ContainsKey($SubKeyPath)) {
+                # CORRECCIÓN BUG 1: Solo solicitamos Access y Owner (Evitamos la SACL)
+                $sections = [System.Security.AccessControl.AccessControlSections]::Access -bor [System.Security.AccessControl.AccessControlSections]::Owner
+                $originalAcl = $keyOwner.GetAccessControl($sections)
+                $Script:SDDL_Backups[$SubKeyPath] = $originalAcl.GetSecurityDescriptorSddlForm($sections)
+            }
+
             $acl = $keyOwner.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner)
             $acl.SetOwner($sidAdmin)
             $keyOwner.SetAccessControl($acl)
-            $keyOwner.Close()
         }
-    } catch { }
+    } catch { 
+        Write-Log -LogLevel WARN -Message "Unlock-Single-Key: Fallo al tomar posesión de $SubKeyPath - $($_.Exception.Message)"
+    } finally {
+        if ($null -ne $keyOwner) { $keyOwner.Dispose() }
+    }
 
     # --- PASO 2: ASIGNAR CONTROL TOTAL ---
-    # Lo hacemos en un paso separado para que el sistema reconozca al nuevo dueño
     try {
         $keyPerms = $rootKey.OpenSubKey($SubKeyPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]::ChangePermissions)
         if ($keyPerms) {
@@ -6658,12 +4481,14 @@ function Unlock-Single-Key {
             $rule = New-Object System.Security.AccessControl.RegistryAccessRule($sidAdmin, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
             $acl.SetAccessRule($rule)
             $keyPerms.SetAccessControl($acl)
-            $keyPerms.Close()
             $success = $true
         }
-    } catch { }
+    } catch { 
+    } finally {
+        if ($null -ne $keyPerms) { $keyPerms.Dispose() }
+    }
     
-    # --- PASO 3: FALLBACK REGINI (En caso de desastre extremo) ---
+    # --- PASO 3: FALLBACK REGINI ---
     if (-not $success) {
         try {
             $kernelPath = "\Registry\Machine\$SubKeyPath"
@@ -6672,12 +4497,109 @@ function Unlock-Single-Key {
             Set-Content -Path $tempFile -Value $reginiContent -Encoding Ascii
             $p = Start-Process regini.exe -ArgumentList "`"$tempFile`"" -PassThru -WindowStyle Hidden -Wait
             Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-            
-            if ($p.ExitCode -eq 0) {
-                 Write-Log -LogLevel WARN -Message "REGINI forzado en: $SubKeyPath"
-            }
         } catch {}
     }
+}
+
+function Restore-KeyOwner {
+    param([string]$KeyPath)
+    
+    Enable-Privileges 
+    $cleanPath = $KeyPath -replace "^Registry::", ""
+    $subPath = $cleanPath -replace "^(HKEY_LOCAL_MACHINE|HKLM|HKLM:|HKEY_LOCAL_MACHINE:)[:\\]+", ""
+    $hive = [Microsoft.Win32.Registry]::LocalMachine
+    $keyObj = $null
+
+    # =========================================================
+    # RESTAURACIÓN QUIRÚRGICA VÍA SDDL (Prioridad Absoluta)
+    # =========================================================
+    if ($Script:SDDL_Backups.ContainsKey($subPath)) {
+        try {
+            $originalSddl = $Script:SDDL_Backups[$subPath]
+            $rights = [System.Security.AccessControl.RegistryRights]::ChangePermissions -bor [System.Security.AccessControl.RegistryRights]::TakeOwnership
+            $keyObj = $hive.OpenSubKey($subPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, $rights)
+            
+            if ($keyObj) {
+                $aclRestored = New-Object System.Security.AccessControl.RegistrySecurity
+                $aclRestored.SetSecurityDescriptorSddlForm($originalSddl)
+                $keyObj.SetAccessControl($aclRestored)
+                
+                Write-Log -LogLevel INFO -Message "Restauracion SDDL Limpia: $subPath"
+                $Script:SDDL_Backups.Remove($subPath)
+                return
+            }
+        } catch {
+            Write-Log -LogLevel WARN -Message "Fallo restauracion SDDL en $subPath. Aplicando Fallback clasico."
+        } finally {
+            if ($null -ne $keyObj) { $keyObj.Dispose(); $keyObj = $null }
+        }
+    }
+
+    # =========================================================
+    # RESTAURACIÓN CLÁSICA / FALLBACK (Sin tocar herencia)
+    # =========================================================
+    $sidAdmin   = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
+    $sidTrusted = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464")
+    
+    $isUserHive = $subPath -match "OfflineUser"
+    $targetOwner = if ($isUserHive) { $sidAdmin } else { $sidTrusted }
+
+    try {
+        # Paso 1: Retirar TODAS las reglas de Administradores sin modificar la herencia
+        $keyObj = $hive.OpenSubKey($subPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]::ChangePermissions)
+        if ($keyObj) {
+            $acl = $keyObj.GetAccessControl()
+            
+            # CORRECCIÓN BUG 2: Purgamos todas las reglas del SID en lugar de buscar coincidencias exactas
+            $acl.PurgeAccessRules($sidAdmin) 
+            
+            $keyObj.SetAccessControl($acl)
+            $keyObj.Dispose(); $keyObj = $null
+        }
+
+        # Paso 2: Devolver el propietario a TrustedInstaller (Si es de sistema)
+        if (-not $isUserHive) {
+            $keyObj = $hive.OpenSubKey($subPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, [System.Security.AccessControl.RegistryRights]::TakeOwnership)
+            if ($keyObj) {
+                $acl = $keyObj.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner)
+                $acl.SetOwner($targetOwner)
+                $keyObj.SetAccessControl($acl)
+            }
+        }
+    } catch {
+        Write-Log -LogLevel ERROR -Message "Fallo en Restore-KeyOwner ($subPath): $($_.Exception.Message)"
+    } finally {
+        if ($null -ne $keyObj) { $keyObj.Dispose() }
+    }
+}
+
+function Get-OfflineControlSet { 
+    if ($null -ne $Script:CachedControlSet) {
+        return $Script:CachedControlSet
+    }
+
+    # CRÍTICO: Validar que el hive esté montado antes de asumir nada
+    if (-not (Test-Path "HKLM:\OfflineSystem")) {
+        Write-Log -LogLevel WARN -Message "Get-OfflineControlSet: OfflineSystem no esta montado. Imposible determinar ControlSet."
+        return $null
+    }
+
+    $SystemHivePath = "HKLM:\OfflineSystem"
+    $currentSet = 1
+    
+    if (Test-Path "$SystemHivePath\Select") {
+        try {
+            $props = Get-ItemProperty -Path "$SystemHivePath\Select" -ErrorAction SilentlyContinue
+            if ($props -and $props.Current) {
+                $currentSet = $props.Current
+            }
+        } catch {
+            Write-Log -LogLevel WARN -Message "No se pudo leer HKLM:\OfflineSystem\Select. Usando Default (001)."
+        }
+    }
+    
+    $Script:CachedControlSet = "ControlSet{0:d3}" -f $currentSet
+    return $Script:CachedControlSet
 }
 
 function Show-RegPreview-GUI {
@@ -6817,7 +4739,8 @@ function Show-RegPreview-GUI {
                     if ($currentSubKeyObj) {
                         $raw = $currentSubKeyObj.GetValue($valName, $null)
                         if ($null -ne $raw) {
-                            $currVal = if ($raw -eq "") { "(Vacio)" } else { $raw.ToString() }
+                            # Extraemos el valor original tal cual esta
+                            $currVal = $raw.ToString()
                         }
                     }
 
@@ -6843,7 +4766,8 @@ function Show-RegPreview-GUI {
                     if ($currentSubKeyObj) {
                         $raw = $currentSubKeyObj.GetValue("", $null) # "" accede al Default
                         if ($null -ne $raw) {
-                            $currVal = if ($raw -eq "") { "(Vacio)" } else { $raw.ToString() }
+                            # Extraemos el valor original tal cual esta
+                            $currVal = $raw.ToString()
                         }
                     }
 
@@ -6870,25 +4794,6 @@ function Show-RegPreview-GUI {
     })
 
     return ($pForm.ShowDialog() -eq 'OK')
-}
-
-function Get-OfflineControlSet { 
-    $SystemHivePath = "HKLM\OfflineSystem"
-    $currentSet = 1 # Fallback seguro (ControlSet001)
-    
-    if (Test-Path "$SystemHivePath\Select") {
-        try {
-            $props = Get-ItemProperty -Path "$SystemHivePath\Select" -ErrorAction SilentlyContinue
-            if ($props -and $props.Current) {
-                $currentSet = $props.Current
-            }
-        } catch {
-            Write-Log -LogLevel WARN -Message "No se pudo determinar el ControlSet activo. Usando Default (001)."
-        }
-    }
-    
-    # Retorna formato string (ej. "ControlSet001")
-    return "ControlSet{0:d3}" -f $currentSet
 }
 
 #  Modulo GUI: Gestor de Cola de Registro y Perfiles (.REG)
@@ -7223,7 +5128,7 @@ function Show-RegQueue-GUI {
             [System.IO.File]::WriteAllText($tempReg, $combinedContent.ToString(), [System.Text.Encoding]::Unicode)
 
             # Usamos el motor nativo de Windows (mas tolerante a la fusion de archivos)
-            $process = Start-Process regedit.exe -ArgumentList "/s `"$tempReg`"" -Wait -PassThru -WindowStyle Hidden
+            $process = Start-Process reg.exe -ArgumentList "import `"$tempReg`"" -Wait -PassThru -WindowStyle Hidden
             $importExitCode = $process.ExitCode
             
             Write-Log -LogLevel INFO -Message "RegBatch: regedit.exe finalizo con codigo de salida: $importExitCode"
@@ -7661,7 +5566,13 @@ function Show-Tweaks-Offline-GUI {
                             }
                             
                             $safeVal = $valToSet
-                            if ($null -eq $safeVal) { $safeVal = "" }
+                            if ([string]::IsNullOrWhiteSpace($safeVal)) {
+                                if ($type -eq [Microsoft.Win32.RegistryValueKind]::DWord -or $type -eq [Microsoft.Win32.RegistryValueKind]::QWord) {
+                                    $safeVal = 0  # Fallback seguro para numéricos
+                                } else {
+                                    $safeVal = "" # Fallback seguro para cadenas
+                                }
+                            }
 
                             # --- CONVERSION ESTRICTA DE TIPOS (Bypass de Overflow en PowerShell) ---
                             try {
@@ -7756,1287 +5667,28 @@ function Show-Tweaks-Offline-GUI {
     })
     
     $form.ShowDialog() | Out-Null
+
+    # 1. Destrucción explícita de objetos GDI y controles pesados
+    if ($null -ne $globalListViews) {
+        foreach ($lv in $globalListViews) {
+            # Si el ListView tiene un ImageList asociado, destrúyelo primero
+            if ($null -ne $lv.SmallImageList) { 
+                $lv.SmallImageList.Dispose() 
+            }
+            # Destruir el control
+            $lv.Dispose()
+        }
+        $globalListViews.Clear()
+        $globalListViews = $null
+    }
+
+    # 2. Destrucción del formulario padre
     $form.Dispose()
-    $globalListViews.Clear()
-    $globalListViews = $null
-    [GC]::Collect()
-}
 
-# =================================================================
-#  Modulo GUI de Despliegue (WIM -> VHD/VHDX Bootable)
-# =================================================================
-# --- HELPER PRIVADO: Obtener letra de unidad libre (Z -> A) ---
-function Get-UnusedDriveLetter {
-    # Obtenemos las letras usadas actualmente
-    $used = Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Name
-    # Alfabeto invertido (preferimos usar Z, Y, X para montajes temporales)
-    $alphabet = [char[]](90..65) 
-    
-    foreach ($letter in $alphabet) {
-        if ($used -notcontains $letter) {
-            return $letter
-        }
-    }
-    throw "No hay letras de unidad disponibles para montar las particiones temporales."
-}
-
-function Show-Deploy-To-VHD-GUI {
-    # 1. Verificacion de Requisitos
-    if (-not (Get-Command "New-VHD" -ErrorAction SilentlyContinue)) {
-        [System.Windows.Forms.MessageBox]::Show("Este modulo requiere Hyper-V o PowerShell Storage module.", "Error", 'OK', 'Error')
-        return
-    }
-
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Despliegue WIM a VHDX"
-    $form.Size = New-Object System.Drawing.Size(720, 600)
-    $form.StartPosition = "CenterScreen"
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $form.ForeColor = [System.Drawing.Color]::White
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
-
-    # --- UI SECTIONS ---
-    $grpSource = New-Object System.Windows.Forms.GroupBox
-    $grpSource.Text = " 1. Imagen de Origen "
-    $grpSource.Location = New-Object System.Drawing.Point(20, 15)
-	$grpSource.Size = New-Object System.Drawing.Size(660, 120)
-	$grpSource.ForeColor = [System.Drawing.Color]::Cyan
-    $form.Controls.Add($grpSource)
-
-    $txtWim = New-Object System.Windows.Forms.TextBox
-    $txtWim.Location = "20, 25"
-	$txtWim.Size = "540, 23"
-	$txtWim.ReadOnly = $true
-	$txtWim.BackColor = [System.Drawing.Color]::FromArgb(50,50,50)
-	$txtWim.ForeColor = [System.Drawing.Color]::White
-    $grpSource.Controls.Add($txtWim)
-
-    $btnBrowseWim = New-Object System.Windows.Forms.Button
-    $btnBrowseWim.Text = "..."
-	$btnBrowseWim.Location = "570, 24"
-	$btnBrowseWim.Size = "70, 25"
-	$btnBrowseWim.BackColor = [System.Drawing.Color]::Silver
-	$btnBrowseWim.FlatStyle = "Flat"
-    $grpSource.Controls.Add($btnBrowseWim)
-
-    $lblIdx = New-Object System.Windows.Forms.Label
-    $lblIdx.Text = "Indice:"
-	$lblIdx.Location = "20, 60"
-	$lblIdx.AutoSize = $true
-	$lblIdx.ForeColor = [System.Drawing.Color]::Silver
-    $grpSource.Controls.Add($lblIdx)
-
-    $cmbIndex = New-Object System.Windows.Forms.ComboBox
-    $cmbIndex.Location = "20, 80"
-	$cmbIndex.Size = "620, 25"
-	$cmbIndex.DropDownStyle = "DropDownList"
-	$cmbIndex.BackColor = [System.Drawing.Color]::FromArgb(50,50,50)
-	$cmbIndex.ForeColor = [System.Drawing.Color]::White
-    $grpSource.Controls.Add($cmbIndex)
-
-    $grpDest = New-Object System.Windows.Forms.GroupBox
-    $grpDest.Text = " 2. Configuracion de Disco y Particiones "
-    $grpDest.Location = New-Object System.Drawing.Point(20, 150)
-	$grpDest.Size = New-Object System.Drawing.Size(660, 220)
-	$grpDest.ForeColor = [System.Drawing.Color]::Orange
-    $form.Controls.Add($grpDest)
-
-    $lblVhdPath = New-Object System.Windows.Forms.Label
-    $lblVhdPath.Text = "Ruta VHDX:"
-	$lblVhdPath.Location = "20, 25"
-	$lblVhdPath.AutoSize = $true
-	$lblVhdPath.ForeColor = [System.Drawing.Color]::Silver
-    $grpDest.Controls.Add($lblVhdPath)
-
-    $txtVhd = New-Object System.Windows.Forms.TextBox
-    $txtVhd.Location = "20, 45"
-	$txtVhd.Size = "540, 23"
-	$txtVhd.ReadOnly = $true
-	$txtVhd.BackColor = [System.Drawing.Color]::FromArgb(50,50,50)
-	$txtVhd.ForeColor = [System.Drawing.Color]::White
-    $grpDest.Controls.Add($txtVhd)
-
-    $btnBrowseVhd = New-Object System.Windows.Forms.Button
-    $btnBrowseVhd.Text = "Guardar"
-	$btnBrowseVhd.Location = "570, 44"
-	$btnBrowseVhd.Size = "70, 25"
-	$btnBrowseVhd.BackColor = [System.Drawing.Color]::Silver
-	$btnBrowseVhd.FlatStyle = "Flat"
-    $grpDest.Controls.Add($btnBrowseVhd)
-
-    $lblSize = New-Object System.Windows.Forms.Label
-    $lblSize.Text = "Size Total (GB):"
-	$lblSize.Location = "20, 85"
-	$lblSize.AutoSize = $true
-    $grpDest.Controls.Add($lblSize)
-
-    $numSize = New-Object System.Windows.Forms.NumericUpDown
-    $numSize.Location = "140, 83"
-	$numSize.Size = "80, 25"
-	$numSize.Minimum = 10
-	$numSize.Maximum = 10000
-	$numSize.Value = 60
-    $grpDest.Controls.Add($numSize)
-
-    $chkDynamic = New-Object System.Windows.Forms.CheckBox
-    $chkDynamic.Text = "Expansion Dinamica"
-	$chkDynamic.Location = "250, 85"
-	$chkDynamic.AutoSize = $true
-	$chkDynamic.Checked = $true
-    $grpDest.Controls.Add($chkDynamic)
-
-    $chkUEFI = New-Object System.Windows.Forms.CheckBox
-    $chkUEFI.Text = "Esquema GPT (UEFI)"
-	$chkUEFI.Location = "420, 85"
-	$chkUEFI.AutoSize = $true
-	$chkUEFI.Checked = $true
-	$chkUEFI.ForeColor = [System.Drawing.Color]::LightGreen
-    $grpDest.Controls.Add($chkUEFI)
-
-    $lblPartInfo = New-Object System.Windows.Forms.Label
-    $lblPartInfo.Text = "--- Size de Particiones de Sistema ---"
-    $lblPartInfo.Location = "20, 125"
-	$lblPartInfo.AutoSize = $true
-	$lblPartInfo.ForeColor = [System.Drawing.Color]::Silver
-    $grpDest.Controls.Add($lblPartInfo)
-
-    $lblEfiSize = New-Object System.Windows.Forms.Label
-    $lblEfiSize.Text = "EFI (MB):"
-	$lblEfiSize.Location = "20, 155"
-	$lblEfiSize.AutoSize = $true
-    $grpDest.Controls.Add($lblEfiSize)
-
-    $numEfiSize = New-Object System.Windows.Forms.NumericUpDown
-    $numEfiSize.Location = "140, 153"
-	$numEfiSize.Size = "80, 25"
-	$numEfiSize.Minimum = 50
-	$numEfiSize.Maximum = 2000
-	$numEfiSize.Value = 100
-    $grpDest.Controls.Add($numEfiSize)
-
-    $lblMsrSize = New-Object System.Windows.Forms.Label
-    $lblMsrSize.Text = "MSR (MB):"
-	$lblMsrSize.Location = "250, 155"
-	$lblMsrSize.AutoSize = $true
-    $grpDest.Controls.Add($lblMsrSize)
-
-    $numMsrSize = New-Object System.Windows.Forms.NumericUpDown
-    $numMsrSize.Location = "330, 153"
-	$numMsrSize.Size = "80, 25"
-	$numMsrSize.Minimum = 0
-	$numMsrSize.Maximum = 500
-	$numMsrSize.Value = 16
-    $grpDest.Controls.Add($numMsrSize)
-
-    $chkUEFI.Add_CheckedChanged({
-        if ($chkUEFI.Checked) {
-            $numEfiSize.Value = 100
-            $lblMsrSize.Visible = $true; $numMsrSize.Visible = $true
-            $lblEfiSize.Text = "EFI (MB):"
-        } else {
-            $numEfiSize.Value = 500
-            $lblMsrSize.Visible = $false; $numMsrSize.Visible = $false
-            $lblEfiSize.Text = "Sys. Rsvd (MB):"
-        }
-    })
-
-    $lblStatus = New-Object System.Windows.Forms.Label
-    $lblStatus.Text = "Esperando configuracion..."
-	$lblStatus.Location = "20, 520"
-	$lblStatus.AutoSize = $true
-	$lblStatus.ForeColor = [System.Drawing.Color]::Yellow
-    $form.Controls.Add($lblStatus)
-
-    $btnDeploy = New-Object System.Windows.Forms.Button
-    $btnDeploy.Text = "CREAR VHDX Y DESPLEGAR"
-    $btnDeploy.Location = New-Object System.Drawing.Point(380, 440)
-	$btnDeploy.Size = New-Object System.Drawing.Size(300, 50)
-	$btnDeploy.BackColor = [System.Drawing.Color]::SeaGreen
-	$btnDeploy.ForeColor = [System.Drawing.Color]::White
-	$btnDeploy.FlatStyle = "Flat"
-	$btnDeploy.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $form.Controls.Add($btnDeploy)
-
-    $btnBrowseWim.Add_Click({
-        $ofd = New-Object System.Windows.Forms.OpenFileDialog; $ofd.Filter = "Imagenes (*.wim, *.esd)|*.wim;*.esd"
-        if ($ofd.ShowDialog() -eq 'OK') {
-            $txtWim.Text = $ofd.FileName
-            $cmbIndex.Items.Clear()
-            $lblStatus.Text = "Leyendo..."; $form.Refresh()
-            try {
-                $info = Get-WindowsImage -ImagePath $ofd.FileName
-                foreach ($img in $info) { $cmbIndex.Items.Add("[$($img.ImageIndex)] $($img.ImageName)") }
-                if ($cmbIndex.Items.Count -gt 0) { $cmbIndex.SelectedIndex = 0 }
-                $lblStatus.Text = "WIM Cargado."
-            } catch { $lblStatus.Text = "Error leyendo WIM." }
-        }
-    })
-
-    $btnBrowseVhd.Add_Click({
-        $sfd = New-Object System.Windows.Forms.SaveFileDialog; $sfd.Filter = "VHDX (*.vhdx)|*.vhdx|VHD (*.vhd)|*.vhd"
-        if ($sfd.ShowDialog() -eq 'OK') { $txtVhd.Text = $sfd.FileName }
-    })
-
-    # --- LOGICA CORE DE DESPLIEGUE ---
-    $btnDeploy.Add_Click({
-        if (-not $txtWim.Text -or -not $txtVhd.Text) { [System.Windows.Forms.MessageBox]::Show("Rutas vacias.", "Error", 'OK', 'Error'); return }
-        
-        $vhdPath = $txtVhd.Text
-        $wimPath = $txtWim.Text
-        $idx = $cmbIndex.SelectedIndex + 1
-        $totalSize = [long]$numSize.Value * 1GB
-        $isDynamic = $chkDynamic.Checked
-        $isGPT = $chkUEFI.Checked
-        $sizeBootMB = [int]$numEfiSize.Value
-        $sizeMsrMB  = [int]$numMsrSize.Value
-
-        if (Test-Path $vhdPath) {
-            if ([System.Windows.Forms.MessageBox]::Show("El VHD existe. Se borrara todo su contenido.`nContinuar?", "Confirmar", 'YesNo', 'Warning') -eq 'No') { return }
-            try { 
-                Remove-Item $vhdPath -Force -ErrorAction Stop 
-                Write-Log -LogLevel ACTION -Message "DEPLOY_VHD: VHD existente eliminado ($vhdPath)."
-            } catch { 
-                [System.Windows.Forms.MessageBox]::Show("No se pudo borrar el archivo. Esta en uso?", "Error", 'OK', 'Error')
-                return 
-            }
-        }
-
-        $btnDeploy.Enabled = $false
-        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-
-        try {
-            $lblStatus.Text = "Creando VHD..."
-            $form.Refresh()
-            
-            Write-Log -LogLevel ACTION -Message "DEPLOY_VHD: Iniciando creacion. Origen: WIM Idx $idx | Destino: $vhdPath"
-            Write-Log -LogLevel INFO -Message "DEPLOY_VHD: Specs -> Tamaño: $([math]::Round($totalSize/1GB, 2))GB | Dinamico: $isDynamic | Estilo: $(if($isGPT){'GPT'}else{'MBR'})"
-
-            if ($isDynamic) { New-VHD -Path $vhdPath -SizeBytes $totalSize -Dynamic -ErrorAction Stop | Out-Null }
-            else { New-VHD -Path $vhdPath -SizeBytes $totalSize -Fixed -ErrorAction Stop | Out-Null }
-
-            $disk = Mount-VHD -Path $vhdPath -Passthru -ErrorAction Stop
-            $diskNum = $disk.Number
-            Write-Log -LogLevel INFO -Message "DEPLOY_VHD: Disco virtual creado y montado como Disco $diskNum."
-
-            $partStyle = if ($isGPT) { "GPT" } else { "MBR" }
-            Initialize-Disk -Number $diskNum -PartitionStyle $partStyle -ErrorAction Stop
-
-            $driveLetterSystem = $null
-            $driveLetterBoot = $null
-
-            # --- PARTICIONADO ROBUSTO ---
-            Write-Log -LogLevel INFO -Message "DEPLOY_VHD: Formateando y asignando particiones..."
-            if ($isGPT) {
-                # GPT: EFI + MSR + WINDOWS
-                $lblStatus.Text = "Particionando GPT..."
-                
-                # 1. EFI
-                $pEFI = New-Partition -DiskNumber $diskNum -Size ($sizeBootMB * 1MB) -GptType "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}" -ErrorAction Stop
-                Format-Volume -Partition $pEFI -FileSystem FAT32 -NewFileSystemLabel "System" -Confirm:$false | Out-Null
-                if (-not $pEFI.DriveLetter) {
-                    $freeLet = Get-UnusedDriveLetter
-                    Set-Partition -InputObject $pEFI -NewDriveLetter $freeLet -ErrorAction Stop
-                    $driveLetterBoot = "$($freeLet):"
-                } else { $driveLetterBoot = "$($pEFI.DriveLetter):" }
-
-                # 2. MSR
-                if ($sizeMsrMB -gt 0) {
-                    New-Partition -DiskNumber $diskNum -Size ($sizeMsrMB * 1MB) -GptType "{e3c9e316-0b5c-4db8-817d-f92df00215ae}" -ErrorAction Stop | Out-Null
-                }
-
-                # 3. Windows
-                $pWin = New-Partition -DiskNumber $diskNum -UseMaximumSize -ErrorAction Stop
-                Format-Volume -Partition $pWin -FileSystem NTFS -NewFileSystemLabel "Windows" -Confirm:$false | Out-Null
-                if (-not $pWin.DriveLetter) {
-                    $freeLet = Get-UnusedDriveLetter
-                    Set-Partition -InputObject $pWin -NewDriveLetter $freeLet -ErrorAction Stop
-                    $driveLetterSystem = "$($freeLet):"
-                } else { $driveLetterSystem = "$($pWin.DriveLetter):" }
-
-            } else {
-                # MBR: SYSTEM RESERVED + WINDOWS
-                $lblStatus.Text = "Particionando MBR..."
-                
-                # 1. System Reserved
-                $pBoot = New-Partition -DiskNumber $diskNum -Size ($sizeBootMB * 1MB) -IsActive -ErrorAction Stop
-                Format-Volume -Partition $pBoot -FileSystem NTFS -NewFileSystemLabel "System Reserved" -Confirm:$false | Out-Null
-                if (-not $pBoot.DriveLetter) {
-                    $freeLet = Get-UnusedDriveLetter
-                    Set-Partition -InputObject $pBoot -NewDriveLetter $freeLet -ErrorAction Stop
-                    $driveLetterBoot = "$($freeLet):"
-                } else { $driveLetterBoot = "$($pBoot.DriveLetter):" }
-
-                # 2. Windows
-                $pWin = New-Partition -DiskNumber $diskNum -UseMaximumSize -ErrorAction Stop
-                Format-Volume -Partition $pWin -FileSystem NTFS -NewFileSystemLabel "Windows" -Confirm:$false | Out-Null
-                if (-not $pWin.DriveLetter) {
-                    $freeLet = Get-UnusedDriveLetter
-                    Set-Partition -InputObject $pWin -NewDriveLetter $freeLet -ErrorAction Stop
-                    $driveLetterSystem = "$($freeLet):"
-                } else { $driveLetterSystem = "$($pWin.DriveLetter):" }
-            }
-
-            Write-Log -LogLevel INFO -Message "DEPLOY_VHD: Particiones listas. Boot ($driveLetterBoot), Sistema ($driveLetterSystem)."
-
-            # 4. APLICACION IMAGEN
-            $lblStatus.Text = "Desplegando imagen a $driveLetterSystem..."
-            $form.Refresh()
-            
-            Write-Log -LogLevel ACTION -Message "DEPLOY_VHD: Aplicando imagen (Expand-WindowsImage) hacia $driveLetterSystem..."
-            Expand-WindowsImage -ImagePath $wimPath -Index $idx -ApplyPath $driveLetterSystem -ErrorAction Stop
-
-            # 5. BOOT
-            $lblStatus.Text = "Configurando arranque..."
-            $fw = if ($isGPT) { "UEFI" } else { "BIOS" }
-            Write-Log -LogLevel ACTION -Message "DEPLOY_VHD: Configurando gestor de arranque nativo ($fw) con BCDBoot..."
-            
-            $proc = Start-Process "bcdboot.exe" -ArgumentList "$driveLetterSystem\Windows /s $driveLetterBoot /f $fw" -Wait -NoNewWindow -PassThru
-            if ($proc.ExitCode -ne 0) { throw "BCDBOOT fallo (Codigo de salida: $($proc.ExitCode))" }
-
-            # 6. FIN
-            $lblStatus.Text = "Desmontando..."
-            $form.Refresh()
-            Write-Log -LogLevel INFO -Message "DEPLOY_VHD: Desmontando VHD del sistema."
-            Dismount-VHD -Path $vhdPath -ErrorAction Stop
-            
-            $lblStatus.Text = "Listo."
-            Write-Log -LogLevel INFO -Message "DEPLOY_VHD: *** DESPLIEGUE FINALIZADO CON EXITO ***"
-            [System.Windows.Forms.MessageBox]::Show("Despliegue completado con exito.", "Exito", 'OK', 'Information')
-
-        } catch {
-            $lblStatus.Text = "Error Critico."
-            Write-Log -LogLevel ERROR -Message "DEPLOY_VHD: FALLO CRITICO - $($_.Exception.Message)"
-            Write-Warning "Fallo despliegue: $_"
-            [System.Windows.Forms.MessageBox]::Show("Error Critico:`n$_", "Error", 'OK', 'Error')
-            try { 
-                Dismount-VHD -Path $vhdPath -ErrorAction SilentlyContinue 
-                Write-Log -LogLevel INFO -Message "DEPLOY_VHD: Limpieza de emergencia (Desmontaje) ejecutada."
-            } catch {}
-        } finally {
-            $btnDeploy.Enabled = $true; $form.Cursor = [System.Windows.Forms.Cursors]::Default
-        }
-    })
-
-    # 1. Configuracion del motor de ToolTips
-    $toolTip = New-Object System.Windows.Forms.ToolTip
-    $toolTip.AutoPopDelay = 8000   # Mantiene el mensaje visible 8 segundos
-    $toolTip.InitialDelay = 500    # Tarda 0.5s en aparecer (evita parpadeos al mover rapido)
-    $toolTip.ReshowDelay = 500     # Tiempo para reaparecer en otro control
-    $toolTip.ShowAlways = $true    # Mostrar incluso si la ventana no tiene el foco
-    $toolTip.IsBalloon = $false    # $true para estilo "globo", $false para rectangulo clasico
-
-    # 2. Asignacion de descripciones a los controles existentes
-
-    # --- Grupo Origen ---
-    $toolTip.SetToolTip($btnBrowseWim, "Haz clic para seleccionar el archivo de imagen (.wim o .esd) que contiene el instalador de Windows.")
-    $toolTip.SetToolTip($cmbIndex, "Selecciona la edicion de Windows a instalar (ej. Home, Pro, Enterprise).`nCada indice es una version diferente dentro del mismo archivo.")
-
-    # --- Grupo Destino ---
-    $toolTip.SetToolTip($btnBrowseVhd, "Define donde se guardara el nuevo archivo de disco virtual (.vhdx o .vhd).")
-    $toolTip.SetToolTip($txtVhd, "Ruta completa del archivo de disco virtual de destino.")
-    
-    # --- Configuracion de Disco ---
-    $toolTip.SetToolTip($numSize, "Size maximo que podra tener el disco virtual (en Gigabytes).")
-    
-    $toolTip.SetToolTip($chkDynamic, "Marcado (Recomendado): El archivo empieza pequeño y crece segun guardes datos.`nDesmarcado (Fixed): El archivo ocupa todo el Size (GB) inmediatamente (Mejor rendimiento, ocupa mas espacio).")
-    
-    $toolTip.SetToolTip($chkUEFI, "Marcado (GPT): Para PCs modernos con UEFI. Crea particiones EFI y MSR.`nDesmarcado (MBR): Para PCs antiguos con BIOS Legacy. Crea particion 'System Reserved'.")
-
-    # --- Configuracion de Particiones (Avanzado) ---
-    $toolTip.SetToolTip($numEfiSize, "Size de la particion de arranque (EFI o System Reserved).`n100MB es el estandar recomendado.")
-    $toolTip.SetToolTip($numMsrSize, "Size de la particion MSR (Microsoft Reserved).`nSolo aplica en discos GPT/UEFI.")
-
-    # --- Boton de Accion ---
-    $toolTip.SetToolTip($btnDeploy, "ADVERTENCIA: Iniciara el proceso de creacion, formateo y aplicacion de imagen.`nSi el archivo VHD existe, sera sobrescrito.")
-
-    $form.ShowDialog() | Out-Null
-    $form.Dispose()
-}
-
-# =================================================================
-#  Modulo GUI de Generador de ISO
-# =================================================================
-function Show-IsoMaker-GUI {
-    # 1. Busqueda de Dependencia (Rutas del ADK oficial y herramientas locales)
-    $scriptPath = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
-    
-    $adkPaths = @(
-        "$scriptPath\Tools\oscdimg.exe",
-        "$scriptPath\..\Tools\oscdimg.exe",
-        "${env:ProgramFiles(x86)}\Windows Kits\11\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe",
-        "${env:ProgramFiles(x86)}\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe"
-    )
-
-    $oscdimgExe = $null
-    foreach ($path in $adkPaths) {
-        if (Test-Path $path) { 
-            $oscdimgExe = $path 
-            break 
-        }
-    }
-
-    # Fallback 1: Comprobar si el usuario lo añadio al PATH del sistema
-    if (-not $oscdimgExe) {
-        $cmd = Get-Command "oscdimg.exe" -ErrorAction SilentlyContinue
-        if ($cmd) { $oscdimgExe = $cmd.Source }
-    }
-
-    # Fallback 2: Seleccion manual del usuario (Tu bloque de codigo)
-    if (-not $oscdimgExe) {
-        Add-Type -AssemblyName System.Windows.Forms
-        $res = [System.Windows.Forms.MessageBox]::Show(
-            "No se encontro 'oscdimg.exe' en las rutas estandar del ADK.`n`nDeseas buscar el ejecutable manualmente?", 
-            "Falta Dependencia", 
-            'YesNo', 
-            'Warning'
-        )
-        
-        if ($res -eq 'Yes') {
-            $ofd = New-Object System.Windows.Forms.OpenFileDialog
-            $ofd.Filter = "Oscdimg (oscdimg.exe)|oscdimg.exe"
-            if ($ofd.ShowDialog() -eq 'OK') { 
-                $oscdimgExe = $ofd.FileName 
-            } else { 
-                return # El usuario abrio el dialogo pero le dio a Cancelar. Abortamos silenciosamente.
-            }
-        } else { 
-            # Fallback 3: El usuario dijo "No". Disparamos el fallo elegante exigiendo el ADK.
-            $msg = "Para utilizar el Generador de ISO, es un requisito estricto contar con 'oscdimg.exe'.`n`n" +
-                   "Por favor, descarga e instala el Windows Assessment and Deployment Kit (ADK) " +
-                   "(especificamente las 'Deployment Tools') desde la pagina oficial de Microsoft y vuelve a intentarlo."
-                   
-            [System.Windows.Forms.MessageBox]::Show($msg, "Requisito Faltante: Windows ADK", 'OK', 'Error')
-            return # Abortamos la creacion de la GUI
-        }
-    }
-
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-
-    # --- GUI SETUP ---
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Generador de ISO (BIOS/UEFI)"
-    $form.Size = New-Object System.Drawing.Size(700, 720)
-    $form.StartPosition = "CenterScreen"
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $form.ForeColor = [System.Drawing.Color]::White
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
-
-    # --- GRUPO 1: CONFIGURACION ---
-    $grpCfg = New-Object System.Windows.Forms.GroupBox
-    $grpCfg.Text = " 1. Configuracion de la Imagen "
-    $grpCfg.Location = "15, 10"
-    $grpCfg.Size = "650, 160"
-    $grpCfg.ForeColor = [System.Drawing.Color]::Cyan
-    $form.Controls.Add($grpCfg)
-
-    $lblSrc = New-Object System.Windows.Forms.Label
-    $lblSrc.Text = "Carpeta Origen (Debe contener boot, efi, sources...):"
-    $lblSrc.Location = "15, 25"
-	$lblSrc.AutoSize=$true
-	$lblSrc.ForeColor=[System.Drawing.Color]::Silver
-    $grpCfg.Controls.Add($lblSrc)
-
-    $txtSrc = New-Object System.Windows.Forms.TextBox
-    $txtSrc.Location = "15, 45"
-	$txtSrc.Size = "530, 23"
-    $grpCfg.Controls.Add($txtSrc)
-
-    $btnSrc = New-Object System.Windows.Forms.Button
-    $btnSrc.Text = "..."
-	$btnSrc.Location = "555, 43"
-	$btnSrc.Size = "80, 25"
-    $btnSrc.BackColor=[System.Drawing.Color]::Silver
-	$btnSrc.FlatStyle="Flat"
-    $grpCfg.Controls.Add($btnSrc)
-
-    $lblDst = New-Object System.Windows.Forms.Label
-    $lblDst.Text = "Archivo ISO Destino:"
-    $lblDst.Location = "15, 75"
-	$lblDst.AutoSize=$true
-	$lblDst.ForeColor=[System.Drawing.Color]::Silver
-    $grpCfg.Controls.Add($lblDst)
-
-    $txtDst = New-Object System.Windows.Forms.TextBox
-    $txtDst.Location = "15, 95"
-	$txtDst.Size = "530, 23"
-    $grpCfg.Controls.Add($txtDst)
-    
-    $btnDst = New-Object System.Windows.Forms.Button
-    $btnDst.Text = "Guardar"
-	$btnDst.Location = "555, 93"
-	$btnDst.Size = "80, 25"
-    $btnDst.BackColor=[System.Drawing.Color]::Silver
-	$btnDst.FlatStyle="Flat"
-    $grpCfg.Controls.Add($btnDst)
-
-    $lblLabel = New-Object System.Windows.Forms.Label
-    $lblLabel.Text = "Etiqueta de Volumen (Label):"
-    $lblLabel.Location = "15, 130"
-	$lblLabel.AutoSize=$true
-	$lblLabel.ForeColor=[System.Drawing.Color]::Silver
-    $grpCfg.Controls.Add($lblLabel)
-
-    $txtLabel = New-Object System.Windows.Forms.TextBox
-    $txtLabel.Location = "180, 127"
-	$txtLabel.Size = "200, 23"
-	$txtLabel.Text = "WINDOWS_CUSTOM"
-    $grpCfg.Controls.Add($txtLabel)
-
-    # --- GRUPO 2: AUTOMATIZACION ---
-    $grpAuto = New-Object System.Windows.Forms.GroupBox
-    $grpAuto.Text = " 2. Automatizacion OOBE (Opcional) "
-    $grpAuto.Location = "15, 180"
-    $grpAuto.Size = "650, 100"
-    $grpAuto.ForeColor = [System.Drawing.Color]::Orange
-    $form.Controls.Add($grpAuto)
-
-    $lblAutoInfo = New-Object System.Windows.Forms.Label
-    $lblAutoInfo.Text = "Inyectar 'autounattend.xml' en la raiz del medio:"
-    $lblAutoInfo.Location = "15, 25"
-	$lblAutoInfo.AutoSize=$true
-	$lblAutoInfo.ForeColor=[System.Drawing.Color]::Silver
-    $grpAuto.Controls.Add($lblAutoInfo)
-
-    $txtUnattend = New-Object System.Windows.Forms.TextBox
-    $txtUnattend.Location = "15, 45"
-	$txtUnattend.Size = "430, 23"
-    $grpAuto.Controls.Add($txtUnattend)
-    
-    $btnUnattend = New-Object System.Windows.Forms.Button
-    $btnUnattend.Text = "Buscar XML"
-	$btnUnattend.Location = "455, 43"
-	$btnUnattend.Size = "80, 25"
-    $btnUnattend.BackColor=[System.Drawing.Color]::Silver
-	$btnUnattend.FlatStyle="Flat"
-	$btnUnattend.ForeColor=[System.Drawing.Color]::Black
-    $grpAuto.Controls.Add($btnUnattend)
-
-    $lnkWeb = New-Object System.Windows.Forms.LinkLabel
-    $lnkWeb.Text = "Generador Online (schneegans.de)"
-	$lnkWeb.Location = "15, 75"
-	$lnkWeb.AutoSize = $true
-	$lnkWeb.LinkColor = [System.Drawing.Color]::Yellow
-    $grpAuto.Controls.Add($lnkWeb)
-
-    # LOG
-    $txtLog = New-Object System.Windows.Forms.TextBox
-    $txtLog.Location = "15, 290"
-	$txtLog.Size = "650, 300"
-    $txtLog.Multiline = $true
-	$txtLog.ScrollBars = "Vertical"
-	$txtLog.ReadOnly = $true
-    $txtLog.BackColor = [System.Drawing.Color]::Black
-	$txtLog.ForeColor = [System.Drawing.Color]::Lime
-    $txtLog.Font = New-Object System.Drawing.Font("Consolas", 10)
-    $txtLog.Text = "Esperando configuracion...`r`nMotor: $oscdimgExe"
-    $form.Controls.Add($txtLog)
-
-    $btnMake = New-Object System.Windows.Forms.Button
-    $btnMake.Text = "CREAR ISO BOOTEABLE"
-    $btnMake.Location = "200, 615"
-	$btnMake.Size = "300, 40"
-    $btnMake.BackColor = [System.Drawing.Color]::SeaGreen
-	$btnMake.ForeColor = [System.Drawing.Color]::White
-    $btnMake.FlatStyle = "Flat"
-	$btnMake.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-    $form.Controls.Add($btnMake)
-
-    # --- EVENTOS ---
-    $btnSrc.Add_Click({
-        $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
-        $fbd.Description = "Selecciona carpeta raiz de Windows (donde estan setup.exe, boot, efi...)"
-        if ($fbd.ShowDialog() -eq 'OK') { 
-            $txtSrc.Text = $fbd.SelectedPath 
-            
-            # --- LOGICA DE AUTO-ETIQUETA (NATIVA Y BLINDADA V2) ---
-            $installWim = Join-Path $fbd.SelectedPath "sources\install.wim"
-            $installEsd = Join-Path $fbd.SelectedPath "sources\install.esd"
-            $targetImage = $null
-            
-            if (Test-Path -LiteralPath $installWim) { $targetImage = $installWim }
-            elseif (Test-Path -LiteralPath $installEsd) { $targetImage = $installEsd }
-            
-            if ($targetImage) {
-                $txtLog.AppendText("`r`n[INFO] Analizando metadatos (Motor DISM Nativo)...")
-                $form.Refresh()
-                
-                try {
-                    # 1. Determinar PREFIJO usando el cmdlet rapido
-                    $prefix = "CCCOMA"
-                    $allImages = Get-WindowsImage -ImagePath $targetImage -ErrorAction SilentlyContinue
-                    if ($allImages) {
-                        $allNames = $allImages.ImageName -join " "
-                        if ($allNames -match "Server") { $prefix = "SSS" }
-                        elseif ($allNames -match "Enterprise" -or $allNames -match "LTSC") { $prefix = "CCBOMA" }
-                    }
-
-                    # 2. Extraer Arquitectura e Idioma leyendo la consola cruda
-                    $dismInfo = dism.exe /Get-ImageInfo /ImageFile:"$targetImage" /Index:1 /English
-                    
-                    # Unimos todas las lineas en un solo gran bloque de texto
-                    $dismText = $dismInfo -join "`r`n"
-                    
-                    # Extraer Arquitectura
-                    $archStr = "X64" # Default
-                    if ($dismText -match "Architecture\s*:\s*x86") { $archStr = "X86" }
-                    elseif ($dismText -match "Architecture\s*:\s*arm64") { $archStr = "ARM64" }
-                    
-                    # Extraer Idioma (Con soporte para saltos de linea "\r?\n")
-                    $langStr = "EN-US" # Default
-                    if ($dismText -match "Languages?\s*:\s*\r?\n\s*([a-zA-Z]{2}-[a-zA-Z]{2,3})") {
-                        $langStr = $matches[1].ToUpper()
-                    }
-
-                    # 3. Ensamblar la Etiqueta Oficial
-                    $txtLabel.Text = "$($prefix)_$($archStr)FRE_$($langStr)_DV9"
-                    
-                    $txtLog.AppendText("`r`n[EXITO] Etiqueta Oficial Generada: $($txtLabel.Text)")
-                    $txtLog.AppendText("`r`n[INFO] Familia: $prefix | Arch: $archStr | Idioma: $langStr")
-                    
-                } catch {
-                    $txtLog.AppendText("`r`n[WARN] Error leyendo metadatos. Usando etiqueta estandar.")
-                    $txtLabel.Text = "CCCOMA_X64FRE_ES-ES_DV9"
-                }
-            } else {
-                $txtLog.AppendText("`r`n[WARN] No se encontro install.wim/esd. Usando etiqueta base.")
-                $txtLabel.Text = "WINDOWS_CUSTOM"
-            }
-        }
-    })
-    $btnDst.Add_Click({
-        $sfd = New-Object System.Windows.Forms.SaveFileDialog
-		$sfd.Filter = "Imagen ISO (*.iso)|*.iso"
-        if ($sfd.ShowDialog() -eq 'OK') { $txtDst.Text = $sfd.FileName }
-    })
-    $btnUnattend.Add_Click({
-        $ofd = New-Object System.Windows.Forms.OpenFileDialog
-		$ofd.Filter = "XML Files (*.xml)|*.xml"
-        if ($ofd.ShowDialog() -eq 'OK') { $txtUnattend.Text = $ofd.FileName }
-    })
-    $lnkWeb.Add_Click({ Start-Process "https://schneegans.de/windows/unattend-generator/" })
-
-    # --- LOGICA SEGURA (METODO SINCRONO) ---
-    $btnMake.Add_Click({
-        $src = $txtSrc.Text; $iso = $txtDst.Text; $label = $txtLabel.Text; $xmlPath = $txtUnattend.Text
-
-        if (-not $src -or -not $iso) { 
-            Write-Log -LogLevel WARN -Message "ISO_Maker: El usuario intento compilar sin definir rutas de origen o destino."
-            [System.Windows.Forms.MessageBox]::Show("Faltan rutas.", "Error", 'OK', 'Error')
-            return 
-        }
-        
-        $biosBoot = Join-Path $src "boot\etfsboot.com"
-        $uefiBoot = Join-Path $src "efi\microsoft\boot\efisys.bin"
-
-        if (-not (Test-Path $biosBoot)) { 
-            Write-Log -LogLevel ERROR -Message "ISO_Maker: Fallo estructural. Falta boot\etfsboot.com en la ruta de origen ($src)."
-            [System.Windows.Forms.MessageBox]::Show("No se encuentra boot\etfsboot.com.", "Error Estructural", 'OK', 'Error')
-            return 
-        }
-
-        if (-not [string]::IsNullOrWhiteSpace($xmlPath) -and (Test-Path $xmlPath)) {
-            Write-Log -LogLevel INFO -Message "ISO_Maker: Archivo Unattend.xml detectado. Inyectando en la raiz de la ISO."
-            try { Copy-Item -Path $xmlPath -Destination (Join-Path $src "autounattend.xml") -Force -ErrorAction Stop }
-            catch { 
-                Write-Log -LogLevel ERROR -Message "ISO_Maker: Fallo al copiar el archivo XML a la raiz - $($_.Exception.Message)"
-                [System.Windows.Forms.MessageBox]::Show("Error copiando XML: $_", "Error", 'OK', 'Error')
-                return 
-            }
-        }
-
-        $btnMake.Enabled = $false; $grpCfg.Enabled = $false; $grpAuto.Enabled = $false
-        $txtLog.Text = "--- INICIO DEL LOG ---`r`n"
-        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-
-        # Argumentos
-        $bootArg = "-bootdata:2#p0,e,b`"{0}`"#pEF,e,b`"{1}`"" -f $biosBoot, $uefiBoot
-        $allArgs = '-m -o -u2 -udfver102 -l"{0}" {1} "{2}" "{3}"' -f $label, $bootArg, $src, $iso
-
-        Write-Log -LogLevel ACTION -Message "ISO_Maker: Iniciando compilacion de ISO..."
-        Write-Log -LogLevel INFO -Message "ISO_Maker: Etiqueta: [$label] | Origen: [$src] | Destino: [$iso]"
-        Write-Log -LogLevel INFO -Message "ISO_Maker: Argumentos CMD: oscdimg.exe $allArgs"
-
-        $txtLog.AppendText("COMANDO:`r`noscdimg.exe $allArgs`r`n----------------`r`n")
-        $form.Refresh() # Forzar pintado antes de iniciar
-
-        try {
-            $pInfo = New-Object System.Diagnostics.ProcessStartInfo
-            $pInfo.FileName = $oscdimgExe
-            $pInfo.Arguments = $allArgs
-            $pInfo.RedirectStandardOutput = $true
-            $pInfo.RedirectStandardError = $true
-            $pInfo.UseShellExecute = $false
-            $pInfo.CreateNoWindow = $true
-
-            $proc = New-Object System.Diagnostics.Process
-            $proc.StartInfo = $pInfo
-            
-            if ($proc.Start()) {
-                # --- BUCLE DE LECTURA SEGURO (SIN EVENTOS) ---
-                while (-not $proc.HasExited) {
-                    # Leer Output
-                    while ($proc.StandardOutput.Peek() -gt -1) {
-                        $line = $proc.StandardOutput.ReadLine()
-                        if (-not [string]::IsNullOrWhiteSpace($line)) {
-                            $txtLog.AppendText($line + "`r`n")
-                            $txtLog.ScrollToCaret()
-                        }
-                    }
-                    # Leer Error (Filtrado)
-                    while ($proc.StandardError.Peek() -gt -1) {
-                        $errLine = $proc.StandardError.ReadLine()
-                        
-                        if ([string]::IsNullOrWhiteSpace($errLine)) {
-                            $txtLog.AppendText($errLine + "`r`n")
-                            continue
-                        }
-
-                        if ($errLine -match "% complete" -or $errLine -match "Scanning source") {
-                            $txtLog.AppendText($errLine + "`r`n") 
-                        } 
-                        else {
-                            $txtLog.AppendText("[ERR] " + $errLine + "`r`n")
-                        }
-                    }
-                    [System.Windows.Forms.Application]::DoEvents()
-                    Start-Sleep -Milliseconds 50
-                }
-                
-                # Lectura final remanente
-                $remOut = $proc.StandardOutput.ReadToEnd(); if($remOut){ $txtLog.AppendText($remOut) }
-                $remErr = $proc.StandardError.ReadToEnd(); if($remErr){ $txtLog.AppendText($remErr) }
-                
-                $exitCode = $proc.ExitCode
-                $proc.Dispose()
-
-                try {
-                    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                    $logFileName = "ISO_Build_$timestamp.log"
-                    $logPath = Join-Path $script:logDir $logFileName
-                    
-                    $txtLog.Text | Out-File -FilePath $logPath -Encoding utf8 -Force
-                    
-                    $txtLog.AppendText("`r`n[INFO] Log guardado en: $logFileName")
-                    Write-Log -LogLevel INFO -Message "ISO_Maker: Archivo de volcado individual creado en: $logPath"
-                } catch {
-                    $txtLog.AppendText("`r`n[WARN] No se pudo guardar el archivo de log.")
-                    Write-Log -LogLevel WARN -Message "ISO_Maker: No se pudo guardar el archivo .log individual de oscdimg."
-                }
-
-                if ($exitCode -eq 0) {
-                    Write-Log -LogLevel INFO -Message "ISO_Maker: Compilacion de ISO completada con EXITO."
-                    $txtLog.AppendText("`r`n[EXITO] ISO Creada.")
-                    [System.Windows.Forms.MessageBox]::Show("ISO creada en:`n$iso", "Exito", 'OK', 'Information')
-                } else {
-                    Write-Log -LogLevel ERROR -Message "ISO_Maker: oscdimg fallo con codigo de salida: $exitCode"
-                    $txtLog.AppendText("`r`n[ERROR] Codigo: $exitCode")
-                    [System.Windows.Forms.MessageBox]::Show("Fallo la creacion. Revisa el Log para detalles.", "Error", 'OK', 'Error')
-                }
-            } else { 
-                Write-Log -LogLevel ERROR -Message "ISO_Maker: Fallo critico. El proceso oscdimg.exe no pudo iniciarse."
-                throw "No inicio oscdimg" 
-            }
-
-        } catch {
-            Write-Log -LogLevel ERROR -Message "ISO_Maker: Excepcion controlada de aplicacion - $($_.Exception.Message)"
-            [System.Windows.Forms.MessageBox]::Show("Excepcion: $_", "Crash", 'OK', 'Error')
-            $txtLog.AppendText("`r`nEXCEPCION: $_")
-        } finally {
-            if (-not $form.IsDisposed) {
-                $btnMake.Enabled = $true; $grpCfg.Enabled = $true; $grpAuto.Enabled = $true
-                $form.Cursor = [System.Windows.Forms.Cursors]::Default
-            }
-        }
-    })
-
-    $form.ShowDialog() | Out-Null
-    $form.Dispose()
-    [GC]::Collect()
-}
-
-# =================================================================
-#  Modulo de Inyeccion Languages
-# =================================================================
-function Inject-WinReLanguage {
-    param (
-        [Parameter(Mandatory=$true)][string]$InstallMountDir,
-        [Parameter(Mandatory=$true)][string]$WinPeLangPackPath, # Ruta a la carpeta con los .cab de WinPE para el idioma
-        [Parameter(Mandatory=$true)][string]$LangCode           # Ej: 'es-MX' o 'es-ES'
-    )
-
-    Write-Log -LogLevel ACTION -Message "LangInjector[WinRE]: Iniciando inyeccion del idioma [$LangCode] en el entorno de recuperacion."
-
-    $winRePath = Join-Path $InstallMountDir "Windows\System32\Recovery\winre.wim"
-    $tempWorkDir = Join-Path $env:TEMP "DeltaPack_WinRE_Workspace"
-    $winReMountDir = Join-Path $tempWorkDir "Mount"
-    $winReTempPath = Join-Path $tempWorkDir "winre.wim"
-
-    # 1. Validacion de existencia
-    if (-not (Test-Path $winRePath)) {
-        Write-Log -LogLevel WARN -Message "LangInjector[WinRE]: No se encontro winre.wim en la ruta estandar. Es posible que la imagen original lo haya eliminado."
-        Write-Warning "No se encontro winre.wim en la imagen. Se omitira la inyeccion de recuperacion."
-        return $false
-    }
-
-    try {
-        # 2. Preparacion del entorno de trabajo aislado
-        Write-Log -LogLevel INFO -Message "LangInjector[WinRE]: Preparando entorno de trabajo aislado en $tempWorkDir"
-        if (Test-Path $tempWorkDir) { Remove-Item -Path $tempWorkDir -Recurse -Force -ErrorAction SilentlyContinue }
-        $null = New-Item -ItemType Directory -Path $winReMountDir -Force
-
-        # Quitar atributos de Solo Lectura/Oculto/Sistema antes de copiar
-        Set-ItemProperty -Path $winRePath -Name Attributes -Value "Normal" -ErrorAction SilentlyContinue
-        Copy-Item -Path $winRePath -Destination $winReTempPath -Force
-        
-        Write-Log -LogLevel INFO -Message "LangInjector[WinRE]: Archivo winre.wim extraido con exito al espacio temporal."
-
-        # 3. Montaje del WinRE
-        Write-Log -LogLevel ACTION -Message "LangInjector[WinRE]: Ejecutando DISM /Mount-Wim para winre.wim..."
-        dism /mount-wim /wimfile:"$winReTempPath" /index:1 /mountdir:"$winReMountDir" | Out-Null
-        
-        if ($LASTEXITCODE -ne 0) { throw "Fallo al montar winre.wim. Codigo DISM: $LASTEXITCODE" }
-
-        # 4. Inyeccion de Paquetes (LP y Satelites WinPE)
-        Write-Log -LogLevel INFO -Message "LangInjector[WinRE]: Buscando e inyectando paquetes .cab de idioma desde $WinPeLangPackPath..."
-        
-        # Filtramos solo los paquetes que corresponden al idioma objetivo
-        $cabFiles = Get-ChildItem -Path $WinPeLangPackPath -Filter "*$LangCode*.cab" -Recurse
-        
-        if ($cabFiles.Count -eq 0) { throw "No se encontraron paquetes .cab para $LangCode en la ruta especificada." }
-
-        foreach ($cab in $cabFiles) {
-            Write-Log -LogLevel INFO -Message "LangInjector[WinRE]: Inyectando paquete -> $($cab.Name)"
-            dism /image:"$winReMountDir" /add-package /packagepath:"$($cab.FullName)" | Out-Null
-            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw "Fallo al inyectar $($cab.Name). Codigo: $LASTEXITCODE" }
-        }
-
-        # 5. Configuracion del Idioma Predeterminado
-        Write-Log -LogLevel ACTION -Message "LangInjector[WinRE]: Configurando [$LangCode] como idioma predeterminado del entorno..."
-        dism /image:"$winReMountDir" /Set-AllIntl:$LangCode | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Fallo al establecer el idioma predeterminado. Codigo: $LASTEXITCODE" }
-
-    } catch {
-        Write-Log -LogLevel ERROR -Message "LangInjector[WinRE]: Falla critica durante el proceso - $($_.Exception.Message)"
-        Write-Error "Fallo la inyeccion en WinRE: $($_.Exception.Message)"
-        
-        # Desmontar descartando cambios en caso de error
-        dism /unmount-wim /mountdir:"$winReMountDir" /discard | Out-Null
-        return $false
-
-    } finally {
-        # 7. Desmontaje Seguro y Reemplazo
-        if (Test-Path $winReMountDir) {
-            $mountInfo = dism /get-mountedwiminfo | Select-String $winReMountDir
-            if ($mountInfo) {
-                Write-Log -LogLevel ACTION -Message "LangInjector[WinRE]: Guardando cambios y desmontando winre.wim..."
-                dism /unmount-wim /mountdir:"$winReMountDir" /commit | Out-Null
-                
-                if ($LASTEXITCODE -eq 0) {
-                    # --- OPTIMIZACION TIER 1 (Exportacion) ---
-                    Write-Host "`n   > Optimizando tamaño final del WinRE (Exportando)..." -ForegroundColor Yellow
-                    $winReOptimized = Join-Path $tempWorkDir "winre_optimized.wim"
-                    Write-Log -LogLevel ACTION -Message "LangInjector[WinRE]: Optimizando archivo mediante Export-Image."
-                    
-                    dism /export-image /sourceimagefile:"$winReTempPath" /sourceindex:1 /destinationimagefile:"$winReOptimized" /compress:max | Out-Null
-                    
-                    if ($LASTEXITCODE -eq 0 -and (Test-Path $winReOptimized)) {
-                        Write-Log -LogLevel INFO -Message "LangInjector[WinRE]: Exportacion exitosa. Reemplazando el winre.wim original."
-                        Copy-Item -Path $winReOptimized -Destination $winRePath -Force
-                    } else {
-                        Write-Log -LogLevel WARN -Message "LangInjector[WinRE]: Fallo la exportacion. Usando WIM sin optimizar. Codigo: $LASTEXITCODE"
-                        Copy-Item -Path $winReTempPath -Destination $winRePath -Force
-                    }
-                    # -----------------------------------------
-                    
-                    # Restaurar atributos ocultos/sistema por seguridad
-                    Set-ItemProperty -Path $winRePath -Name Attributes -Value "Hidden, System" -ErrorAction SilentlyContinue
-                    Write-Log -LogLevel INFO -Message "LangInjector[WinRE]: Proceso completado exitosamente."
-                } else {
-                    Write-Log -LogLevel ERROR -Message "LangInjector[WinRE]: Error critico al desmontar winre.wim. Codigo: $LASTEXITCODE"
-                }
-            }
-        }
-        
-        # Garbage Collection proactivo
-        [GC]::Collect()
-        [GC]::WaitForPendingFinalizers()
-        
-        # Limpieza de temporales
-        Remove-Item -Path $tempWorkDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-
-    return $true
-}
-
-function Inject-OsLanguage {
-    param (
-        [Parameter(Mandatory=$true)][string]$MountDir,
-        [Parameter(Mandatory=$true)][string]$LangPackPath, # Ruta a la carpeta con el LP principal
-        [Parameter(Mandatory=$true)][string]$FodPath,      # Ruta a la carpeta con los FODs
-        [Parameter(Mandatory=$false)][string]$LxpPath,     # Opcional: Ruta a la carpeta con los Appx LXP
-        [Parameter(Mandatory=$true)][string]$LangCode      # Ej: 'es-MX' o 'es-ES'
-    )
-
-    Write-Log -LogLevel ACTION -Message "LangInjector[OS]: Iniciando inyeccion Tier 1 para el idioma [$LangCode] en el Install.wim."
-
-    try {
-        # 1. Inyectar el Language Pack Principal (LP)
-        Write-Log -LogLevel INFO -Message "LangInjector[OS]: Buscando el paquete de idioma principal (Client-Language-Pack)..."
-        $lpCab = Get-ChildItem -Path $LangPackPath -Filter "*Client-Language-Pack*$LangCode*.cab" -Recurse | Select-Object -First 1
-
-        if (-not $lpCab) { throw "No se encontro el paquete de idioma principal (LP) para $LangCode en la ruta proporcionada." }
-
-        Write-Host "   > Inyectando paquete base ($LangCode)..." -ForegroundColor Yellow
-        Write-Log -LogLevel ACTION -Message "LangInjector[OS]: Inyectando LP -> $($lpCab.Name)"
-        
-        dism /image:"$MountDir" /Add-Package /PackagePath:"$($lpCab.FullName)" | Out-Null
-        
-        # DISM devuelve 3010 cuando requiere un reinicio, en un montaje offline, esto es un exito.
-        if ($LASTEXITCODE -notin @(0, 3010)) { throw "Error al inyectar el LP. Codigo DISM: $LASTEXITCODE" }
-
-        # 2. Inyectar los Features on Demand (FODs)
-        Write-Host "   > Inyectando caracteristicas bajo demanda (Voz, Fuentes, Texto)..." -ForegroundColor Yellow
-        Write-Log -LogLevel INFO -Message "LangInjector[OS]: Inyectando Features on Demand (FODs) satelites..."
-        
-        $fodTypes = @("Basic", "Fonts", "Handwriting", "Speech", "TextToSpeech")
-
-        foreach ($fod in $fodTypes) {
-            $fodCab = Get-ChildItem -Path $FodPath -Filter "*LanguageFeatures-$fod*$LangCode*.cab" -Recurse | Select-Object -First 1
-            if ($fodCab) {
-                Write-Log -LogLevel INFO -Message "LangInjector[OS]: Inyectando FOD -> $($fodCab.Name)"
-                dism /image:"$MountDir" /Add-Package /PackagePath:"$($fodCab.FullName)" | Out-Null
-                if ($LASTEXITCODE -notin @(0, 3010)) { 
-                    Write-Log -LogLevel WARN -Message "LangInjector[OS]: Advertencia al inyectar FOD $($fodCab.Name). Codigo: $LASTEXITCODE" 
-                }
-            } else {
-                Write-Log -LogLevel WARN -Message "LangInjector[OS]: FOD '$fod' no encontrado para $LangCode. Se omitira, pero podria afectar funcionalidades del SO."
-            }
-        }
-
-        # 3. Inyectar Local Experience Pack (LXP)
-        if ($LxpPath -and (Test-Path $LxpPath)) {
-            Write-Host "   > Inyectando paquete de experiencia local (LXP UWP)..." -ForegroundColor Yellow
-            Write-Log -LogLevel INFO -Message "LangInjector[OS]: Buscando paquete de experiencia local (LXP Appx)..."
-            
-            $lxpAppx = Get-ChildItem -Path $LxpPath -Filter "*$LangCode*.appx*" -Recurse | Select-Object -First 1
-            $lxpLicense = Get-ChildItem -Path $LxpPath -Filter "*$LangCode*license*.xml" -Recurse | Select-Object -First 1
-
-            if ($lxpAppx) {
-                Write-Log -LogLevel ACTION -Message "LangInjector[OS]: Inyectando LXP Appx -> $($lxpAppx.Name)"
-                $dismLxpCmd = "dism /image:`"$MountDir`" /Add-ProvisionedAppxPackage /PackagePath:`"$($lxpAppx.FullName)`""
-                if ($lxpLicense) { 
-                    $dismLxpCmd += " /LicensePath:`"$($lxpLicense.FullName)`"" 
-                } else { 
-                    $dismLxpCmd += " /SkipLicense" 
-                }
-
-                Invoke-Expression $dismLxpCmd | Out-Null
-                if ($LASTEXITCODE -notin @(0, 3010)) { 
-                    Write-Log -LogLevel WARN -Message "LangInjector[OS]: Error al inyectar LXP. Codigo: $LASTEXITCODE" 
-                }
-            }
-        }
-
-        # 4. Establecer como Predeterminado Absoluto
-        Write-Host "   > Configurando $LangCode como idioma predeterminado del sistema..." -ForegroundColor Yellow
-        Write-Log -LogLevel ACTION -Message "LangInjector[OS]: Configurando [$LangCode] como idioma, teclado y zona predeterminada..."
-        
-        dism /image:"$MountDir" /Set-AllIntl:$LangCode | Out-Null
-        dism /image:"$MountDir" /Set-SKUIntlDefaults:$LangCode | Out-Null
-
-        if ($LASTEXITCODE -notin @(0, 3010)) { throw "Error al configurar el idioma predeterminado. Codigo: $LASTEXITCODE" }
-
-        Write-Log -LogLevel ACTION -Message "LangInjector[OS]: Inyeccion en Install.wim finalizada exitosamente."
-        return $true
-
-    } catch {
-        Write-Log -LogLevel ERROR -Message "LangInjector[OS]: Falla critica en la inyeccion principal - $($_.Exception.Message)"
-        Write-Error "Fallo la inyeccion en Install.wim: $($_.Exception.Message)"
-        return $false
-    }
-}
-
-function Inject-BootWimLanguage {
-    param (
-        [Parameter(Mandatory=$true)][string]$BootWimPath,         # Ruta directa al archivo boot.wim
-        [Parameter(Mandatory=$true)][string]$IsoDistributionDir,  # Carpeta raiz donde extrajiste la ISO (para el lang.ini)
-        [Parameter(Mandatory=$true)][string]$WinPeLangPackPath,   # Ruta a la carpeta con los .cab de WinPE / Setup
-        [Parameter(Mandatory=$true)][string]$LangCode             # Ej: 'es-MX' o 'es-ES'
-    )
-
-    Write-Log -LogLevel ACTION -Message "LangInjector[Boot]: Iniciando inyeccion Tier 1 para el idioma [$LangCode] en el Boot.wim."
-
-    $tempWorkDir = Join-Path $env:TEMP "DeltaPack_Boot_Workspace"
-    $bootMountDir = Join-Path $tempWorkDir "Mount"
-    
-    # 1. Preparacion del entorno de trabajo
-    if (Test-Path $tempWorkDir) { Remove-Item -Path $tempWorkDir -Recurse -Force -ErrorAction SilentlyContinue }
-    $null = New-Item -ItemType Directory -Path $bootMountDir -Force
-
-    # Verificar cuantos indices tiene el boot.wim
-    Write-Log -LogLevel INFO -Message "LangInjector[Boot]: Analizando estructura del boot.wim..."
-    $bootImages = Get-WindowsImage -ImagePath $BootWimPath -ErrorAction Stop
-    $indexCount = $bootImages.Count
-
-    Write-Log -LogLevel INFO -Message "LangInjector[Boot]: Se detectaron $indexCount indices en el boot.wim."
-
-    # Filtramos los paquetes CAB correspondientes al idioma
-    $cabFiles = Get-ChildItem -Path $WinPeLangPackPath -Filter "*$LangCode*.cab" -Recurse
-    if ($cabFiles.Count -eq 0) { throw "No se encontraron paquetes WinPE/Setup para $LangCode en $WinPeLangPackPath." }
-
-    # Bucle para procesar cada indice del boot.wim (Usualmente 1 y 2)
-    for ($i = 1; $i -le $indexCount; $i++) {
-        try {
-            Write-Host "`n[+] Procesando boot.wim (Indice $i de $indexCount)..." -ForegroundColor Yellow
-            Write-Log -LogLevel ACTION -Message "LangInjector[Boot]: Ejecutando DISM /Mount-Wim para el Indice $i..."
-            
-            dism /mount-wim /wimfile:"$BootWimPath" /index:$i /mountdir:"$bootMountDir" | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "Fallo al montar el Indice $i del boot.wim. Codigo: $LASTEXITCODE" }
-
-            # Inyectar todos los paquetes de idioma (LP y Setup Satellites)
-            Write-Host "   > Inyectando paquetes de idioma WinPE/Setup..." -ForegroundColor DarkGray
-            Write-Log -LogLevel INFO -Message "LangInjector[Boot]: Inyectando $($cabFiles.Count) paquetes de idioma en el Indice $i..."
-            
-            foreach ($cab in $cabFiles) {
-                dism /image:"$bootMountDir" /add-package /packagepath:"$($cab.FullName)" | Out-Null
-                if ($LASTEXITCODE -notin @(0, 3010)) { 
-                    Write-Log -LogLevel WARN -Message "LangInjector[Boot]: Advertencia al inyectar $($cab.Name). Codigo: $LASTEXITCODE" 
-                }
-            }
-
-            # Configurar Idioma Predeterminado
-            Write-Host "   > Configurando $LangCode por defecto..." -ForegroundColor DarkGray
-            Write-Log -LogLevel ACTION -Message "LangInjector[Boot]: Estableciendo [$LangCode] como predeterminado (Indice $i)..."
-            dism /image:"$bootMountDir" /Set-AllIntl:$LangCode | Out-Null
-
-            # =========================================================================
-            # MAGIA TIER 1: Regenerar LANG.INI (Solo se hace en el Indice de Setup, usualmente el 2)
-            # =========================================================================
-            if ($i -eq 2 -or $indexCount -eq 1) {
-                if (Test-Path $IsoDistributionDir) {
-                    Write-Host "   > Regenerando archivo de orquestacion Lang.ini..." -ForegroundColor Cyan
-                    Write-Log -LogLevel ACTION -Message "LangInjector[Boot]: Regenerando lang.ini en la distribucion ISO ($IsoDistributionDir)..."
-                    
-                    # Este comando sincroniza los idiomas inyectados con la carpeta "sources" de la ISO externa
-                    dism /image:"$bootMountDir" /Gen-LangINI /distribution:"$IsoDistributionDir" | Out-Null
-                    
-                    if ($LASTEXITCODE -notin @(0, 3010)) {
-                        Write-Log -LogLevel ERROR -Message "LangInjector[Boot]: Falla al generar lang.ini. Codigo: $LASTEXITCODE"
-                    } else {
-                        Write-Log -LogLevel INFO -Message "LangInjector[Boot]: Lang.ini actualizado correctamente. El instalador detectara el idioma [$LangCode]."
-                        
-                        # Extra: Asegurar que el Setup arranque en el nuevo idioma modificando el lang.ini para que sea el default
-                        dism /image:"$bootMountDir" /Set-SetupUILang:$LangCode /distribution:"$IsoDistributionDir" | Out-Null
-                    }
-                } else {
-                    Write-Log -LogLevel WARN -Message "LangInjector[Boot]: No se proporciono una carpeta de distribucion ISO valida. Se omitira la regeneracion de lang.ini."
-                }
-            }
-
-            # Desmontar y Guardar
-            Write-Host "   > Guardando cambios en el Indice $i..." -ForegroundColor Green
-            Write-Log -LogLevel ACTION -Message "LangInjector[Boot]: Guardando y desmontando el Indice $i..."
-            dism /unmount-wim /mountdir:"$bootMountDir" /commit | Out-Null
-
-        } catch {
-            Write-Log -LogLevel ERROR -Message "LangInjector[Boot]: Falla en el Indice $i - $($_.Exception.Message)"
-            Write-Error "Error en el indice $i del boot.wim: $($_.Exception.Message)"
-            dism /unmount-wim /mountdir:"$bootMountDir" /discard | Out-Null
-            return $false
-        }
-    }
-
-    # --- OPTIMIZACION (Exportacion Multindice) ---
-    Write-Host "`n[+] Optimizando tamaño final del boot.wim (Exportando indices)..." -ForegroundColor Yellow
-    Write-Log -LogLevel ACTION -Message "LangInjector[Boot]: Iniciando exportacion secuencial para optimizar el boot.wim..."
-    $bootOptimized = Join-Path $tempWorkDir "boot_optimized.wim"
-    $exportSuccess = $true
-    
-    for ($j = 1; $j -le $indexCount; $j++) {
-        dism /export-image /sourceimagefile:"$BootWimPath" /sourceindex:$j /destinationimagefile:"$bootOptimized" /compress:max | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            $exportSuccess = $false
-            Write-Log -LogLevel ERROR -Message "LangInjector[Boot]: Fallo exportacion del indice $j. Codigo: $LASTEXITCODE"
-            break
-        }
-    }
-    
-    if ($exportSuccess -and (Test-Path $bootOptimized)) {
-        Write-Log -LogLevel INFO -Message "LangInjector[Boot]: Exportacion exitosa. Reemplazando boot.wim original."
-        Copy-Item -Path $bootOptimized -Destination $BootWimPath -Force
-    } else {
-        Write-Log -LogLevel WARN -Message "LangInjector[Boot]: Optimizacion fallida. Se conservara el boot.wim sin optimizar."
-    }
-
-    # Limpieza final
+    # 3. Forzar limpieza profunda de memoria
     [GC]::Collect()
     [GC]::WaitForPendingFinalizers()
-    Remove-Item -Path $tempWorkDir -Recurse -Force -ErrorAction SilentlyContinue
 
-    Write-Log -LogLevel ACTION -Message "LangInjector[Boot]: Inyeccion de idioma en boot.wim completada exitosamente."
-    return $true
-}
-
-function Show-LanguageInjector {
-    Clear-Host
-    Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host "         Inyector de Idiomas (OSD Offline)             " -ForegroundColor Cyan
-    Write-Host "=======================================================" -ForegroundColor Cyan
-    
-    Write-Log -LogLevel INFO -Message "LangInjectorGUI: Iniciando asistente de inyeccion de idiomas."
-
-    # 1. Validacion de estado del motor base
-    if ($Script:IMAGE_MOUNTED -ne 1) {
-        Write-Log -LogLevel WARN -Message "LangInjectorGUI: Acceso denegado. Se requiere un install.wim montado."
-        Write-Warning "Debes montar el archivo 'install.wim' de destino antes de iniciar este proceso."
-        Write-Host "El motor necesita el OS montado para extraer el WinRE e inyectar el sistema base." -ForegroundColor Gray
-        Pause; return
-    }
-
-    Write-Host "Este asistente automatizado procesara WinRE, el OS y Boot.wim en secuencia." -ForegroundColor DarkGray
-    Write-Host "Requisitos previos:" -ForegroundColor Yellow
-    Write-Host " 1. ISO de Idiomas (Language and Optional Features) extraida." -ForegroundColor White
-    Write-Host " 2. Windows ADK instalado O carpeta de WinPE Addons manual." -ForegroundColor White
-    Write-Host " 3. Carpeta de distribucion de tu ISO de Windows (donde esta la carpeta 'sources').`n" -ForegroundColor White
-
-    # 2. Captura del Codigo de Idioma
-    $langCode = Read-Host "Ingrese el codigo de idioma objetivo (Ej: es-MX, es-ES, en-US)"
-    if ([string]::IsNullOrWhiteSpace($langCode)) { 
-        Write-Log -LogLevel INFO -Message "LangInjectorGUI: Operacion cancelada (Codigo de idioma vacio)."
-        return 
-    }
-    Write-Log -LogLevel INFO -Message "LangInjectorGUI: Codigo de idioma objetivo configurado -> [$langCode]"
-
-    # 3. Recopilacion de Rutas (Con Select-PathDialog y Auto-Deteccion)
-    Write-Host "`n[Paso 1 de 4] Selecciona la carpeta raiz de la ISO de Idiomas (FODs y Client LP)..." -ForegroundColor Cyan
-    $osLangPath = Select-PathDialog -DialogType Folder -Title "Selecciona carpeta de la ISO de Idiomas"
-    if (-not $osLangPath) { return }
-
-    # --- AUTO-DETECCION DE WINPE (Estilo Tier 1 / abbodi1406) ---
-    Write-Host "`n[Paso 2 de 4] Buscando paquetes WinPE (ADK) para el idioma [$langCode]..." -ForegroundColor Cyan
-    Write-Log -LogLevel INFO -Message "LangInjectorGUI: Iniciando escaneo de auto-descubrimiento para paquetes WinPE."
-    
-    $peLangPath = $null
-    
-    # Rutas de escaneo
-    $adkPath = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Assessment and Deployment Kit\Windows Preinstallation Environment\amd64\WinPE_OCs"
-    $localPePath = Join-Path $PSScriptRoot "WinPE\amd64\WinPE_OCs"
-
-    # Verificamos si la ruta existe Y si contiene la subcarpeta del idioma especifico
-    if ((Test-Path $adkPath) -and (Test-Path (Join-Path $adkPath $langCode))) {
-        $peLangPath = $adkPath
-        Write-Host "   [OK] ADK oficial detectado automaticamente en:" -ForegroundColor Green
-        Write-Host "   $peLangPath" -ForegroundColor Gray
-        Write-Log -LogLevel INFO -Message "LangInjectorGUI: Auto-descubrimiento exitoso. WinPE Addons encontrados en ADK oficial."
-    } elseif ((Test-Path $localPePath) -and (Test-Path (Join-Path $localPePath $langCode))) {
-        $peLangPath = $localPePath
-        Write-Host "   [OK] Carpeta WinPE local detectada automaticamente en:" -ForegroundColor Green
-        Write-Host "   $peLangPath" -ForegroundColor Gray
-        Write-Log -LogLevel INFO -Message "LangInjectorGUI: Auto-descubrimiento exitoso. WinPE Addons encontrados en directorio local."
-    } else {
-        Write-Host "   [!] No se encontro el ADK de Windows instalado para este idioma." -ForegroundColor Yellow
-        Write-Host "   Por favor, selecciona manualmente la carpeta raiz de los paquetes WinPE..." -ForegroundColor Cyan
-        $peLangPath = Select-PathDialog -DialogType Folder -Title "Selecciona carpeta de WinPE Addons"
-        if (-not $peLangPath) { 
-            Write-Log -LogLevel INFO -Message "LangInjectorGUI: El usuario cancelo la seleccion manual de WinPE."
-            return 
-        }
-    }
-
-    Write-Host "`n[Paso 3 de 4] Selecciona la carpeta raiz de tu ISO de Windows (Distribucion con carpeta 'sources')..." -ForegroundColor Cyan
-    $isoDistPath = Select-PathDialog -DialogType Folder -Title "Selecciona la raiz de la ISO de Windows a compilar"
-    if (-not $isoDistPath) { return }
-
-    # Verificar existencia de boot.wim en la distribucion
-    $bootWimPath = Join-Path $isoDistPath "sources\boot.wim"
-    if (-not (Test-Path $bootWimPath)) {
-        Write-Log -LogLevel ERROR -Message "LangInjectorGUI: No se encontro boot.wim en $bootWimPath."
-        Write-Warning "No se encontro el archivo 'sources\boot.wim' en la carpeta de distribucion seleccionada."
-        Write-Host "Asegurate de seleccionar la carpeta raiz que contiene las carpetas 'boot', 'efi', 'sources', etc." -ForegroundColor Gray
-        Pause; return
-    }
-
-    Write-Host "`n[Paso 4 de 4] Confirmacion Final" -ForegroundColor Cyan
-    Write-Host "Se inyectara el idioma [$langCode] en:" -ForegroundColor White
-    Write-Host " - WinRE (Oculto en el install.wim montado)" -ForegroundColor Gray
-    Write-Host " - Install.wim (SO Principal montado)" -ForegroundColor Gray
-    Write-Host " - Boot.wim (En $bootWimPath)" -ForegroundColor Gray
-    Write-Host " - Lang.ini (Regeneracion en $isoDistPath)" -ForegroundColor Gray
-    
-    $confirm = Read-Host "`nIniciar inyeccion masiva? Esto tomara bastante tiempo (S/N)"
-    if ($confirm -notmatch '^(s|S)$') { 
-        Write-Log -LogLevel INFO -Message "LangInjectorGUI: El usuario cancelo en la confirmacion final."
-        return 
-    }
-
-    $startTime = Get-Date
-    Write-Log -LogLevel ACTION -Message "LangInjectorGUI: Arrancando secuencia maestra de inyeccion Tier 1 para [$langCode]."
-
-    # =======================================================
-    # ORQUESTACION DE MOTORES (Bloque Try/Catch maestro)
-    # =======================================================
-    try {
-        # FASE 1: WinRE
-        Write-Host "`n=======================================================" -ForegroundColor Magenta
-        Write-Host " FASE 1: Procesando Entorno de Recuperacion (winre.wim)" -ForegroundColor Magenta
-        Write-Host "=======================================================" -ForegroundColor Magenta
-        $winReSuccess = Inject-WinReLanguage -InstallMountDir $Script:MOUNT_DIR -WinPeLangPackPath $peLangPath -LangCode $langCode
-        
-        if (-not $winReSuccess) {
-            Write-Warning "La inyeccion en WinRE fallo o se omitio. Continuando con el OS principal..."
-        }
-
-        # FASE 2: Install.wim (OS)
-        Write-Host "`n=======================================================" -ForegroundColor Magenta
-        Write-Host " FASE 2: Procesando Sistema Operativo (install.wim)" -ForegroundColor Magenta
-        Write-Host "=======================================================" -ForegroundColor Magenta
-        # Asumimos que los LXP estan en la misma ISO de lenguajes, ajusta si los tienes separados
-        $osSuccess = Inject-OsLanguage -MountDir $Script:MOUNT_DIR -LangPackPath $osLangPath -FodPath $osLangPath -LxpPath $osLangPath -LangCode $langCode
-
-        if (-not $osSuccess) {
-            throw "La inyeccion en el sistema operativo fallo. Abortando secuencia para evitar una imagen corrupta."
-        }
-
-        # FASE 3: Boot.wim y Lang.ini
-        Write-Host "`n=======================================================" -ForegroundColor Magenta
-        Write-Host " FASE 3: Procesando Instalador y Lang.ini (boot.wim)" -ForegroundColor Magenta
-        Write-Host "=======================================================" -ForegroundColor Magenta
-        $bootSuccess = Inject-BootWimLanguage -BootWimPath $bootWimPath -IsoDistributionDir $isoDistPath -WinPeLangPackPath $peLangPath -LangCode $langCode
-
-        if (-not $bootSuccess) {
-            Write-Warning "La inyeccion en boot.wim tuvo errores. Revisa los logs."
-        }
-
-        $endTime = Get-Date
-        $timeSpan = New-TimeSpan -Start $startTime -End $endTime
-
-        Write-Log -LogLevel ACTION -Message "LangInjectorGUI: Secuencia maestra completada en $($timeSpan.Minutes) minutos y $($timeSpan.Seconds) segundos."
-        
-        Clear-Host
-        Write-Host "=======================================================" -ForegroundColor Green
-        Write-Host "        INYECCION DE IDIOMA COMPLETADA ($langCode)     " -ForegroundColor Green
-        Write-Host "=======================================================" -ForegroundColor Green
-        Write-Host "Tiempo transcurrido: $($timeSpan.Minutes) min $($timeSpan.Seconds) seg" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "IMPORTANTE:" -ForegroundColor Yellow
-        Write-Host "Recuerda ejecutar la opcion 'Guardar y Desmontar' en el Menu Principal" -ForegroundColor White
-        Write-Host "para aplicar permanentemente los cambios en el install.wim." -ForegroundColor White
-        Write-Host ""
-        
-        [System.Windows.Forms.MessageBox]::Show("Inyeccion del idioma $langCode completada en la estructura base y el instalador.", "Operacion Exitosa", 'OK', 'Information')
-
-    } catch {
-        Write-Log -LogLevel ERROR -Message "LangInjectorGUI: Secuencia maestra abortada por excepcion - $($_.Exception.Message)"
-        Write-Error "El orquestador de idiomas sufrio un error fatal: $_"
-    }
-
-    Pause
 }
 
 # Funcion auxiliar de Check y Reparacion Montaje
@@ -9292,8 +5944,8 @@ function Main-Menu {
                     Write-Host "   [2] Crear ISO Booteable" -ForegroundColor White
                     Write-Host "       (Genera una ISO compatible con BIOS/UEFI)" -ForegroundColor Gray
                     Write-Host ""
-                    Write-Host "   [3] Despliegue a VHD (Instalacion Virtual)" -ForegroundColor White
-                    Write-Host "       (Instala Windows en un disco virtual nativo)" -ForegroundColor Gray
+                    Write-Host "   [3] Despliegue a VHD / Disco Fisico" -ForegroundColor White
+                    Write-Host "       (Aplica una imagen WIM/ESD a un VHDX o disco USB/externo)" -ForegroundColor Gray
                     Write-Host ""
                     Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
                     Write-Host ""
@@ -9414,6 +6066,7 @@ function Main-Menu {
         }
     }
 }
+
 # Pequeña funcion auxiliar para evitar repetir el mensaje de error
 function Show-Mount-Warning {
     [System.Console]::Beep(400, 200)
@@ -9485,7 +6138,7 @@ if ($Script:IMAGE_MOUNTED -eq 0) {
                 # 3. HEURISTICA: Es esta particion específica una instalacion de Windows?
                 if (Test-Path "$rootPath\Windows\System32\config\SYSTEM") {
 
-                    # ¡ENCONTRADO!
+                    # ENCONTRADO!
                     $Script:IMAGE_MOUNTED = 2 # Estado 2 = VHD
                     $Script:MOUNT_DIR = $rootPath
                     $Script:MOUNTED_INDEX = $part.PartitionNumber
@@ -9559,15 +6212,22 @@ try {
     # Ejecutamos el bucle principal
     Main-Menu
 }
+
 catch {
-    # --- MEJORA: Logging Detallado de Errores (Stack Trace) ---
     $ErrorActionPreference = "Continue" # Asegurar que podemos procesar el error
     
-    # 1. Capturar detalles tecnicos
+    # 1. Capturar detalles técnicos y del entorno
     $ex = $_.Exception
     $line = $_.InvocationInfo.ScriptLineNumber
     $cmd = $_.InvocationInfo.MyCommand
     $stack = $_.ScriptStackTrace
+    
+    # --- NUEVO: Extraer la excepción real de .NET y contexto del sistema ---
+    $innerExc = if ($null -ne $ex.InnerException) { $ex.InnerException.Message } else { "N/A" }
+    $osVersion = [Environment]::OSVersion.VersionString
+    $psVersion = $PSVersionTable.PSVersion.ToString()
+    $mntState = if ($null -ne $Script:IMAGE_MOUNTED) { $Script:IMAGE_MOUNTED } else { "N/A" }
+    $mntPath = if ($null -ne $Script:WIM_FILE_PATH) { $Script:WIM_FILE_PATH } else { "N/A" }
 
     # 2. Formatear mensaje para el usuario (Limpio)
     Clear-Host
@@ -9575,31 +6235,41 @@ catch {
     Write-Host "             ¡ERROR CRITICO DEL SISTEMA!               " -ForegroundColor Red
     Write-Host "=======================================================" -ForegroundColor Red
     Write-Host ""
-    Write-Host "Ha ocurrido un error inesperado que detuvo la ejecucion." -ForegroundColor Gray
+    Write-Host "Ha ocurrido un error inesperado que detuvo la ejecución." -ForegroundColor Gray
     Write-Host "Error: " -NoNewline; Write-Host $_.ToString() -ForegroundColor Yellow
-    Write-Host "Linea: " -NoNewline; Write-Host $line -ForegroundColor Cyan
+    Write-Host "Línea: " -NoNewline; Write-Host $line -ForegroundColor Cyan
     Write-Host ""
 
-    # 3. Escribir Log Tecnico Completo (Para el SysAdmin)
+    # 3. Escribir Log Técnico Completo (Reporte Forense)
     $logPayload = @"
-CRASH REPORT
+
+==================================================
+CRASH REPORT - EXCEPCIÓN NO CONTROLADA
+==================================================
+Timestamp  : $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+Script Ver : v$($script:Version)
+OS Context : $osVersion
+PS Context : $psVersion
+Mount State: $mntState | Target: $mntPath
 --------------------------------------------------
-Timestamp : $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-Error     : $($_.ToString())
-Command   : $cmd
-Line      : $line
-Category  : $($_.CategoryInfo.ToString())
-Stack Tr. : 
+Error Msg  : $($_.ToString())
+Inner Exc. : $innerExc
+Command    : $cmd
+Line       : $line
+Category   : $($_.CategoryInfo.ToString())
+Stack Tr.  : 
 $stack
---------------------------------------------------
+==================================================
 "@
+    # Escribimos en el log usando tu función optimizada
     Write-Log -LogLevel ERROR -Message $logPayload
 
-    # 4. Opcion de recuperacion
-    Write-Host "El detalle completo se ha guardado en el archivo de registro." -ForegroundColor Gray
-    Write-Warning "Se recomienda desmontar Hives y limpiar carpetas antes de reintentar."
+    # 4. Opción de recuperación
+    Write-Host "El detalle técnico forense se ha guardado en el archivo de registro (Logs\Registro.log)." -ForegroundColor Gray
+    Write-Warning "El sistema intentará desmontar las colmenas y limpiar el entorno automáticamente."
     Pause
 }
+
 finally {
     # ESTO SE EJECUTA SIEMPRE: Ya sea que salgas bien, por error, o con CTRL+C
     Write-Host "`n[SISTEMA] Finalizando y asegurando limpieza..." -ForegroundColor DarkGray
