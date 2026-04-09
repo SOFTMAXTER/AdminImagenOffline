@@ -114,115 +114,107 @@ function Invoke-FullRepoUpdater {
     if ($updateAvailable) {
         Write-Host "`nNueva version encontrada!" -ForegroundColor Green
         Write-Host ""
-		Write-Host "Version Local: v$($script:Version)" -ForegroundColor Gray
+        Write-Host "Version Local: v$($script:Version)" -ForegroundColor Gray
         Write-Host "Version Remota: v$remoteVersionStr" -ForegroundColor Yellow
         Write-Log -LogLevel INFO -Message "UPDATER: Nueva version detectada. Local: v$($script:Version) | Remota: v$remoteVersionStr"
 
-		Write-Host ""
+        Write-Host ""
         $confirmation = Read-Host "Deseas descargar e instalar la actualizacion ahora? (S/N)"
 
         if ($confirmation.ToUpper() -eq 'S') {
-            Write-Warning "`nEl actualizador se ejecutara en una nueva ventana."
-            Write-Warning "Este script principal se cerrara para permitir la actualizacion."
-            Write-Log -LogLevel ACTION -Message "UPDATER: Iniciando proceso de actualizacion. El script se cerrara."
+            Write-Warning "`nDescargando y preparando la actualizacion de forma segura..."
+            Write-Log -LogLevel ACTION -Message "UPDATER: Iniciando descarga en el proceso de confianza."
 
-            # --- Preparar el script del actualizador externo ---
-            $tempDir = Join-Path $env:TEMP "AdminUpdater"
-            if (Test-Path $tempDir) { Remove-Item -Path $tempDir -Recurse -Force }
-            New-Item -Path $tempDir -ItemType Directory | Out-Null
+            # --- 1. PREPARAR ENTORNO TEMPORAL ---
+            $tempDir = Join-Path $env:TEMP "AdminUpdater_$($PID)"
+            if (Test-Path $tempDir) { Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
+            New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
 
-            $updaterScriptPath = Join-Path $tempDir "updater.ps1"
-            $installPath = (Split-Path -Path $PSScriptRoot -Parent)
-            $batchPath = Join-Path $installPath "Run.bat"
+            $tempZip = Join-Path $tempDir "update.zip"
+            $tempExtract = Join-Path $tempDir "extracted"
 
-            # Contenido del script temporal
-            $updaterScriptContent = @"
-param(`$parentPID)
-`$ErrorActionPreference = 'Stop'
-`$Host.UI.RawUI.WindowTitle = 'PROCESO DE ACTUALIZACION DE AdminImagenOffline - NO CERRAR'
+            try {
+                # --- 2. DESCARGA Y EXTRACCIÓN (HECHO POR EL SCRIPT PRINCIPAL) ---
+                Write-Host "   > Descargando paquete (v$remoteVersionStr)..." -ForegroundColor Cyan
+                Invoke-WebRequest -Uri $zipUrl -OutFile $tempZip -UseBasicParsing
 
-# Funcion auxiliar para logs del actualizador
-function Write-UpdateLog { param([string]`$msg) Write-Host "`n`$msg" -ForegroundColor Cyan }
+                Write-Host "   > Extrayendo archivos..." -ForegroundColor Cyan
+                Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
+                
+                # GitHub extrae en una subcarpeta (ej. AdminImagenOffline-main)
+                $updateSourcePath = (Get-ChildItem -Path $tempExtract -Directory | Select-Object -First 1).FullName
+                $elementosNuevos = Get-ChildItem -Path $updateSourcePath -Force
+                
+                if ($elementosNuevos.Count -eq 0) {
+                    throw "Integridad fallida: El archivo ZIP esta vacio."
+                }
 
-try {
-    `$tempDir_updater = "$tempDir"
-    `$tempZip_updater = Join-Path "`$tempDir_updater" "update.zip"
-    `$tempExtract_updater = Join-Path "`$tempDir_updater" "extracted"
+                # --- 3. GENERAR SCRIPT DE BATCH (CIEGO A AMSI) ---
+                $installPath = (Split-Path -Path $PSScriptRoot -Parent)
+                $exePath = Join-Path $installPath "AdminImagenOffline.exe"
+                $batPath = Join-Path $tempDir "install_update.cmd"
 
-    Write-UpdateLog "[PASO 1/6] Descargando la nueva version v$remoteVersionStr..."
-    Invoke-WebRequest -Uri "$zipUrl" -OutFile "`$tempZip_updater"
+                Write-Host "   > Preparando motor de inyeccion..." -ForegroundColor Cyan
 
-    Write-UpdateLog "[PASO 2/6] Descomprimiendo archivos..."
-    Expand-Archive -Path "`$tempZip_updater" -DestinationPath "`$tempExtract_updater" -Force
-    
-    # GitHub extrae en una subcarpeta
-    `$updateSourcePath = (Get-ChildItem -Path "`$tempExtract_updater" -Directory | Select-Object -First 1).FullName
+                # Este .cmd usara un truco de la vieja escuela para saber si tu .exe o entorno ya se cerro
+                $batContent = @"
+@echo off
+title PROCESO DE ACTUALIZACION DE AdminImagenOffline
+color 0B
+echo.
+echo =========================================================
+echo    APLICANDO ACTUALIZACION A LA VERSION $remoteVersionStr
+echo =========================================================
+echo.
+echo Esperando a que se liberen los archivos (Cerrando aplicacion)...
 
-    Write-UpdateLog "[PASO 3/6] Esperando a que el proceso principal finalice..."
-    try {
-        # Espera segura con Timeout para no colgarse
-        Get-Process -Id `$parentPID -ErrorAction Stop | Wait-Process -ErrorAction Stop -Timeout 30
-    } catch {
-        Write-Host "   - El proceso principal ya ha finalizado." -ForegroundColor Gray
-    }
+:WaitLoop
+:: Intentamos renombrar la carpeta Script. Si falla, el proceso de PS sigue vivo bloqueandola.
+move /Y "$installPath\Script" "$installPath\Script_Old" >NUL 2>&1
+if exist "$installPath\Script" (
+    ping 127.0.0.1 -n 2 >NUL
+    goto WaitLoop
+)
 
-    Write-UpdateLog "[PASO 4/6] Verificando integridad de la descarga..."
-    
-    # --- LECTURA PREVENTIVA ---
-    # Capturamos los nuevos archivos ANTES de borrar los viejos.
-    `$elementosNuevos = Get-ChildItem -Path `$updateSourcePath -Force
-    
-    if (`$elementosNuevos.Count -eq 0) {
-        throw "ERROR DE INTEGRIDAD: El archivo ZIP descargado esta vacio o corrupto. Abortando actualizacion para proteger la instalacion actual."
-    }
+echo.
+echo Limpiando version anterior...
+rmdir /S /Q "$installPath\Script_Old" 2>NUL
+del /F /Q "$installPath\AdminImagenOffline.exe" 2>NUL
+del /F /Q "$installPath\README.md" 2>NUL
+del /F /Q "$installPath\LICENSE" 2>NUL
+del /F /Q "$installPath\version.txt" 2>NUL
 
-    Write-UpdateLog "[PASO 5/6] Preparando instalacion (eliminando version anterior)..."
+echo.
+echo Instalando nuevos archivos...
+xcopy /Y /E /H /C /I "$updateSourcePath\*" "$installPath\" >NUL
 
-    # --- 1. ELIMINACION POR LISTA EXPLICITA (Solo si la descarga fue exitosa) ---
-    `$elementosABorrar = @(
-        "Run.bat",
-        "Script",
-        "README.md",
-        "LICENSE",
-        "version.txt"
-    )
+echo.
+echo Limpiando archivos temporales...
+rmdir /S /Q "$tempDir" 2>NUL
 
-    foreach (`$elemento in `$elementosABorrar) {
-        `$rutaDestino = Join-Path "$installPath" `$elemento
-        if (Test-Path -LiteralPath `$rutaDestino) {
-            Remove-Item -Path `$rutaDestino -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-
-    Write-UpdateLog "[PASO 6/6] Instalando nuevos archivos..."
-    
-    # --- 2. COPIA BLINDADA ---
-    foreach (`$nuevo in `$elementosNuevos) {
-        `$destinoFinal = Join-Path "$installPath" `$nuevo.Name
-        Copy-Item -Path `$nuevo.FullName -Destination `$destinoFinal -Recurse -Force
-    }
-    
-    # Limpieza y reinicio
-    Remove-Item -Path "`$tempDir_updater" -Recurse -Force -ErrorAction SilentlyContinue
-    Start-Process -FilePath "$batchPath"
-}
-catch {
-    `$errFile = Join-Path "`$env:TEMP" "AdminImagenOfflineUpdateError.log"
-    "ERROR FATAL DE ACTUALIZACION: `$_" | Out-File -FilePath `$errFile -Force
-    Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.MessageBox]::Show("La actualizacion fallo.`nRevisa: `$errFile", "Error AdminImagenOffline", 'OK', 'Error')
-    exit 1
-}
+echo.
+echo Reiniciando aplicacion...
+start "" "$exePath"
+exit
 "@
-            # Guardar el script del actualizador con codificacion UTF8 limpia
-            $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-            [System.IO.File]::WriteAllText($updaterScriptPath, $updaterScriptContent, $utf8NoBom)
+                [System.IO.File]::WriteAllText($batPath, $batContent, [System.Text.Encoding]::ASCII)
 
-            # Lanzar el actualizador y cerrar
-            $launchArgs = "/c start `"PROCESO DE ACTUALIZACION`" powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$updaterScriptPath`" -parentPID $PID"
-            Start-Process cmd.exe -ArgumentList $launchArgs -WindowStyle Normal
+                Write-Log -LogLevel ACTION -Message "UPDATER: Descarga lista. Cediendo control al proceso Batch y saliendo."
+                Write-Warning "`nEl sistema se cerrara automaticamente para aplicar los cambios."
+                Start-Sleep -Seconds 2
 
-            exit
+                # Lanzar el proceso batch de forma asincrona y salir de PowerShell inmediatamente
+                Start-Process "cmd.exe" -ArgumentList "/c `"$batPath`"" -WindowStyle Normal
+                exit
+            }
+            catch {
+                Write-Host "`n[ERROR] Fallo la preparacion de la actualizacion: $_" -ForegroundColor Red
+                Write-Log -LogLevel ERROR -Message "UPDATER: Excepcion durante la descarga o preparacion: $_"
+                
+                # Limpieza en caso de fallo
+                Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 3
+            }
         } else {
             Write-Host "`nActualizacion omitida por el usuario." -ForegroundColor Yellow
             Start-Sleep -Seconds 1
