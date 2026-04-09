@@ -71,152 +71,89 @@ function Write-Log {
 
 # --- INICIO DEL MODULO DE AUTO-ACTUALIZACION ---
 function Invoke-FullRepoUpdater {
-    # --- CONFIGURACION ---
     $repoUser = "SOFTMAXTER"
     $repoName = "AdminImagenOffline"
     $repoBranch = "main"
-
-    # URLs directas
-    $versionUrl = "https://raw.githubusercontent.com/$repoUser/$repoName/$repoBranch/version.txt"
-    $zipUrl = "https://github.com/$repoUser/$repoName/archive/refs/heads/$repoBranch.zip"
+    $versionUrl = "[https://raw.githubusercontent.com/$repoUser/$repoName/$repoBranch/version.txt](https://raw.githubusercontent.com/$repoUser/$repoName/$repoBranch/version.txt)"
+    $zipUrl = "[https://github.com/$repoUser/$repoName/archive/refs/heads/$repoBranch.zip](https://github.com/$repoUser/$repoName/archive/refs/heads/$repoBranch.zip)"
 
     $updateAvailable = $false
     $remoteVersionStr = ""
 
     try {
-        Write-Host "Buscando actualizaciones..." -ForegroundColor Gray
-        # Timeout corto para no afectar el inicio si no hay red
+        Write-Host "`n  [~] Buscando actualizaciones en el servidor..." -ForegroundColor DarkGray
         $response = Invoke-WebRequest -Uri $versionUrl -UseBasicParsing -Headers @{"Cache-Control"="no-cache"} -TimeoutSec 5 -ErrorAction Stop
         $remoteVersionStr = $response.Content.Trim()
 
-        # --- LOGICA ROBUSTA DE VERSIONADO ---
-        try {
-            $localV = [System.Version]$script:Version
-            $remoteV = [System.Version]$remoteVersionStr
-            
-            if ($remoteV -gt $localV) {
-                $updateAvailable = $true
-            }
-        }
-        catch {
-            # Fallback: Comparacion de texto simple si el formato no es estandar
-            if ($remoteVersionStr -ne $script:Version) { 
-                $updateAvailable = $true 
-            }
-        }
-    }
-    catch {
-        # Silencioso si no hay conexion, no es critico
-        return
-    }
+        try { if ([System.Version]$remoteVersionStr -gt [System.Version]$script:Version) { $updateAvailable = $true } }
+        catch { if ($remoteVersionStr -ne $script:Version) { $updateAvailable = $true } }
+    } catch { return }
 
-    # --- Si hay una actualizacion, preguntamos al usuario ---
     if ($updateAvailable) {
-        Write-Host "`nNueva version encontrada!" -ForegroundColor Green
         Write-Host ""
-        Write-Host "Version Local: v$($script:Version)" -ForegroundColor Gray
-        Write-Host "Version Remota: v$remoteVersionStr" -ForegroundColor Yellow
-        Write-Log -LogLevel INFO -Message "UPDATER: Nueva version detectada. Local: v$($script:Version) | Remota: v$remoteVersionStr"
+        Write-Host "  =======================================================" -ForegroundColor Cyan
+        Write-Host "           ¡NUEVA VERSIÓN DISPONIBLE DETECTADA!          " -ForegroundColor Green
+        Write-Host "  =======================================================" -ForegroundColor Cyan
+        Write-Host "     Versión Local  : v$($script:Version)" -ForegroundColor Gray
+        Write-Host "     Versión Remota : v$remoteVersionStr" -ForegroundColor Yellow
+        Write-Host "  =======================================================" -ForegroundColor Cyan
 
-        Write-Host ""
-        $confirmation = Read-Host "Deseas descargar e instalar la actualizacion ahora? (S/N)"
-
-        if ($confirmation.ToUpper() -eq 'S') {
-            Write-Warning "`nDescargando y preparando la actualizacion de forma segura..."
-            Write-Log -LogLevel ACTION -Message "UPDATER: Iniciando descarga en el proceso de confianza."
-
-            # --- 1. PREPARAR ENTORNO TEMPORAL ---
-            $tempDir = Join-Path $env:TEMP "AdminUpdater_$($PID)"
-            if (Test-Path $tempDir) { Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
-            New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
-
-            $tempZip = Join-Path $tempDir "update.zip"
-            $tempExtract = Join-Path $tempDir "extracted"
+        if ((Read-Host "`n  [?] Deseas descargar e instalar la actualizacion ahora? (S/N)").ToUpper() -eq 'S') {
+            Write-Host "`n  [!] Preparando la actualizacion de forma segura..." -ForegroundColor Magenta
+            
+            $installPath = (Split-Path -Path $PSScriptRoot -Parent)
+            $tempZip = Join-Path $installPath "update.zip"
+            $tempExtract = Join-Path $installPath "update_extracted"
 
             try {
-                # --- 2. DESCARGA Y EXTRACCIÓN (HECHO POR EL SCRIPT PRINCIPAL) ---
+                if (Test-Path $tempExtract) { Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
+                
                 Write-Host "   > Descargando paquete (v$remoteVersionStr)..." -ForegroundColor Cyan
                 Invoke-WebRequest -Uri $zipUrl -OutFile $tempZip -UseBasicParsing
-
+                
                 Write-Host "   > Extrayendo archivos..." -ForegroundColor Cyan
                 Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
                 
-                # GitHub extrae en una subcarpeta (ej. AdminImagenOffline-main)
-                $updateSourcePath = (Get-ChildItem -Path $tempExtract -Directory | Select-Object -First 1).FullName
-                $elementosNuevos = Get-ChildItem -Path $updateSourcePath -Force
-                
-                if ($elementosNuevos.Count -eq 0) {
-                    throw "Integridad fallida: El archivo ZIP esta vacio."
-                }
-
-                # --- 3. GENERAR SCRIPT DE BATCH (CIEGO A AMSI) ---
-                $installPath = (Split-Path -Path $PSScriptRoot -Parent)
+                Write-Host "   > Generando motor de inyeccion..." -ForegroundColor Cyan
+                $batPath = Join-Path $installPath "ApplyUpdate.cmd"
                 $exePath = Join-Path $installPath "AdminImagenOffline.exe"
-                $batPath = Join-Path $tempDir "install_update.cmd"
 
-                Write-Host "   > Preparando motor de inyeccion..." -ForegroundColor Cyan
-
-                # Este .cmd usara un truco de la vieja escuela para saber si tu .exe o entorno ya se cerro
                 $batContent = @"
 @echo off
-title PROCESO DE ACTUALIZACION DE AdminImagenOffline
+title Instalando Actualizacion...
 color 0B
 echo.
 echo =========================================================
 echo    APLICANDO ACTUALIZACION A LA VERSION $remoteVersionStr
 echo =========================================================
 echo.
-echo Esperando a que se liberen los archivos (Cerrando aplicacion)...
+echo Esperando a que el sistema libere los archivos...
+timeout /t 4 /nobreak > NUL
 
-:WaitLoop
-:: Intentamos renombrar la carpeta Script. Si falla, el proceso de PS sigue vivo bloqueandola.
-move /Y "$installPath\Script" "$installPath\Script_Old" >NUL 2>&1
-if exist "$installPath\Script" (
-    ping 127.0.0.1 -n 2 >NUL
-    goto WaitLoop
-)
-
-echo.
-echo Limpiando version anterior...
-rmdir /S /Q "$installPath\Script_Old" 2>NUL
-del /F /Q "$installPath\AdminImagenOffline.exe" 2>NUL
-del /F /Q "$installPath\README.md" 2>NUL
-del /F /Q "$installPath\LICENSE" 2>NUL
-del /F /Q "$installPath\version.txt" 2>NUL
-
-echo.
 echo Instalando nuevos archivos...
-xcopy /Y /E /H /C /I "$updateSourcePath\*" "$installPath\" >NUL
+xcopy /Y /E /H /C /I "%~dp0update_extracted\AdminImagenOffline-main\*" "%~dp0" > NUL
 
-echo.
-echo Limpiando archivos temporales...
-rmdir /S /Q "$tempDir" 2>NUL
+echo Limpiando temporales...
+rmdir /S /Q "%~dp0update_extracted" 2>NUL
+del /F /Q "%~dp0update.zip" 2>NUL
 
-echo.
 echo Reiniciando aplicacion...
 start "" "$exePath"
-exit
+del "%~f0"
 "@
                 [System.IO.File]::WriteAllText($batPath, $batContent, [System.Text.Encoding]::ASCII)
-
-                Write-Log -LogLevel ACTION -Message "UPDATER: Descarga lista. Cediendo control al proceso Batch y saliendo."
-                Write-Warning "`nEl sistema se cerrara automaticamente para aplicar los cambios."
-                Start-Sleep -Seconds 2
-
-                # Lanzar el proceso batch de forma asincrona y salir de PowerShell inmediatamente
-                Start-Process "cmd.exe" -ArgumentList "/c `"$batPath`"" -WindowStyle Normal
-                exit
-            }
-            catch {
-                Write-Host "`n[ERROR] Fallo la preparacion de la actualizacion: $_" -ForegroundColor Red
-                Write-Log -LogLevel ERROR -Message "UPDATER: Excepcion durante la descarga o preparacion: $_"
                 
-                # Limpieza en caso de fallo
-                Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host "`n  [!] El sistema se cerrara para aplicar los cambios." -ForegroundColor Red
+                Start-Sleep -Seconds 2
+                
+                Start-Process "explorer.exe" -ArgumentList "`"$batPath`""
+                exit
+            } catch {
+                Write-Host "`n  [ERROR] Fallo la actualizacion: $_" -ForegroundColor Red
                 Start-Sleep -Seconds 3
             }
         } else {
-            Write-Host "`nActualizacion omitida por el usuario." -ForegroundColor Yellow
+            Write-Host "`n  [i] Actualizacion pospuesta por el usuario." -ForegroundColor DarkGray
             Start-Sleep -Seconds 1
         }
     }
@@ -274,20 +211,59 @@ function Format-WrappedText {
 
 # --- HELPER PRIVADO: Obtener letra de unidad libre (Z -> A) ---
 function Get-UnusedDriveLetter {
-    # 1. Usamos la clase nativa de .NET para una detección absoluta.
-    # A diferencia de Get-PSDrive, esto detecta todas las letras ocupadas en el sistema operativo a bajo nivel.
-    $usedLetters = [System.IO.DriveInfo]::GetDrives() | Select-Object -ExpandProperty Name | ForEach-Object { $_[0] }
-    
-    # 2. Rango ASCII invertido: Z (90) hasta F (70).
-    # Esto protege las letras A y B (Legacy), C (Sistema), D y E (Ópticos o discos secundarios fijos).
+    param(
+        # Array opcional para letras que el script ha reservado en memoria 
+        # pero que Windows aún no ha registrado completamente.
+        [string[]]$AlreadyReserved = @()
+    )
+
+    # Usamos un HashSet para rendimiento y para evitar duplicados automáticamente
+    $usedLetters = New-Object System.Collections.Generic.HashSet[string]
+
+    # 1. .NET Nativo: Detecta discos locales y de red en el token de Administrador actual.
+    [System.IO.DriveInfo]::GetDrives() | ForEach-Object { 
+        $null = $usedLetters.Add($_.Name[0].ToString().ToUpper()) 
+    }
+
+    # 2. WMI/CIM: Detecta volúmenes lógicos a nivel de sistema profundo.
+    Get-CimInstance Win32_LogicalDisk -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.DeviceID) { $null = $usedLetters.Add($_.DeviceID[0].ToString().ToUpper()) }
+    }
+
+    # 3. PSDrive: Detecta mapeos temporales exclusivos de la sesión de PowerShell.
+    Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.Name.Length -eq 1) { $null = $usedLetters.Add($_.Name.ToUpper()) }
+    }
+
+    # 4. El "Cazafantasmas" del Registro: Detecta unidades de red mapeadas por el 
+    # usuario estándar que el token de Administrador no puede ver por culpa de UAC.
+    $regNetwork = "HKCU:\Network"
+    if (Test-Path -LiteralPath $regNetwork) {
+        Get-ChildItem -Path $regNetwork -ErrorAction SilentlyContinue | ForEach-Object {
+            $null = $usedLetters.Add($_.PSChildName.ToUpper())
+        }
+    }
+
+    # 5. Reservas dinámicas del script (Parámetro fantasma corregido).
+    if ($AlreadyReserved) {
+        $AlreadyReserved | ForEach-Object { 
+            $null = $usedLetters.Add($_[0].ToString().ToUpper()) 
+        }
+    }
+
+    # Rango ASCII invertido: Z (90) hasta F (70).
+    # Protege A/B (Legacy), C (Sistema), D/E (Ópticos o secundarios fijos).
     $alphabet = [char[]](90..70) 
-    
-    foreach ($letter in $alphabet) {
-        if ($usedLetters -notcontains $letter) {
+
+    foreach ($letterChar in $alphabet) {
+        $letter = $letterChar.ToString()
+        
+        # Si la letra no está en nuestra lista negra, es segura para usar.
+        if (-not $usedLetters.Contains($letter)) {
             return $letter
         }
     }
-    
+
     throw "Excepcion de Montaje: No hay letras de unidad disponibles (rango Z: a F:) para adjuntar particiones temporales."
 }
 
