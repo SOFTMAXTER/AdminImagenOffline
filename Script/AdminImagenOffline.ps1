@@ -74,8 +74,8 @@ function Invoke-FullRepoUpdater {
     $repoUser = "SOFTMAXTER"
     $repoName = "AdminImagenOffline"
     $repoBranch = "main"
-    $versionUrl = "[https://raw.githubusercontent.com/$repoUser/$repoName/$repoBranch/version.txt](https://raw.githubusercontent.com/$repoUser/$repoName/$repoBranch/version.txt)"
-    $zipUrl = "[https://github.com/$repoUser/$repoName/archive/refs/heads/$repoBranch.zip](https://github.com/$repoUser/$repoName/archive/refs/heads/$repoBranch.zip)"
+    $versionUrl = "https://raw.githubusercontent.com/$repoUser/$repoName/$repoBranch/version.txt"
+    $zipUrl = "https://github.com/$repoUser/$repoName/archive/refs/heads/$repoBranch.zip"
 
     $updateAvailable = $false
     $remoteVersionStr = ""
@@ -92,10 +92,10 @@ function Invoke-FullRepoUpdater {
     if ($updateAvailable) {
         Write-Host ""
         Write-Host "  =======================================================" -ForegroundColor Cyan
-        Write-Host "           ¡NUEVA VERSIÓN DISPONIBLE DETECTADA!          " -ForegroundColor Green
+        Write-Host "           ¡NUEVA VERSION DISPONIBLE DETECTADA!          " -ForegroundColor Green
         Write-Host "  =======================================================" -ForegroundColor Cyan
-        Write-Host "     Versión Local  : v$($script:Version)" -ForegroundColor Gray
-        Write-Host "     Versión Remota : v$remoteVersionStr" -ForegroundColor Yellow
+        Write-Host "     Version Local  : v$($script:Version)" -ForegroundColor Gray
+        Write-Host "     Version Remota : v$remoteVersionStr" -ForegroundColor Yellow
         Write-Host "  =======================================================" -ForegroundColor Cyan
 
         if ((Read-Host "`n  [?] Deseas descargar e instalar la actualizacion ahora? (S/N)").ToUpper() -eq 'S') {
@@ -118,6 +118,7 @@ function Invoke-FullRepoUpdater {
                 $batPath = Join-Path $installPath "ApplyUpdate.cmd"
                 $exePath = Join-Path $installPath "AdminImagenOffline.exe"
 
+                # ATENCION: El cierre "@ de este bloque NO debe tener espacios a la izquierda
                 $batContent = @"
 @echo off
 title Instalando Actualizacion...
