@@ -4,7 +4,7 @@
 #  CONTENIDO   : Inject-WinReLanguage
 #                Inject-BootWimLanguage
 #                Inject-OsLanguage
-#                Show-LanguageInjector
+#                Show-LanguageInjector-GUI
 #
 #  DEPENDENCIAS DEL NUCLEO (heredadas via dot-source):
 #    - Write-Log              : registro de eventos
@@ -13,10 +13,11 @@
 #    - Select-PathDialog      : dialogo de seleccion de carpeta/archivo
 #
 #  ARQUITECTURA:
-#    Show-LanguageInjector  (orquestador de consola, 4 pasos interactivos)
+#    Show-LanguageInjector-GUI  (orquestador de consola, 4 pasos interactivos)
 #      ├─ Inject-WinReLanguage   (Fase 1 — winre.wim dentro del OS montado)
 #      ├─ Inject-OsLanguage      (Fase 2 — install.wim montado en MOUNT_DIR)
 #      └─ Inject-BootWimLanguage (Fase 3 — boot.wim en la distribucion ISO)
+#
 #  CARGA       : . "$PSScriptRoot\Modulo-Idioma.ps1"
 #
 #  NO modificar las firmas de funcion; el nucleo las invoca por nombre.
@@ -103,12 +104,47 @@ function Inject-WinReLanguage {
 
         if ($cabFiles.Count -eq 0) { throw "No se encontraron paquetes .cab para el idioma $LangCode." }
 
-        foreach ($cab in $cabFiles) {
-            Write-Log -LogLevel INFO -Message "LangInjector[WinRE]: Inyectando paquete -> $($cab.Name)"
+        # Fix 7: Inyectar lp.cab primero (pack base obligatorio).
+        # Los packs de componentes opcionales (WinPE-HTA, WinPE-WMI, etc.) se inyectan
+        # despues y se tratan como NO fatales: 0x800F081E (CBS_E_SOURCE_MISSING) indica
+        # que el componente base no existe en esta WinRE minima. Se salta con advertencia.
+        $DISM_SOURCE_MISSING = -2146498530  # 0x800F081E
+
+        $basePacks     = @($cabFiles | Where-Object { $_.Name -eq "lp.cab" })
+        $optionalPacks = @($cabFiles | Where-Object { $_.Name -ne "lp.cab" })
+
+        # 1. Pack base (lp.cab) — fallo aqui si es fatal
+        foreach ($cab in $basePacks) {
+            Write-Log -LogLevel INFO -Message "LangInjector[WinRE]: Inyectando pack base -> $($cab.Name)"
             dism /image:"$winReMountDir" /add-package /packagepath:"$($cab.FullName)" | Out-Null
-            # Codigo 3010 = reinicio requerido, no es error
-            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
-                throw "Fallo al inyectar $($cab.Name). Codigo: $LASTEXITCODE"
+            
+            if ($LASTEXITCODE -eq $DISM_SOURCE_MISSING) {
+                Write-Log -LogLevel ERROR -Message "LangInjector[WinRE]: Incompatibilidad de version ADK vs WinRE."
+                Write-Host "`n   [!] ERROR DE COMPATIBILIDAD:" -ForegroundColor Red
+                Write-Host "   El paquete de idioma base (lp.cab) no es compatible con la version de este WinRE." -ForegroundColor Yellow
+                Write-Host "   La version de los paquetes WinPE_OCs (ADK) debe coincidir con la version de la ISO." -ForegroundColor Gray
+                
+                # Desmontamos el WinRE sin guardar y abortamos la Fase 1 limpiamente
+                dism /unmount-wim /mountdir:"$winReMountDir" /discard | Out-Null
+                $dismountedWithDiscard = $true
+                return $false 
+            } elseif ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
+                throw "Fallo al inyectar el pack base $($cab.Name). Codigo: $LASTEXITCODE"
+            }
+        }
+
+        # 2. Packs de componentes opcionales — 0x800F081E se salta con advertencia
+        foreach ($cab in $optionalPacks) {
+            Write-Log -LogLevel INFO -Message "LangInjector[WinRE]: Inyectando pack opcional -> $($cab.Name)"
+            dism /image:"$winReMountDir" /add-package /packagepath:"$($cab.FullName)" | Out-Null
+
+            if ($LASTEXITCODE -eq $DISM_SOURCE_MISSING) {
+                # Componente base no presente en WinRE — salto seguro
+                Write-Log -LogLevel WARN -Message "LangInjector[WinRE]: Componente no presente en WinRE, se omite: $($cab.Name)"
+                Write-Host "   [!] Componente ausente en WinRE, omitido: $($cab.Name)" -ForegroundColor DarkYellow
+            } elseif ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
+                Write-Log -LogLevel WARN -Message "LangInjector[WinRE]: Error inesperado en $($cab.Name) (Codigo: $LASTEXITCODE). Se continua."
+                Write-Host "   [!] Error al inyectar $($cab.Name) (Codigo: $LASTEXITCODE), se continua." -ForegroundColor Yellow
             }
         }
 
@@ -171,7 +207,6 @@ function Inject-WinReLanguage {
     return $operationSucceeded
 }
 
-
 # =================================================================
 #  Inject-BootWimLanguage
 #  Inyecta idioma en todos los indices del boot.wim de la distribucion
@@ -211,6 +246,11 @@ function Inject-BootWimLanguage {
 
         if ($cabFiles.Count -eq 0) { throw "No se encontraron paquetes WinPE/Setup para $LangCode." }
 
+        # --- Lógica de separación de paquetes (Crucial para boot.wim) ---
+        $DISM_SOURCE_MISSING = -2146498530  # 0x800F081E
+        $basePacks     = @($cabFiles | Where-Object { $_.Name -match "^lp\.cab$" })
+        $optionalPacks = @($cabFiles | Where-Object { $_.Name -notmatch "^lp\.cab$" })
+
         # Procesar cada indice del boot.wim (tipicamente 1=WinPE, 2=Setup)
         for ($i = 1; $i -le $indexCount; $i++) {
             try {
@@ -218,9 +258,26 @@ function Inject-BootWimLanguage {
                 dism /mount-wim /wimfile:"$BootWimPath" /index:$i /mountdir:"$bootMountDir" | Out-Null
                 if ($LASTEXITCODE -ne 0) { throw "Fallo al montar el Indice $i del boot.wim. Codigo: $LASTEXITCODE" }
 
-                Write-Host "   > Inyectando paquetes de idioma WinPE/Setup..." -ForegroundColor DarkGray
-                foreach ($cab in $cabFiles) {
+                # 1. Inyectar paquete base PRIMERO
+                Write-Host "   > Inyectando paquete base (lp.cab)..." -ForegroundColor DarkGray
+                foreach ($cab in $basePacks) {
                     dism /image:"$bootMountDir" /add-package /packagepath:"$($cab.FullName)" | Out-Null
+                    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { 
+                        throw "Fallo al inyectar el pack base $($cab.Name). Codigo: $LASTEXITCODE" 
+                    }
+                }
+
+                # 2. Inyectar módulos opcionales/Setup (Tolerando ausencias en Indice 1)
+                Write-Host "   > Inyectando componentes opcionales/Setup..." -ForegroundColor DarkGray
+                foreach ($cab in $optionalPacks) {
+                    dism /image:"$bootMountDir" /add-package /packagepath:"$($cab.FullName)" | Out-Null
+                    
+                    if ($LASTEXITCODE -eq $DISM_SOURCE_MISSING) {
+                        # Es normal que en el Indice 1 falten componentes de Setup
+                        Write-Log -LogLevel WARN -Message "LangInjector[Boot]: Componente ausente en Indice $i, se omite: $($cab.Name)"
+                    } elseif ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
+                        Write-Log -LogLevel WARN -Message "LangInjector[Boot]: Error inesperado en $($cab.Name) (Codigo: $LASTEXITCODE). Se continua."
+                    }
                 }
 
                 Write-Host "   > Configurando $LangCode por defecto..." -ForegroundColor DarkGray
@@ -278,7 +335,6 @@ function Inject-BootWimLanguage {
                 throw "Fallo la copia fisica del boot.wim optimizado. Se restauro la copia de seguridad original. Error: $($_.Exception.Message)"
             }
         } else {
-            # Bug 2 corregido: advertencia explicita cuando la optimizacion falla
             Write-Log -LogLevel WARN -Message "LangInjector[Boot]: La optimizacion (export) fallo o fue omitida. El boot.wim conserva su tamano original sin comprimir."
             Write-Warning "boot.wim no pudo ser optimizado. Revisa el log para detalles."
         }
@@ -296,7 +352,6 @@ function Inject-BootWimLanguage {
 
     return $operationSucceeded
 }
-
 
 # =================================================================
 #  Inject-OsLanguage
@@ -317,14 +372,36 @@ function Inject-OsLanguage {
 
     try {
         # 1. Paquete de idioma principal (Client Language Pack)
-        Write-Log -LogLevel INFO -Message "LangInjector[OS]: Buscando el paquete de idioma principal (Client-Language-Pack)..."
-        $lpCab = Get-ChildItem -Path $LangPackPath -Filter "*Client-Language-Pack*$LangCode*.cab" -Recurse |
+        # Busqueda flexible para aceptar formatos clásicos (.cab) y modernos comprimidos (.esd)
+        Write-Log -LogLevel INFO -Message "LangInjector[OS]: Buscando el paquete de idioma principal (.cab o .esd)..."
+
+        # Tier 1
+        $lpCab = Get-ChildItem -Path $LangPackPath -File -Recurse |
+                 Where-Object { $_.Name -match "(?i)Client-Language.*Pack.*$LangCode.*\.(cab|esd)$" } |
                  Select-Object -First 1
 
         if (-not $lpCab) {
-            throw "No se encontro el paquete de idioma principal (LP) para $LangCode en la ruta proporcionada."
+            Write-Log -LogLevel WARN -Message "LangInjector[OS]: Tier 1 sin resultados. Probando filtro Tier 2..."
+            $lpCab = Get-ChildItem -Path $LangPackPath -File -Recurse |
+                     Where-Object { $_.Name -match "(?i)LanguagePack.*$LangCode.*\.(cab|esd)$" } |
+                     Select-Object -First 1
         }
 
+        if (-not $lpCab) {
+            Write-Log -LogLevel WARN -Message "LangInjector[OS]: Tier 2 sin resultados. Probando filtro Tier 3..."
+            $lpCab = Get-ChildItem -Path $LangPackPath -File -Recurse |
+                     Where-Object { $_.Name -match "(?i)$LangCode.*\.(cab|esd)$" -and $_.Name -notmatch "(?i)LanguageFeatures|WinPE-|NetFx" } |
+                     Select-Object -First 1
+        }
+
+        if (-not $lpCab) {
+            $allCabs = @(Get-ChildItem -Path $LangPackPath -Include "*.cab", "*.esd" -Recurse -File | Select-Object -First 10)
+            $sample  = if ($allCabs.Count -gt 0) { ($allCabs.Name -join ", ") } else { "(ninguno encontrado)" }
+            Write-Log -LogLevel ERROR -Message "LangInjector[OS]: LP no encontrado. Ruta: '$LangPackPath' | Muestra: $sample"
+            throw "No se encontro el paquete de idioma principal (LP) para '$LangCode'.`nMuestra de archivos encontrados: $sample"
+        }
+
+        Write-Log -LogLevel INFO -Message "LangInjector[OS]: LP encontrado -> $($lpCab.FullName)"
         Write-Host "   > Inyectando paquete base ($LangCode)..." -ForegroundColor Yellow
         Write-Log -LogLevel ACTION -Message "LangInjector[OS]: Inyectando LP -> $($lpCab.Name)"
 
@@ -336,8 +413,11 @@ function Inject-OsLanguage {
         $fodTypes = @("Basic", "Fonts", "Handwriting", "Speech", "TextToSpeech")
 
         foreach ($fod in $fodTypes) {
-            $fodCab = Get-ChildItem -Path $FodPath -Filter "*LanguageFeatures-$fod*$LangCode*.cab" -Recurse |
+            # Adaptado también para tolerar FODs en formato .esd si los hubiera
+            $fodCab = Get-ChildItem -Path $FodPath -File -Recurse |
+                      Where-Object { $_.Name -match "(?i)LanguageFeatures-$fod.*$LangCode.*\.(cab|esd)$" } |
                       Select-Object -First 1
+                      
             if ($fodCab) {
                 dism /image:"$MountDir" /Add-Package /PackagePath:"$($fodCab.FullName)" | Out-Null
             } else {
@@ -346,7 +426,6 @@ function Inject-OsLanguage {
         }
 
         # 3. Paquete de Experiencia Local (LXP UWP, opcional)
-        # Bug 3 corregido: Start-Process en lugar de Invoke-Expression para blindar rutas con espacios
         if ($LxpPath -and (Test-Path $LxpPath)) {
             Write-Host "   > Inyectando paquete de experiencia local (LXP UWP)..." -ForegroundColor Yellow
             $lxpAppx    = Get-ChildItem -Path $LxpPath -Filter "*$LangCode*.appx*" -Recurse | Select-Object -First 1
@@ -363,7 +442,6 @@ function Inject-OsLanguage {
                 )
 
                 if ($lxpLicense) {
-                    # Reemplazar /SkipLicense por la licencia real si existe
                     $dismArgs[-1] = "/LicensePath:$($lxpLicense.FullName)"
                 }
 
@@ -392,7 +470,6 @@ function Inject-OsLanguage {
         return $false
     }
 }
-
 
 # =================================================================
 #  Show-LanguageInjector
