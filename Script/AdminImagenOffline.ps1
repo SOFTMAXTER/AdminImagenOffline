@@ -81,7 +81,7 @@ function Invoke-FullRepoUpdater {
     $remoteVersionStr = ""
 
     try {
-        Write-Host "`n  [~] Buscando actualizaciones en el servidor..." -ForegroundColor DarkGray
+        # Write-Host "`n  [~] Buscando actualizaciones en el servidor..." -ForegroundColor Gray
         $response = Invoke-WebRequest -Uri $versionUrl -UseBasicParsing -Headers @{"Cache-Control"="no-cache"} -TimeoutSec 5 -ErrorAction Stop
         $remoteVersionStr = $response.Content.Trim()
 
@@ -92,7 +92,7 @@ function Invoke-FullRepoUpdater {
     if ($updateAvailable) {
         Write-Host ""
         Write-Host "  =======================================================" -ForegroundColor Cyan
-        Write-Host "           ¡NUEVA VERSION DISPONIBLE DETECTADA!          " -ForegroundColor Green
+        Write-Host "           NUEVA VERSION DISPONIBLE DETECTADA!          " -ForegroundColor Green
         Write-Host "  =======================================================" -ForegroundColor Cyan
         Write-Host "     Version Local  : v$($script:Version)" -ForegroundColor Gray
         Write-Host "     Version Remota : v$remoteVersionStr" -ForegroundColor Yellow
@@ -154,7 +154,7 @@ del "%~f0"
                 Start-Sleep -Seconds 3
             }
         } else {
-            Write-Host "`n  [i] Actualizacion pospuesta por el usuario." -ForegroundColor DarkGray
+            Write-Host "`n  [i] Actualizacion pospuesta por el usuario." -ForegroundColor Gray
             Start-Sleep -Seconds 1
         }
     }
@@ -253,7 +253,7 @@ function Get-UnusedDriveLetter {
     }
 
     # Rango ASCII invertido: Z (90) hasta F (70).
-    # Protege A/B (Legacy), C (Sistema), D/E (Ópticos o secundarios fijos).
+    # Protege A/B (Legacy), C (Sistema), D/E (Opticos o secundarios fijos).
     $alphabet = [char[]](90..70) 
 
     foreach ($letterChar in $alphabet) {
