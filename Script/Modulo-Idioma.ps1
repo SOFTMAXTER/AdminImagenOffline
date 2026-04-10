@@ -4,7 +4,7 @@
 #  CONTENIDO   : Inject-WinReLanguage
 #                Inject-BootWimLanguage
 #                Inject-OsLanguage
-#                Show-LanguageInjector-GUI
+#                Show-LanguageInjector
 #
 #  DEPENDENCIAS DEL NUCLEO (heredadas via dot-source):
 #    - Write-Log              : registro de eventos
