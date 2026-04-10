@@ -5971,8 +5971,8 @@ function Main-Menu {
             }
             "8" { 
                 if ($Script:IMAGE_MOUNTED) { 
-                    Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Show-LanguageInjector-GUI'"
-                    Show-LanguageInjector-GUI 
+                    Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Show-LanguageInjector'"
+                    Show-LanguageInjector 
                 } else { 
                     Write-Log -LogLevel WARN -Message "MenuMain: Intento de acceso a Idiomas denegado (No hay imagen montada)."
                     Show-Mount-Warning 
@@ -6204,7 +6204,7 @@ catch {
     Write-Host "             ¡ERROR CRITICO DEL SISTEMA!               " -ForegroundColor Red
     Write-Host "=======================================================" -ForegroundColor Red
     Write-Host ""
-    Write-Host "Ha ocurrido un error inesperado que detuvo la ejecución." -ForegroundColor Gray
+    Write-Host "Ha ocurrido un error inesperado que detuvo la ejecucion." -ForegroundColor Gray
     Write-Host "Error: " -NoNewline; Write-Host $_.ToString() -ForegroundColor Yellow
     Write-Host "Línea: " -NoNewline; Write-Host $line -ForegroundColor Cyan
     Write-Host ""
@@ -6213,7 +6213,7 @@ catch {
     $logPayload = @"
 
 ==================================================
-CRASH REPORT - EXCEPCIÓN NO CONTROLADA
+CRASH REPORT - EXCEPCION NO CONTROLADA
 ==================================================
 Timestamp  : $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 Script Ver : v$($script:Version)
@@ -6234,8 +6234,8 @@ $stack
     Write-Log -LogLevel ERROR -Message $logPayload
 
     # 4. Opción de recuperación
-    Write-Host "El detalle técnico forense se ha guardado en el archivo de registro (Logs\Registro.log)." -ForegroundColor Gray
-    Write-Warning "El sistema intentará desmontar las colmenas y limpiar el entorno automáticamente."
+    Write-Host "El detalle tecnico forense se ha guardado en el archivo de registro (Logs\Registro.log)." -ForegroundColor Gray
+    Write-Warning "El sistema intentara desmontar las colmenas y limpiar el entorno automaticamente."
     Pause
 }
 
