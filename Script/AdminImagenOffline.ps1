@@ -5879,7 +5879,7 @@ function Main-Menu {
         }
         Write-Host ""
         Write-Host " [ SISTEMA ]" -ForegroundColor Yellow
-        Write-Host "   8. Configuracion (Rutas)"
+        Write-Host "   9. Configuracion (Rutas)"
         Write-Host ""
         Write-Host "--------------------------------------------------------------------------------"
         Write-Host "   [L] Ver Logs   [H] Ayuda/Info   [S] Salir" -ForegroundColor Gray
