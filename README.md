@@ -95,66 +95,89 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ---
 
-## Arquitectura y Explicación Detallada de Funciones
+## 🚀 Configuración Inicial
 
-A diferencia de scripts tradicionales, AdminImagenOffline opera mediante un motor central que carga dinámicamente submódulos y gestiona bloqueos de memoria (`Garbage Collection`) para evitar la corrupción de la imagen. A continuación, se detalla la lógica interna de cada componente principal:
+Al iniciar el script por primera vez, se te pedirá configurar dos directorios críticos (estas rutas se guardan en `config.json`):
+1. **Directorio de Montaje (`MOUNT_DIR`):** Carpeta vacía (ej. `C:\TEMP`) donde se desempaquetará la imagen de Windows para su edición.
+2. **Directorio Temporal (`Scratch_DIR`):** Espacio de trabajo para DISM (ej. `C:\Scratch`). Se recomienda usar rutas cortas para evitar el límite de 260 caracteres de Windows al extraer paquetes profundos.
 
-### 1. Motor Central de Montaje y Estado Global
-El núcleo del script maneja el ciclo de vida del montaje, protegiendo contra cierres inesperados y bloqueos de archivos.
+---
 
-* **`Check-And-Repair-Mounts`**: Función de seguridad forense. Detecta si un montaje previo quedó huérfano (ej. por un apagón) leyendo el estado `Needs Remount` o `Invalid` en DISM, ofreciendo recuperación interactiva o limpieza (`/Cleanup-Wim`).
-* **`Select-WindowsMediaSource`**: Gestor de extracción de ISOs. Monta una ISO virtualmente, extrae el contenido usando `Robocopy` (para máxima velocidad y evasión de permisos) y normaliza los atributos de solo lectura.
-* **`Mount-Image`**: Enrutador de montaje.
-    * **Modo WIM/ESD:** Ejecuta el montaje estándar de DISM.
-    * **Modo VHD/VHDX:** Utiliza el motor de Hyper-V (`Mount-VHD`). Implementa un escaneo heurístico de particiones asignando letras de unidad dinámicas (en el rango seguro Z: a F:) para localizar el árbol `\Windows\System32\config\SYSTEM`, garantizando que se monte la partición correcta del sistema operativo.
-* **`Unmount-Image`**: Cierre blindado. Antes de llamar a DISM para hacer `/Commit` (guardar) o `/Discard`, fuerza un `Unmount-Hives` y dispara múltiples pases del Recolector de Basura (`[GC]::Collect()`) para liberar *handles* retenidos por la API COM de .NET, previniendo errores `C1420116` (Directorio en uso).
+## 📖 Guía Detallada del Menú Principal y Módulos
 
-### 2. Conversión y Gestión de Índices
-Herramientas para manipular la estructura interna de los contenedores de despliegue.
+A continuación se desglosan las opciones del menú principal, explicando la lógica técnica y cómo utilizar cada módulo de la suite.
 
-* **`Convert-ESD`**: Transforma compresión sólida (ESD) a estándar (WIM) extrayendo el índice seleccionado. Vital, ya que DISM prohíbe la edición directa sobre archivos `.esd`.
-* **`Convert-VHD`**: Ingeniería de captura. Monta un disco virtual *sin* asignar letra automática (`-NoDriveLetter`) para evitar condiciones de carrera con el Plug & Play de Windows. Ubica la partición del SO, ejecuta `Optimize-Volume -ReTrim` para eliminar bloques vacíos, y captura el estado a un archivo `.wim` ultra-comprimido.
-* **`Export-Index` / `Delete-Index`**: Wrappers seguros para extraer ediciones específicas (ej. aislar Windows 10 Pro) o purgar índices no deseados para reducir el tamaño del contenedor base.
+### [ 1 ] Gestión de Imagen
+Este es el núcleo de la herramienta. Controla el ciclo de vida del montaje de la imagen.
 
-### 3. Gestor Avanzado del Entorno de Recuperación y Arranque
-Módulos críticos para manipular los entornos de preinstalación (`WinPE`).
+* **Montar Imagen:** Te permite seleccionar un archivo `.wim`, `.esd` (solo lectura/exportación) o disco virtual (`.vhd`/`.vhdx`). 
+  * *Novedad:* Puedes elegir **"Extraer desde una ISO"**. El script montará la ISO, vaciará de forma segura una carpeta de extracción temporal y volcará el contenido usando `Robocopy` a máxima velocidad.
+  * *Discos Virtuales (VHD):* Si seleccionas un VHD, el script hace un escaneo inteligente saltándose las particiones EFI/Recovery, encuentra la partición de Windows, le asigna una letra de unidad dinámica y la monta. **Importante:** Los cambios en un VHD se guardan en tiempo real.
+* **Desmontar / Guardar Cambios (Commit):** * Si usas WIM, la opción *Commit* re-comprimirá los cambios en el archivo.
+  * Si hay bloqueos de registro, el script fuerza un `[GC]::Collect()` (Recolección de basura en .NET) para liberar *handles* huérfanos antes de desmontar, evitando corrupciones.
+* **Editar Metadatos:** Cambia el nombre interno y la descripción de la imagen (ej. de "Windows 10 Pro" a "Mi Custom OS").
+* **Editar Índices:** Permite Exportar un índice específico para crear una imagen más ligera o Eliminar índices que no necesitas permanentemente.
 
-* **`Manage-WinRE-Menu`**: 
-    1.  Extrae físicamente `winre.wim` de la ruta `Windows\System32\Recovery`.
-    2.  Respalda sus atributos y ACLs originales (propiedad de TrustedInstaller).
-    3.  Despliega un entorno de montaje anidado (Staging) permitiendo inyectar drivers (ej. Intel VMD/RAID) o herramientas (DaRT).
-    4.  Al guardar, ejecuta una *recompresión extrema* usando `/Export-Image /Bootable` para reconstruir el diccionario WIM, reduciendo significativamente el peso muerto antes de reinyectarlo en el SO base.
-* **`Manage-BootWim-Menu`**: Analiza `boot.wim` separando heurísticamente el índice de Setup (Instalador) del índice WinPE (Rescate). Permite inyectar controladores de almacenamiento masivo vitales para que el instalador reconozca discos NVMe modernos.
+### [ 2 ] Convertir Formatos
+Herramientas de conversión e ingesta de imágenes.
 
-### 4. Motor de Registro Offline (El Core Arquitectónico)
-El componente técnico más avanzado. Evade las limitaciones de `Set-ItemProperty` que suelen corromper las colmenas.
+* **Convertir ESD a WIM:** Los archivos `.esd` tienen compresión sólida y no pueden ser modificados directamente. Esta opción extrae un índice del ESD y lo convierte a formato `.wim` estándar para su posterior montaje y edición.
+* **Convertir VHD/VHDX a WIM:** Monta un disco virtual silenciosamente, detecta la partición del sistema operativo, le aplica un *Trim* (Optimización) si es posible, y captura todo el volumen hacia un archivo `.wim` usando compresión máxima.
 
-* **`Mount-Hives` / `Unmount-Hives`**: Carga las colmenas físicas (`SYSTEM`, `SOFTWARE`, `COMPONENTS`, `NTUSER.DAT`) en ramales temporales (`HKLM\OfflineSystem`, etc.).
-* **`Translate-OfflinePath`**: Traductor en tiempo real. Redirige automáticamente rutas estándar escritas por usuarios (ej. `HKCU\Software` o `HKCR`) a sus respectivas colmenas temporales físicas (`HKLM\OfflineUser`, `HKLM\OfflineSoftware\Classes`), detectando el `ControlSet` activo de manera dinámica.
-* **`Unlock-Single-Key` / `Restore-KeyOwner`**: **Blindaje de Permisos (SDDL).** Toma posesión de claves protegidas por el sistema utilizando la API de bajo nivel de .NET (`[System.Security.AccessControl]`). Antes de modificar, respalda el descriptor de seguridad original (SDDL) en RAM (`$Script:SDDL_Backups`), y tras la inyección, restaura quirúrgicamente la propiedad a `TrustedInstaller` o `SYSTEM`, garantizando que el sistema operativo no se rompa al arrancar.
-* **`Import-OfflineReg`**: Inyector *headless* de archivos `.reg`. Limpia cabeceras, traduce las rutas masivamente, evade Hives bloqueados (SAM, SECURITY) para prevenir corrupción, y aplica los cambios usando una instancia silenciosa de `reg.exe` conectada a un buffer asíncrono para captura de errores.
+### [ 3 ] Herramientas de Arranque y Medios (Boot Tools)
+Para modificar el entorno de preinstalación y generar medios.
 
-### 5. Inyector de Addons (Carga Útil)
-* **`Show-Addons-GUI` / `Install-OfflineAddon`**: Motor de inyección de software de terceros.
-    * **Ordenamiento Heurístico:** Clasifica la inyección leyendo sufijos (`_main.tpk` se instala antes que paquetes de idioma o parches de registro).
-    * **Escudo de Arquitectura:** Detecta si la imagen destino es `x64` o `x86` y omite automáticamente paquetes marcados con el sufijo incorrecto (ej. `_x86.tpk` en un Windows de 64 bits), evitando BSODs.
-    * **Inyección Robocopy:** Utiliza `robocopy /B` (Backup Mode) para inyectar archivos esquivando los bloqueos NTFS de Windows, fusionando directorios sin alterar ACLs.
+* **Editar boot.wim:** Monta el motor de instalación de Windows. El script detecta automáticamente el índice de *Windows PE* (para crear Live USB de rescate) y el índice de *Setup* (para el instalador). Es vital para inyectar *Drivers* de almacenamiento (VMD/Raid/Intel RST) para que el instalador reconozca discos duros modernos.
+* **Crear ISO Booteable:** Toma tu carpeta de extracción y empaqueta una ISO lista para Rufus o Ventoy.
+* **Despliegue a VHD:** Aplica tu WIM personalizado directamente a un disco físico (USB) o disco virtual.
 
-### 6. Módulos de Personalización (Catálogos y GUIs)
-Interfaces gráficas que cargan diccionarios de datos (`.ps1`) para manipular la imagen.
+### [ 4 ] Drivers (Inyectar / Eliminar)
+Gestión completa de los controladores *offline*.
 
-* **`Show-Bloatware-GUI`**: Lee los paquetes aprovisionados (Appx) y los cruza con listas blancas/negras predefinidas. Permite la purga masiva de telemetría y apps basura a nivel contenedor (impidiendo que se instalen en los nuevos usuarios).
-* **`Show-Services-Offline-GUI`**: Mapea servicios del sistema clasificados por impacto. Modifica los estados de arranque (`Start = 4` para deshabilitar) directamente en la colmena offline, incluyendo un botón de "Restauración SDDL" para devolver los servicios a su estado de fábrica.
-* **`Show-Tweaks-Offline-GUI`**: Aplica configuraciones avanzadas (rendimiento, privacidad, UI). Su motor de inyección realiza conversiones de tipo estrictas (ej. forzando arreglos de bytes nativos mediante `[BitConverter]`) evadiendo el desbordamiento aritmético natural de PowerShell al manejar `DWord` o `QWord` de gran tamaño.
-* **`Show-RegQueue-GUI`**: Procesador por lotes (Batch) para archivos de registro. Fusiona múltiples `.reg` en un solo archivo maestro en memoria, aplica la traducción de rutas global y realiza una única transacción de desbloqueo e inyección para máximo rendimiento.
+* **Inyectar Drivers:** Selecciona una carpeta con archivos `.inf`. El motor de DISM inyectará los controladores en el almacén del sistema. Ideal para integrar drivers de red o video antes de instalar.
+* **Desinstalar Drivers:** Interfaz gráfica que lista todos los controladores de terceros (OEM) instalados en la imagen montada, permitiendo eliminarlos selectivamente.
 
-### 7. Mantenimiento y Limpieza de Imagen
-Rutinas escalonadas para el saneamiento del contenedor.
+### [ 5 ] Centro de Personalización y Ajustes (Ingeniería del Sistema)
+El módulo más potente de la suite, estructurado en múltiples interfaces gráficas (GUI).
 
-* **`Limpieza-Menu`**: Orquesta comandos de salud de DISM (`CheckHealth`, `ScanHealth`).
-    * **Fallback Inteligente:** Si `RestoreHealth` falla por falta de archivos (`Error 0x800f081f`), solicita una ISO/WIM de origen e intenta la reparación forzando el modo `/LimitAccess`.
-    * **SFC Offline:** Ejecuta el Comprobador de Archivos de Sistema dirigiendo los parámetros `/offbootdir` y `/offwindir` al punto de montaje temporal.
-    * **Component Store Cleanup:** Elimina actualizaciones superadas. Opcionalmente ejecuta `/ResetBase` para comprimir la imagen al máximo, rompiendo la retro-compatibilidad de desinstalación de parches antiguos.
+1. **Eliminar Bloatware (Apps):** * **Uso:** Abre una interfaz que escanea las `AppxProvisionedPackages`. 
+   * **Lógica:** Compara las apps contra listas blancas y negras (`Bloatware.ps1`). Te permite marcar la "basura" (Xbox, Solitario, Bloatware OEM) y eliminarla en lote. Tiene un "Escudo" que oculta apps vitales (Calculadora, Store, VCLibs) a menos que actives el modo avanzado.
+2. **Características y .NET 3.5:** Activa o desactiva funciones nativas (Hyper-V, SMB 1.0, WSL) o inyecta el paquete de compatibilidad de .NET 3.5 si proporcionas la carpeta `sxs`.
+3. **Servicios del Sistema:**
+   * **Uso:** Interfaz por pestañas que carga la colmena (`Hive`) del registro `SYSTEM` en memoria.
+   * **Lógica:** Permite apagar servicios pesados (SysMain/Superfetch, Indexación, Xbox) de forma segura. Si modificas un servicio, el script realiza el cambio evadiendo restricciones, pero guarda el objeto original para permitirte usar el botón **"RESTAURAR ORIGINALES"** en cualquier momento.
+4. **Tweaks y Registro:** * **Ajustes Nativos:** Aplica mejoras de rendimiento y privacidad (Desactivar Telemetría, Cortana, Optimizar NTFS) definidas en `Ajustes.ps1`. Utiliza inyección de datos `.NET` estricta (`BitConverter`) para evitar desbordamientos de datos DWORD en PowerShell.
+   * **Importador .REG en Lote:** Permite encolar múltiples archivos `.reg`. El motor fusiona el texto, traduce dinámicamente las rutas (ej. convierte `HKCU` en `HKLM\OfflineUser`), respalda los permisos nativos (SDDL) de *TrustedInstaller*, inyecta los datos de forma silenciosa y luego restaura la herencia de permisos para no romper la seguridad de Windows.
+5. **Inyector de Apps Modernas (Appx/MSIX):** Aprovisiona aplicaciones universales descargadas manualmente.
+6. **Automatización OOBE (Unattend.xml):** Aplica archivos de respuestas para automatizar la instalación de Windows (saltar preguntas de privacidad, crear cuentas de usuario automático).
+7. **Inyector de Addons (.wim, .tpk, .bpk, .reg):**
+   * **Uso:** Integra paquetes de utilidades (7-Zip, Visual C++, etc.).
+   * **Lógica Inteligente:** Si incluyes sufijos en el nombre del archivo (ej. `_x64`, `_x86`), el motor activa el **Escudo de Arquitectura** y omitirá los paquetes que no coincidan con la arquitectura de la imagen montada. Si usas `_main`, les dará prioridad de inyección en la cola. Extrae los empaquetados usando firma binaria para evitar fallos.
+8. **Gestionar WinRE (Entorno de Recuperación):**
+   * **Lógica:** Va a `Windows\System32\Recovery`, extrae el `winre.wim`, lo monta en el *Scratch*, permite inyectar DaRT o Drivers, y al guardar, utiliza `/Export-Image /Bootable` para destruir los diccionarios viejos y recomprimir el entorno, ahorrando cientos de megabytes de "peso muerto".
+9. **OEM Branding:** Personaliza fondos de pantalla predeterminados, la pantalla de bloqueo y la información del fabricante (Logo, Soporte) en las propiedades del sistema.
+
+### [ 6 ] Limpieza y Reparación (DISM/SFC)
+Mantenimiento de la integridad de la imagen.
+
+* **CheckHealth / ScanHealth:** Verifica daños en el almacén de componentes.
+* **Reparar Imagen (RestoreHealth):** Si la imagen está corrupta, intenta repararla. Si falla, el script despliega un protocolo de emergencia (*Fallback*) que te pedirá un `install.wim` sano para usarlo como fuente de reparación (`/LimitAccess`).
+* **SFC Offline:** Ejecuta el comprobador de archivos del sistema apuntando a la unidad montada.
+* **Limpiar Componentes (StartComponentCleanup):** Pule el tamaño de la imagen borrando actualizaciones obsoletas. Te preguntará si deseas usar `/ResetBase` (mayor compresión, pero impide desinstalar actualizaciones previas).
+
+### [ 7 ] Cambiar Edición
+Permite actualizar la versión de Windows (ej. de `Home` a `Professional` o `Enterprise LTSC`).
+* **Nota Técnica:** El script consulta las ediciones de destino viables (`Get-TargetEditions`). Esta operación en archivos WIM es reversible si no se guardan los cambios, pero en un **VHD** es un proceso destructivo e irreversible en tiempo real. El script mostrará una advertencia de seguridad roja si intentas hacer esto sobre un disco virtual.
+
+### [ 8 ] Gestión de Idiomas
+Permite inyectar *Language Packs* (LP), *Features on Demand* (FOD) y *Local Experience Packs* (LXP) para cambiar el idioma base del instalador y del sistema operativo.
+
+---
+
+## 🛡️ Notas Técnicas y Seguridad
+
+* **Manejo de Hives (Colmenas de Registro):** AdminImagenOffline no usa comandos frágiles para modificar el registro. Levanta las colmenas físicas (`SYSTEM`, `SOFTWARE`, `NTUSER.DAT`) como variables virtuales, aplica permisos administrativos temporales, escribe y las descarga. Si fuerzas el cierre de la ventana, el evento `$OnExitScript` atrapará la señal de muerte e intentará desmontar el registro para evitar pantallas azules (BSOD) en tu imagen.
+* **Recuperación de Sesión:** Si la PC se apaga bruscamente o un antivirus bloquea un montaje, la próxima vez que abras el script, detectará el montaje "Fantasma" o el estado "Needs Remount" y te ofrecerá una recuperación guiada o limpieza forzada del entorno.
 
 ---
 
