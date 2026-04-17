@@ -2603,7 +2603,7 @@ function Customization-Menu {
         Write-Host "       (Extrae, monta y modifica el entorno de recuperacion nativo)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "   [9] OEM Branding (Fondos y Metadatos del Sistema)" -ForegroundColor Cyan
-        Write-Host "       (Aplica wallpaper/lockscreen e inyecta logo e informacion del fabricante)" -ForegroundColor Gray
+        Write-Host "       (Aplica wallpaper/lockscreen e informacion del fabricante)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
@@ -5879,7 +5879,7 @@ function Main-Menu {
         }
         Write-Host ""
         Write-Host " [ SISTEMA ]" -ForegroundColor Yellow
-        Write-Host "   9. Configuracion (Rutas)"
+        Write-Host "   [R] Configuracion (Rutas)"
         Write-Host ""
         Write-Host "--------------------------------------------------------------------------------"
         Write-Host "   [L] Ver Logs   [H] Ayuda/Info   [S] Salir" -ForegroundColor Gray
@@ -5978,7 +5978,7 @@ function Main-Menu {
                     Show-Mount-Warning 
                 } 
             }
-            "9" { 
+            "R" { 
                 Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Show-ConfigMenu'"
                 Show-ConfigMenu
 			}
