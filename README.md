@@ -92,6 +92,70 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 3.  Haz doble clic en **`AdminImagenOffline.exe`**. El lanzador solicitará permisos de Administrador y preparará el entorno de PowerShell con las políticas de ejecución correctas.
 4.  Si es la primera ejecución, ve al menú **[8] Configuración** para definir tus directorios de trabajo permanente (`MOUNT_DIR` y `Scratch_DIR`). Se recomienda usar rutas lo más cortas posibles (ej. `C:\Mount`) para evitar el límite de 260 caracteres de la API de Windows durante las extracciones.
 
+
+---
+
+## Arquitectura y Explicación Detallada de Funciones
+
+A diferencia de scripts tradicionales, AdminImagenOffline opera mediante un motor central que carga dinámicamente submódulos y gestiona bloqueos de memoria (`Garbage Collection`) para evitar la corrupción de la imagen. A continuación, se detalla la lógica interna de cada componente principal:
+
+### 1. Motor Central de Montaje y Estado Global
+El núcleo del script maneja el ciclo de vida del montaje, protegiendo contra cierres inesperados y bloqueos de archivos.
+
+* **`Check-And-Repair-Mounts`**: Función de seguridad forense. Detecta si un montaje previo quedó huérfano (ej. por un apagón) leyendo el estado `Needs Remount` o `Invalid` en DISM, ofreciendo recuperación interactiva o limpieza (`/Cleanup-Wim`).
+* **`Select-WindowsMediaSource`**: Gestor de extracción de ISOs. Monta una ISO virtualmente, extrae el contenido usando `Robocopy` (para máxima velocidad y evasión de permisos) y normaliza los atributos de solo lectura.
+* **`Mount-Image`**: Enrutador de montaje.
+    * **Modo WIM/ESD:** Ejecuta el montaje estándar de DISM.
+    * **Modo VHD/VHDX:** Utiliza el motor de Hyper-V (`Mount-VHD`). Implementa un escaneo heurístico de particiones asignando letras de unidad dinámicas (en el rango seguro Z: a F:) para localizar el árbol `\Windows\System32\config\SYSTEM`, garantizando que se monte la partición correcta del sistema operativo.
+* **`Unmount-Image`**: Cierre blindado. Antes de llamar a DISM para hacer `/Commit` (guardar) o `/Discard`, fuerza un `Unmount-Hives` y dispara múltiples pases del Recolector de Basura (`[GC]::Collect()`) para liberar *handles* retenidos por la API COM de .NET, previniendo errores `C1420116` (Directorio en uso).
+
+### 2. Conversión y Gestión de Índices
+Herramientas para manipular la estructura interna de los contenedores de despliegue.
+
+* **`Convert-ESD`**: Transforma compresión sólida (ESD) a estándar (WIM) extrayendo el índice seleccionado. Vital, ya que DISM prohíbe la edición directa sobre archivos `.esd`.
+* **`Convert-VHD`**: Ingeniería de captura. Monta un disco virtual *sin* asignar letra automática (`-NoDriveLetter`) para evitar condiciones de carrera con el Plug & Play de Windows. Ubica la partición del SO, ejecuta `Optimize-Volume -ReTrim` para eliminar bloques vacíos, y captura el estado a un archivo `.wim` ultra-comprimido.
+* **`Export-Index` / `Delete-Index`**: Wrappers seguros para extraer ediciones específicas (ej. aislar Windows 10 Pro) o purgar índices no deseados para reducir el tamaño del contenedor base.
+
+### 3. Gestor Avanzado del Entorno de Recuperación y Arranque
+Módulos críticos para manipular los entornos de preinstalación (`WinPE`).
+
+* **`Manage-WinRE-Menu`**: 
+    1.  Extrae físicamente `winre.wim` de la ruta `Windows\System32\Recovery`.
+    2.  Respalda sus atributos y ACLs originales (propiedad de TrustedInstaller).
+    3.  Despliega un entorno de montaje anidado (Staging) permitiendo inyectar drivers (ej. Intel VMD/RAID) o herramientas (DaRT).
+    4.  Al guardar, ejecuta una *recompresión extrema* usando `/Export-Image /Bootable` para reconstruir el diccionario WIM, reduciendo significativamente el peso muerto antes de reinyectarlo en el SO base.
+* **`Manage-BootWim-Menu`**: Analiza `boot.wim` separando heurísticamente el índice de Setup (Instalador) del índice WinPE (Rescate). Permite inyectar controladores de almacenamiento masivo vitales para que el instalador reconozca discos NVMe modernos.
+
+### 4. Motor de Registro Offline (El Core Arquitectónico)
+El componente técnico más avanzado. Evade las limitaciones de `Set-ItemProperty` que suelen corromper las colmenas.
+
+* **`Mount-Hives` / `Unmount-Hives`**: Carga las colmenas físicas (`SYSTEM`, `SOFTWARE`, `COMPONENTS`, `NTUSER.DAT`) en ramales temporales (`HKLM\OfflineSystem`, etc.).
+* **`Translate-OfflinePath`**: Traductor en tiempo real. Redirige automáticamente rutas estándar escritas por usuarios (ej. `HKCU\Software` o `HKCR`) a sus respectivas colmenas temporales físicas (`HKLM\OfflineUser`, `HKLM\OfflineSoftware\Classes`), detectando el `ControlSet` activo de manera dinámica.
+* **`Unlock-Single-Key` / `Restore-KeyOwner`**: **Blindaje de Permisos (SDDL).** Toma posesión de claves protegidas por el sistema utilizando la API de bajo nivel de .NET (`[System.Security.AccessControl]`). Antes de modificar, respalda el descriptor de seguridad original (SDDL) en RAM (`$Script:SDDL_Backups`), y tras la inyección, restaura quirúrgicamente la propiedad a `TrustedInstaller` o `SYSTEM`, garantizando que el sistema operativo no se rompa al arrancar.
+* **`Import-OfflineReg`**: Inyector *headless* de archivos `.reg`. Limpia cabeceras, traduce las rutas masivamente, evade Hives bloqueados (SAM, SECURITY) para prevenir corrupción, y aplica los cambios usando una instancia silenciosa de `reg.exe` conectada a un buffer asíncrono para captura de errores.
+
+### 5. Inyector de Addons (Carga Útil)
+* **`Show-Addons-GUI` / `Install-OfflineAddon`**: Motor de inyección de software de terceros.
+    * **Ordenamiento Heurístico:** Clasifica la inyección leyendo sufijos (`_main.tpk` se instala antes que paquetes de idioma o parches de registro).
+    * **Escudo de Arquitectura:** Detecta si la imagen destino es `x64` o `x86` y omite automáticamente paquetes marcados con el sufijo incorrecto (ej. `_x86.tpk` en un Windows de 64 bits), evitando BSODs.
+    * **Inyección Robocopy:** Utiliza `robocopy /B` (Backup Mode) para inyectar archivos esquivando los bloqueos NTFS de Windows, fusionando directorios sin alterar ACLs.
+
+### 6. Módulos de Personalización (Catálogos y GUIs)
+Interfaces gráficas que cargan diccionarios de datos (`.ps1`) para manipular la imagen.
+
+* **`Show-Bloatware-GUI`**: Lee los paquetes aprovisionados (Appx) y los cruza con listas blancas/negras predefinidas. Permite la purga masiva de telemetría y apps basura a nivel contenedor (impidiendo que se instalen en los nuevos usuarios).
+* **`Show-Services-Offline-GUI`**: Mapea servicios del sistema clasificados por impacto. Modifica los estados de arranque (`Start = 4` para deshabilitar) directamente en la colmena offline, incluyendo un botón de "Restauración SDDL" para devolver los servicios a su estado de fábrica.
+* **`Show-Tweaks-Offline-GUI`**: Aplica configuraciones avanzadas (rendimiento, privacidad, UI). Su motor de inyección realiza conversiones de tipo estrictas (ej. forzando arreglos de bytes nativos mediante `[BitConverter]`) evadiendo el desbordamiento aritmético natural de PowerShell al manejar `DWord` o `QWord` de gran tamaño.
+* **`Show-RegQueue-GUI`**: Procesador por lotes (Batch) para archivos de registro. Fusiona múltiples `.reg` en un solo archivo maestro en memoria, aplica la traducción de rutas global y realiza una única transacción de desbloqueo e inyección para máximo rendimiento.
+
+### 7. Mantenimiento y Limpieza de Imagen
+Rutinas escalonadas para el saneamiento del contenedor.
+
+* **`Limpieza-Menu`**: Orquesta comandos de salud de DISM (`CheckHealth`, `ScanHealth`).
+    * **Fallback Inteligente:** Si `RestoreHealth` falla por falta de archivos (`Error 0x800f081f`), solicita una ISO/WIM de origen e intenta la reparación forzando el modo `/LimitAccess`.
+    * **SFC Offline:** Ejecuta el Comprobador de Archivos de Sistema dirigiendo los parámetros `/offbootdir` y `/offwindir` al punto de montaje temporal.
+    * **Component Store Cleanup:** Elimina actualizaciones superadas. Opcionalmente ejecuta `/ResetBase` para comprimir la imagen al máximo, rompiendo la retro-compatibilidad de desinstalación de parches antiguos.
+
 ---
 
 ## Notas de Seguridad y Mejores Prácticas
