@@ -1,7 +1,4 @@
-# --- CATALOGO CENTRAL DE AJUSTES (OPTIMIZADO PARA OFFLINE / WIM) ---
-# Contiene solo ajustes basados en REGISTRO que pueden aplicarse a una imagen montada.
-
-$script:SystemTweaks = @(
+﻿$script:SystemTweaks = @(
 
     # =========================================================
     # ANTI-BLOATWARE
@@ -129,17 +126,6 @@ $script:SystemTweaks = @(
         RegistryKey    = "EnableEnhancedSearchMode"
         EnabledValue   = 0
         DefaultValue   = 1
-        RegistryType   = "DWord"
-    },
-    [PSCustomObject]@{
-        Name           = "Limitar CPU de Windows Defender (25%)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Evita que los escaneos de Defender acaparen toda la CPU."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows Defender\Scan"
-        RegistryKey    = "AvgCPULoadFactor"
-        EnabledValue   = 25
-        DefaultValue   = 50
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
