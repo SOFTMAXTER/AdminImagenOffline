@@ -4,7 +4,6 @@
 - Integracion de Idiomas / Medios Multilingues (Nuevo): Language Packs y Language Features on Demand con deteccion automatica de ADK/WinPE Add-on.
 - Actualizador Inteligente Mejorado: muestra el changelog en consola antes de aplicar la actualizacion.
 - Limpieza Profunda de Bloatware (Appx): nuevo motor de eliminacion permanente con limpieza de residuos fisicos y vacunas anti-reinstalacion.
-- Mas de 40 Nuevos Tweaks (Categoria WIOS): opciones de energia, modo seguro, reinicio en BIOS, panel de control unificado, UUP Dump, entre otros.
 - Autocompletado de Metadatos: plantillas predefinidas para nombres y descripciones de ediciones de Windows.
 - OEM Branding Corporativo: bloqueo permanente de fondos y pantallas de bloqueo via politicas, escalado de imagenes de perfil para Windows 11.
 - Automatizacion OOBE Ampliada: contrasenas que nunca expiran y ajustes de barra de tareas desde el generador de Unattend.xml.
