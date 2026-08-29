@@ -1,4 +1,4 @@
-# =================================================================
+﻿# =================================================================
 #  Modulo-DeployVHD
 #
 #  CONTENIDO   : Show-Deploy-To-VHD-GUI
@@ -169,9 +169,9 @@ function Show-Deploy-To-VHD-GUI {
     $numSize          = New-Object System.Windows.Forms.NumericUpDown
     $numSize.Location = "140, 83"
     $numSize.Size     = "80, 25"
-    $numSize.Minimum  = 10
+    $numSize.Minimum  = 40
     $numSize.Maximum  = 10000
-    $numSize.Value    = 60
+    $numSize.Value    = 64
     $grpDest.Controls.Add($numSize)
 
     $chkDynamic          = New-Object System.Windows.Forms.CheckBox
@@ -233,9 +233,9 @@ function Show-Deploy-To-VHD-GUI {
     $numEfiSize          = New-Object System.Windows.Forms.NumericUpDown
     $numEfiSize.Location = "140, 153"
     $numEfiSize.Size     = "80, 25"
-    $numEfiSize.Minimum  = 50
+    $numEfiSize.Minimum  = 100
     $numEfiSize.Maximum  = 2000
-    $numEfiSize.Value    = 100
+    $numEfiSize.Value    = 260
     $grpDest.Controls.Add($numEfiSize)
 
     $lblMsrSize          = New-Object System.Windows.Forms.Label
@@ -306,7 +306,7 @@ function Show-Deploy-To-VHD-GUI {
     # Ajustar etiqueta EFI y visibilidad MSR segun esquema
     $chkUEFI.Add_CheckedChanged({
         if ($chkUEFI.Checked) {
-            $numEfiSize.Value      = 100
+            $numEfiSize.Value      = 260
             $lblMsrSize.Visible    = $true
             $numMsrSize.Visible    = $true
             $lblEfiSize.Text       = "EFI (MB):"
@@ -412,7 +412,18 @@ function Show-Deploy-To-VHD-GUI {
         $isVhdMode  = $radVhd.Checked
         $vhdPath    = $txtVhd.Text
         $wimPath    = $txtWim.Text
-        $idx        = $cmbIndex.SelectedIndex + 1
+        
+        # --- FIX: Extraccion segura del indice real usando Regex ---
+        # Busca un numero entre corchetes al inicio del texto seleccionado
+        if ($cmbIndex.Text -match '^\[(\d+)\]') {
+            $idx = [int]$Matches[1]
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "No se pudo determinar el indice exacto de la imagen seleccionada.`nEl formato esperado es '[Indice] Nombre'.", 
+                "Error de Indice", 'OK', 'Error')
+            return
+        }
+
         $isGPT      = $chkUEFI.Checked
         $sizeBootMB = [int]$numEfiSize.Value
         $sizeMsrMB  = [int]$numMsrSize.Value
@@ -478,45 +489,68 @@ function Show-Deploy-To-VHD-GUI {
                     New-VHD -Path $vhdPath -SizeBytes $totalSize -Fixed   -ErrorAction Stop | Out-Null
                 }
 
-                Mount-VHD -Path $vhdPath -Passthru -ErrorAction Stop | Out-Null
-                Start-Sleep -Milliseconds 500
-                $diskNum = (Get-VHD -Path $vhdPath).DiskNumber
+                Mount-VHD -Path $vhdPath -ErrorAction Stop | Out-Null
+                
+                $diskNum = $null
+                $maxRetries = 15
+                $retryCount = 0
+
+                # Bucle de espera activa: evalúa cada 500ms si el disco ya está expuesto
+                while ($null -eq $diskNum -and $retryCount -lt $maxRetries) {
+                    Start-Sleep -Milliseconds 500
+                    $vhdInfo = Get-VHD -Path $vhdPath -ErrorAction SilentlyContinue
+                    if ($vhdInfo -and $vhdInfo.DiskNumber -ge 0) {
+                        $diskNum = $vhdInfo.DiskNumber
+                    }
+                    $retryCount++
+                }
 
                 if ($null -eq $diskNum -or $diskNum -lt 0) {
-                    throw "No se pudo determinar el numero de disco del VHD montado de forma segura. Abortando para evitar daño al sistema host."
+                    throw "Timeout: El VDS tardó demasiado en exponer el número de disco del VHD. Abortando para evitar daños en el host."
                 }
             } else {
-                $lblStatus.Text = "Limpiando disco fisico $diskNum..."
+                $lblStatus.Text = "Forzando desmontaje y limpiando disco fisico $diskNum..."
                 $form.Refresh()
-                Clear-Disk -Number $diskNum -RemoveData -Confirm:$false -ErrorAction Stop
+                
+                # Desconexión forzada para soltar el bloqueo de Windows Explorer o Antivirus
+                Set-Disk -Number $diskNum -IsOffline $true -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 1
+                Set-Disk -Number $diskNum -IsOffline $false -ErrorAction SilentlyContinue
+                
+                # Limpieza con atributo RemoveOEM para destruir particiones protegidas antiguas
+                Clear-Disk -Number $diskNum -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop
             }
 
             # ── Fase 2: Inicializacion y particionado ─────────────────
             $partStyle = if ($isGPT) { "GPT" } else { "MBR" }
             Initialize-Disk -Number $diskNum -PartitionStyle $partStyle -ErrorAction Stop
 
-            Write-Log -LogLevel INFO -Message "DEPLOY: Formateando y asignando particiones en Disco $diskNum..."
+            # Prevencion de anomalias: Purga proactiva de particiones automaticas 
+            # (Ej. particion MSR fantasma de 16MB inyectada por el motor de Initialize-Disk en GPT)
+            Get-Partition -DiskNumber $diskNum | Remove-Partition -Confirm:$false -ErrorAction SilentlyContinue
+
+            Write-Log -LogLevel INFO -Message "DEPLOY: Formateando y asignando particiones en Disco $diskNum con esquema $partStyle..."
 
             if ($isGPT) {
                 $lblStatus.Text = "Particionando GPT (UEFI)..."
                 $form.Refresh()
 
-                # 1. EFI
+                # 1. EFI (Arranque del Sistema)
                 $pEFI = New-Partition -DiskNumber $diskNum -Size ($sizeBootMB * 1MB) `
                     -GptType "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}" -ErrorAction Stop
-                Format-Volume -Partition $pEFI -FileSystem FAT32 -NewFileSystemLabel "System" -Confirm:$false | Out-Null
+                Format-Volume -Partition $pEFI -FileSystem FAT32 -Confirm:$false | Out-Null
                 $freeLetBoot      = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                 $reservedLetters += $freeLetBoot.ToString()
                 Set-Partition -InputObject $pEFI -NewDriveLetter $freeLetBoot -ErrorAction Stop
                 $driveLetterBoot  = "$($freeLetBoot):"
 
-                # 2. MSR
+                # 2. MSR (Microsoft Reserved)
                 if ($sizeMsrMB -gt 0) {
                     New-Partition -DiskNumber $diskNum -Size ($sizeMsrMB * 1MB) `
                         -GptType "{e3c9e316-0b5c-4db8-817d-f92df00215ae}" -ErrorAction Stop | Out-Null
                 }
 
-                # 3. Windows
+                # 3. Windows (Volumen principal del SO)
                 $diskObj   = Get-Disk -Number $diskNum
                 $freeSpace = $diskObj.LargestFreeExtent
 
@@ -526,17 +560,17 @@ function Show-Deploy-To-VHD-GUI {
                 } else {
                     $pWin = New-Partition -DiskNumber $diskNum -UseMaximumSize -ErrorAction Stop
                 }
-                Format-Volume -Partition $pWin -FileSystem NTFS -NewFileSystemLabel "Windows" -Confirm:$false | Out-Null
+                Format-Volume -Partition $pWin -FileSystem NTFS -Confirm:$false | Out-Null
                 $freeLetSys       = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                 $reservedLetters += $freeLetSys.ToString()
                 Set-Partition -InputObject $pWin -NewDriveLetter $freeLetSys -ErrorAction Stop
                 $driveLetterSystem = "$($freeLetSys):"
 
-                # 4. Recovery
+                # 4. Recovery (Entorno de Recuperacion)
                 if ($sizeRecMB -gt 0) {
                     $pRec = New-Partition -DiskNumber $diskNum -UseMaximumSize `
                         -GptType "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}" -ErrorAction Stop
-                    Format-Volume -Partition $pRec -FileSystem NTFS -NewFileSystemLabel "Recovery" -Confirm:$false | Out-Null
+                    Format-Volume -Partition $pRec -FileSystem NTFS -Confirm:$false | Out-Null
                     $freeLetRec       = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                     $reservedLetters += $freeLetRec.ToString()
                     Set-Partition -InputObject $pRec -NewDriveLetter $freeLetRec -ErrorAction Stop
@@ -547,15 +581,15 @@ function Show-Deploy-To-VHD-GUI {
                 $lblStatus.Text = "Particionando MBR (Legacy)..."
                 $form.Refresh()
 
-                # 1. System Reserved
+                # 1. System Reserved (Arranque Activo)
                 $pBoot = New-Partition -DiskNumber $diskNum -Size ($sizeBootMB * 1MB) -IsActive -ErrorAction Stop
-                Format-Volume -Partition $pBoot -FileSystem NTFS -NewFileSystemLabel "System Reserved" -Confirm:$false | Out-Null
+                Format-Volume -Partition $pBoot -FileSystem NTFS -Confirm:$false | Out-Null
                 $freeLetBoot      = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                 $reservedLetters += $freeLetBoot.ToString()
                 Set-Partition -InputObject $pBoot -NewDriveLetter $freeLetBoot -ErrorAction Stop
                 $driveLetterBoot  = "$($freeLetBoot):"
 
-                # 2. Windows
+                # 2. Windows (Volumen principal del SO)
                 $diskObj   = Get-Disk -Number $diskNum
                 $freeSpace = $diskObj.LargestFreeExtent
 
@@ -565,16 +599,16 @@ function Show-Deploy-To-VHD-GUI {
                 } else {
                     $pWin = New-Partition -DiskNumber $diskNum -UseMaximumSize -ErrorAction Stop
                 }
-                Format-Volume -Partition $pWin -FileSystem NTFS -NewFileSystemLabel "Windows" -Confirm:$false | Out-Null
+                Format-Volume -Partition $pWin -FileSystem NTFS -Confirm:$false | Out-Null
                 $freeLetSys       = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                 $reservedLetters += $freeLetSys.ToString()
                 Set-Partition -InputObject $pWin -NewDriveLetter $freeLetSys -ErrorAction Stop
                 $driveLetterSystem = "$($freeLetSys):"
 
-                # 3. Recovery
+                # 3. Recovery (Proteccion Legacy Oculta)
                 if ($sizeRecMB -gt 0) {
                     $pRec = New-Partition -DiskNumber $diskNum -UseMaximumSize -MbrType 0x27 -ErrorAction Stop
-                    Format-Volume -Partition $pRec -FileSystem NTFS -NewFileSystemLabel "Recovery" -Confirm:$false | Out-Null
+                    Format-Volume -Partition $pRec -FileSystem NTFS -Confirm:$false | Out-Null
                     $freeLetRec       = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                     $reservedLetters += $freeLetRec.ToString()
                     Set-Partition -InputObject $pRec -NewDriveLetter $freeLetRec -ErrorAction Stop
@@ -582,7 +616,7 @@ function Show-Deploy-To-VHD-GUI {
                 }
             }
 
-            # ── Fase 3: Aplicacion de la imagen ───────────────────────
+            # ── Fase 3: Aplicacion de la imagen principal ─────────────────
             $lblStatus.Text = "Desplegando imagen (Esto tardara varios minutos)..."
             $form.Refresh()
 
@@ -608,18 +642,46 @@ function Show-Deploy-To-VHD-GUI {
                 throw "Fallo la creacion de archivos de arranque (BCDBOOT)."
             }
 
-            # ── Fase 5: Ocultar particiones de sistema ─────────────────
+            # ── Fase 5: Ocultar y proteger particiones de sistema ─────────
             if ($sizeRecMB -gt 0 -and $driveLetterRecovery) {
-                $lblStatus.Text = "Ocultando particion WinRE..."
+                $lblStatus.Text = "Protegiendo particion WinRE..."
                 $form.Refresh()
+                
+                # Aplicar Atributos GPT requeridos por Microsoft si estamos en UEFI
+                if ($isGPT) {
+                    Write-Log -LogLevel INFO -Message "DEPLOY: Inyectando atributos GPT protectivos a la particion Recovery."
+                    try {
+                        # Corrección: Especificar el Namespace de Storage y filtrar en origen
+                        $cimNamespace = "Root\Microsoft\Windows\Storage"
+                        $cimPart = Get-CimInstance -Namespace $cimNamespace -ClassName MSFT_Partition -Filter "DriveLetter = '$($freeLetRec[0])'"
+                        
+                        if ($cimPart) {
+                            $cimPart | Set-CimInstance -Property @{ 
+                                GptType = "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}"; 
+                                IsHidden = $true; 
+                                NoDefaultDriveLetter = $true 
+                            } -ErrorAction SilentlyContinue
+                        }
+                    } catch { 
+                        Write-Log -LogLevel WARN -Message "DEPLOY: No se pudieron establecer los atributos CIM de la particion Recovery. Error: $($_.Exception.Message)" 
+                    }
+                }
+
                 Remove-PartitionAccessPath -InputObject $pRec -AccessPath $driveLetterRecovery -ErrorAction SilentlyContinue
                 $driveLetterRecovery = $null
             }
 
-            $lblStatus.Text = "Ocultando particiones del sistema..."
+            $lblStatus.Text = "Ocultando particiones de arranque..."
             $form.Refresh()
+            
             $bootPart = Get-Partition -DriveLetter $freeLetBoot[0] -ErrorAction SilentlyContinue
             if ($bootPart) {
+                if ($isGPT) {
+                    try { 
+                        # bootPart ya es un objeto CIM, pero aseguramos la escritura silenciosa
+                        $bootPart | Set-CimInstance -Property @{ IsHidden = $true; NoDefaultDriveLetter = $true } -ErrorAction SilentlyContinue 
+                    } catch {}
+                }
                 Remove-PartitionAccessPath -InputObject $bootPart -AccessPath $driveLetterBoot -ErrorAction SilentlyContinue
                 $driveLetterBoot = $null
             }
@@ -645,7 +707,7 @@ function Show-Deploy-To-VHD-GUI {
 
             # Limpiar letras de unidad asignadas antes del fallo
             foreach ($letter in @($driveLetterSystem, $driveLetterBoot, $driveLetterRecovery)) {
-                if ($letter -and (Test-Path $letter)) {
+                if ($letter -and (Test-Path "$letter\")) {
                     $part = Get-Partition -DriveLetter $letter[0] -ErrorAction SilentlyContinue
                     if ($part) {
                         Remove-PartitionAccessPath `
@@ -708,6 +770,20 @@ function Show-Deploy-To-VHD-GUI {
     $toolTip.SetToolTip($numMsrSize,      "Size de la particion MSR. Solo aplica en GPT/UEFI.")
     $toolTip.SetToolTip($numRecSize,      "Size de la particion de Recuperacion (WinRE). Se recomienda 1024 MB.")
     $toolTip.SetToolTip($btnDeploy,       "ADVERTENCIA: Iniciara el proceso de creacion/formateo y aplicacion de imagen.")
+
+    $form.Add_FormClosing({ 
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "Estas seguro de que deseas salir?", 
+            "Confirmar Salida", 
+            [System.Windows.Forms.MessageBoxButtons]::YesNo, 
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+
+        if ($confirm -eq 'No') {
+            $_.Cancel = $true
+        } else {
+        }
+    })
 
     # ------------------------------------------------------------------
     # 6. Mostrar y limpiar

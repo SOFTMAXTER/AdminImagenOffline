@@ -1,4 +1,4 @@
-# =================================================================
+﻿# =================================================================
 #  Modulo-Unattend
 #
 #  CONTENIDO   : Show-Unattend-GUI
@@ -52,18 +52,23 @@ function Show-Unattend-GUI {
     Add-Type -AssemblyName System.Drawing
 
     # ------------------------------------------------------------------
-    # 2. Deteccion de arquitectura del WIM montado
+    # 2. Deteccion de arquitectura de la imagen montada
     # ------------------------------------------------------------------
-    $detectedArch = "amd64"
+    $detectedArch = "amd64" # Valor por defecto
     try {
-        $imgInfo = Get-WindowsImage -Path $Script:MOUNT_DIR -ErrorAction Stop
-        switch ($imgInfo.Architecture) {
-            0  { $detectedArch = "x86"   }
-            9  { $detectedArch = "amd64" }
-            12 { $detectedArch = "arm64" }
+        $sysDir = Join-Path $Script:MOUNT_DIR "Windows"
+        
+        # Detección infalible por estructura de carpetas nativa
+        if (Test-Path (Join-Path $sysDir "SysArm32")) {
+            $detectedArch = "arm64"
+        } elseif (Test-Path (Join-Path $sysDir "SysWOW64")) {
+            $detectedArch = "amd64"
+        } elseif (Test-Path (Join-Path $sysDir "System32")) {
+            $detectedArch = "x86"
         }
+        Write-Log -LogLevel INFO -Message "Unattend-GUI: Arquitectura detectada para XML -> $detectedArch"
     } catch {
-        Write-Log -LogLevel WARN -Message "Unattend-GUI: No se pudo detectar arquitectura. Usando amd64 por defecto."
+        Write-Log -LogLevel WARN -Message "Unattend-GUI: Excepcion al detectar arquitectura. Usando amd64 por defecto."
     }
 
     # ------------------------------------------------------------------
@@ -71,7 +76,7 @@ function Show-Unattend-GUI {
     # ------------------------------------------------------------------
     $form                 = New-Object System.Windows.Forms.Form
     $form.Text            = "Gestor OOBE Inteligente ($detectedArch) - Integrado"
-    $form.Size            = New-Object System.Drawing.Size(980, 620)
+    $form.Size            = New-Object System.Drawing.Size(980, 650)
     $form.StartPosition   = "CenterScreen"
     $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
     $form.ForeColor       = [System.Drawing.Color]::White
@@ -80,7 +85,7 @@ function Show-Unattend-GUI {
 
     $tabControl          = New-Object System.Windows.Forms.TabControl
     $tabControl.Location = "10, 10"
-    $tabControl.Size     = "940, 560"
+    $tabControl.Size     = "940, 580"
     $form.Controls.Add($tabControl)
 
     # ==================================================================
@@ -95,7 +100,7 @@ function Show-Unattend-GUI {
     $grpUser           = New-Object System.Windows.Forms.GroupBox
     $grpUser.Text      = " Usuario Admin Local y Nombre de Equipo "
     $grpUser.Location  = "20, 15"
-    $grpUser.Size      = "440, 145"
+    $grpUser.Size      = "440, 175"
     $grpUser.ForeColor = [System.Drawing.Color]::White
     $tabBasic.Controls.Add($grpUser)
 
@@ -154,15 +159,26 @@ function Show-Unattend-GUI {
     $lblPCNameHint.ForeColor = [System.Drawing.Color]::DarkGray
     $grpUser.Controls.Add($lblPCNameHint)
 
+	$chkPassExpire          = New-Object System.Windows.Forms.CheckBox
+    $chkPassExpire.Text     = "La contraseña del usuario nunca expira"
+    $chkPassExpire.Location = "20, 135"
+    $chkPassExpire.AutoSize = $true
+    $chkPassExpire.Checked  = $true
+    $chkPassExpire.ForeColor = [System.Drawing.Color]::Cyan
+    $chkPassExpire.Enabled  = $true
+    $grpUser.Controls.Add($chkPassExpire)
+
     $chkInteractiveUser.Add_CheckedChanged({
-        $txtUser.Enabled = -not $chkInteractiveUser.Checked
-        $txtPass.Enabled = -not $chkInteractiveUser.Checked
+        $enabled = -not $chkInteractiveUser.Checked
+        $txtUser.Enabled = $enabled
+        $txtPass.Enabled = $enabled
+        $chkPassExpire.Enabled = $enabled
     })
 
     # ── Grupo: Preferencias de idioma y teclado ───────────────────────
     $grpLang           = New-Object System.Windows.Forms.GroupBox
     $grpLang.Text      = " Preferencias de idioma y teclado "
-    $grpLang.Location  = "20, 170"
+    $grpLang.Location  = "20, 200"
     $grpLang.Size      = "440, 275"
     $grpLang.ForeColor = [System.Drawing.Color]::PaleGoldenrod
     $tabBasic.Controls.Add($grpLang)
@@ -266,7 +282,7 @@ function Show-Unattend-GUI {
     $chkBypass.Text     = "Bypass Requisitos (TPM, SecureBoot, RAM) - Solo Win11"
     $chkBypass.Location = "20, 25"
     $chkBypass.AutoSize = $true
-    $chkBypass.Checked  = $true
+    $chkBypass.Checked  = $false
     $grpHacks.Controls.Add($chkBypass)
 
     $chkNet          = New-Object System.Windows.Forms.CheckBox
@@ -296,7 +312,7 @@ function Show-Unattend-GUI {
     $grpTweaks           = New-Object System.Windows.Forms.GroupBox
     $grpTweaks.Text      = " Optimizacion, Visual y Privacidad "
     $grpTweaks.Location  = "480, 170"
-    $grpTweaks.Size      = "440, 300"
+    $grpTweaks.Size      = "440, 330"
     $grpTweaks.ForeColor = [System.Drawing.Color]::Orange
     $tabBasic.Controls.Add($grpTweaks)
 
@@ -304,7 +320,7 @@ function Show-Unattend-GUI {
     $chkVisuals.Text     = "Estilo Win10: Barra Izquierda + Menu Clasico"
     $chkVisuals.Location = "20, 30"
     $chkVisuals.AutoSize = $true
-    $chkVisuals.Checked  = $true
+    $chkVisuals.Checked  = $false
     $grpTweaks.Controls.Add($chkVisuals)
 
     $chkExt          = New-Object System.Windows.Forms.CheckBox
@@ -315,7 +331,7 @@ function Show-Unattend-GUI {
     $grpTweaks.Controls.Add($chkExt)
 
     $chkBloat          = New-Object System.Windows.Forms.CheckBox
-    $chkBloat.Text     = "Debloat: Desactivar Copilot, Widgets y Sugerencias"
+    $chkBloat.Text     = "Debloat: Desactivar Copilot, y Sugerencias"
     $chkBloat.Location = "20, 90"
     $chkBloat.AutoSize = $true
     $chkBloat.Checked  = $true
@@ -364,13 +380,22 @@ function Show-Unattend-GUI {
     $chkFastBoot.Text     = "Deshabilitar Inicio Rapido (FastBoot)"
     $chkFastBoot.Location = "20, 270"
     $chkFastBoot.AutoSize = $true
-    $chkFastBoot.Checked  = $false
+    $chkFastBoot.Checked  = $true
     $grpTweaks.Controls.Add($chkFastBoot)
+
+    # NUEVO: Ajustes de la Barra de Tareas
+    $chkTaskbar          = New-Object System.Windows.Forms.CheckBox
+    $chkTaskbar.Text     = "Barra de Tareas: Buscar como Icono y Ocultar Noticias"
+    $chkTaskbar.Location = "20, 300"
+    $chkTaskbar.AutoSize = $true
+    $chkTaskbar.Checked  = $true
+    $chkTaskbar.ForeColor = [System.Drawing.Color]::Cyan
+    $grpTweaks.Controls.Add($chkTaskbar)
 
     # Boton Generar
     $btnGen           = New-Object System.Windows.Forms.Button
     $btnGen.Text      = "GENERAR E INYECTAR XML"
-    $btnGen.Location  = "320, 480"
+    $btnGen.Location  = "320, 515" 
     $btnGen.Size      = "300, 20"
     $btnGen.BackColor = [System.Drawing.Color]::SeaGreen
     $btnGen.ForeColor = [System.Drawing.Color]::White
@@ -490,6 +515,8 @@ function Show-Unattend-GUI {
         $safeUser   = [System.Security.SecurityElement]::Escape($txtUser.Text.Trim())
         $safePass   = [System.Security.SecurityElement]::Escape($txtPass.Text)
         $safePCName = [System.Security.SecurityElement]::Escape($txtPCName.Text.Trim())
+
+        $isInteractive = $chkInteractiveUser.Checked -or [string]::IsNullOrWhiteSpace($safeUser)
 
         # Nombre de equip
         if ([string]::IsNullOrWhiteSpace($safePCName)) { $safePCName = "*" }
@@ -647,11 +674,27 @@ $wpeSetupBlock
             $order++
         }
 
-        # Bloatware: Copilot, Widgets, Sugerencias
+        if ($chkTaskbar.Checked) {
+            # Búsqueda solo como icono (W10/W11)
+            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Search"" /v SearchboxTaskbarMode /t REG_DWORD /d 1 /f</CommandLine></SynchronousCommand>")
+            $order++
+            # W10 — Desconectar Noticias e intereses: preferencia de usuario
+            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Feeds"" /v ShellFeedsTaskbarViewMode /t REG_DWORD /d 2 /f</CommandLine></SynchronousCommand>")
+            $order++
+			# W10 — Desconectar Noticias e intereses: directiva de máquina (Group Policy W10) [FIX U2]
+            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Feeds"" /v EnableFeeds /t REG_DWORD /d 0 /f</CommandLine></SynchronousCommand>")
+            $order++
+            # W11 — Ocultar Widgets y Chat
+            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced"" /v TaskbarDa /t REG_DWORD /d 0 /f</CommandLine></SynchronousCommand>")
+            $order++
+			# W11 — Ocultar Widgets (Dashboard panel)
+            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SOFTWARE\Policies\Microsoft\Dsh"" /v AllowNewsAndInterests /t REG_DWORD /d 0 /f</CommandLine></SynchronousCommand>")
+            $order++
+        }
+
+        # Bloatware: Copilot, Sugerencias
         if ($chkBloat.Checked) {
             $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKCU\Software\Policies\Microsoft\Windows\WindowsCopilot"" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f</CommandLine></SynchronousCommand>")
-            $order++
-            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SOFTWARE\Policies\Microsoft\Dsh"" /v AllowNewsAndInterests /t REG_DWORD /d 0 /f</CommandLine></SynchronousCommand>")
             $order++
             $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>reg.exe add ""HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent"" /v DisableWindowsConsumerFeatures /t REG_DWORD /d 1 /f</CommandLine></SynchronousCommand>")
             $order++
@@ -661,6 +704,14 @@ $wpeSetupBlock
         $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>cmd.exe /c reagentc /enable</CommandLine></SynchronousCommand>")
         $order++
 
+        # Deshabilitar caducidad de contraseña (Doble capa: Global + Usuario específico)
+        if (-not $isInteractive -and $chkPassExpire.Checked) {
+            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>net accounts /maxpwage:unlimited</CommandLine></SynchronousCommand>")
+            $order++
+            $cmds.Add("<SynchronousCommand wcm:action=""add""><Order>$order</Order><CommandLine>$psPrefix `"Set-LocalUser -Name '$safeUser' -PasswordNeverExpires `$true`"</CommandLine></SynchronousCommand>")
+            $order++
+        }
+
         $logonCommandsBlock = ""
         if ($cmds.Count -gt 0) {
             $logonCommandsBlock = "<FirstLogonCommands>`n" + ($cmds -join "`n") + "`n            </FirstLogonCommands>"
@@ -668,7 +719,6 @@ $wpeSetupBlock
 
         # Cuentas de usuario
         $userAccountsBlock = ""
-        $isInteractive     = $chkInteractiveUser.Checked -or [string]::IsNullOrWhiteSpace($txtUser.Text)
         $hideWifiXmlVal    = if ($chkHideWifi.Checked) { "true" } else { "false" }
 
         if ($isInteractive) {
@@ -772,6 +822,20 @@ $wpeSetupBlock
     $btnInjectImp.Add_Click({
         if (Test-Path $txtImpPath.Text) {
             & $InjectXmlLogic -Content (Get-Content $txtImpPath.Text -Raw) -Desc "XML Importado"
+        }
+    })
+
+    $form.Add_FormClosing({ 
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "Estas seguro de que deseas salir?", 
+            "Confirmar Salida", 
+            [System.Windows.Forms.MessageBoxButtons]::YesNo, 
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+
+        if ($confirm -eq 'No') {
+            $_.Cancel = $true
+        } else {
         }
     })
 
