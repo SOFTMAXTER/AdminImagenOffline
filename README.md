@@ -50,7 +50,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 1. Descarga el repositorio como un archivo `.zip` y extráelo en una ruta corta (ej. `C:\\AdminImagen`).
 2. Asegúrate de mantener la integridad de la estructura de directorios para el correcto funcionamiento de la suite:
 
-&#x20;   ```text
+   ```text
     TuCarpetaPrincipal/
     │
     ├── AdminImagenOffline.exe    <-- Ejecutable Lanzador Principal
