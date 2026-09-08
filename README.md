@@ -1,4 +1,5 @@
-# AdminImagenOffline V1.5.4 by SOFTMAXTER
+
+# AdminImagenOffline V1.5.5 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -8,22 +9,22 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.4 (Changelog)
+## 🆕 Novedades en la Versión 1.5.5 (Changelog)
 
-* **Integración de Actualizaciones Offline (Nuevo)**: Motor de servicing que clasifica e integra paquetes CAB/MSU (SSU, LCU, ESU, Enablement, SetupDU) directamente en `install.wim`, `winre.wim` y `boot.wim`, con respaldo *Preflight*, verificaciones y reportes JSON/HTML por operación.
-* **Integración de Idiomas / Medios Multilingües (Nuevo)**: Motor de servicing para paquetes de idioma y Language Features on Demand, con detección automática de ADK/WinPE Add-on, validación de compatibilidad y actualización de `winre.wim`/`boot.wim`.
-* **Actualizador Inteligente Mejorado**: El sistema ahora lee y muestra el registro de cambios (changelog) directamente en la consola antes de aplicar la actualización.
-* **Limpieza Profunda de Bloatware (Appx)**: Nuevo motor de eliminación que purga aplicaciones nativas de forma permanente, limpia residuos físicos, inyecta un Menú de Inicio minimalista y aplica vacunas anti-reinstalación para evitar que regresen al conectar a internet.
-* **Autocompletado de Metadatos**: El editor de imágenes WIM ahora incluye plantillas predefinidas para rellenar automáticamente los nombres y descripciones de las ediciones de Windows (Home, Pro, LTSC, Server).
-* **OEM Branding Corporativo**: Nueva función para bloquear permanentemente los fondos de pantalla y pantallas de bloqueo aplicados mediante políticas del sistema, junto con un escalado perfecto de las imágenes de perfil para Windows 11.
-* **Automatización OOBE Ampliada**: Opciones para configurar contraseñas que nunca expiran y ajustes de la barra de tareas (como ocultar noticias o forzar la búsqueda como icono) directamente desde el generador de `Unattend.xml`.
-* **Despliegue a VHD Más Seguro**: Mejoras en el particionado UEFI y ocultamiento perfeccionado de la partición de recuperación (WinRE).
+* **Reorganización Completa del Menú Principal**: La antigua sección "Personalización" se dividió en tres módulos independientes —Contenido, Sistema y Comportamiento, y OOBE y Marca— para una navegación más clara; la gestión de WinRE se trasladó a Herramientas de Arranque y los flujos de Montaje/Guardado se unificaron en un solo submenú.
+* **Soporte para Paquetes DeltaPack Dual-Engine (Nuevo)**: El Inyector de Addons ahora reconoce paquetes generados por **DeltaPack Dual-Engine** (`manifest_*.json`) y ejecuta su orden de despliegue declarado (WIM → Acciones → Eliminaciones → Registro → Acciones finales) como una sola unidad transaccional.
+* **Motor de Bloatware Reforzado**: Se blindó el ciclo de montaje/desmontaje de colmenas con `try/finally`, se corrigió la limpieza física de residuos en `WindowsApps` para que coincida por nombre y versión exactos, y se añadió una barra de progreso y confirmación reforzada para aplicaciones vitales del sistema.
+* **Gestor de Drivers Ampliado**: Nueva barra de progreso, casilla para forzar la instalación de drivers sin firmar (`/ForceUnsigned`), botón para cancelar el proceso tras el driver en curso y advertencias reforzadas al desinstalar clases de hardware críticas.
+* **Estabilidad de las Interfaces Gráficas**: Corregido un bug sistémico que rompía los avisos de "imagen no montada" en varios módulos (Servicios, Tweaks, Addons), y se añadieron guardias de "operación en curso" para evitar el cierre accidental de una ventana mientras un proceso sigue en ejecución.
+* **Barras de Progreso Corregidas**: Ajustado el avance de las barras de progreso en Servicios, Drivers, Tweaks y Addons para que reflejen el elemento realmente procesado, en vez del siguiente en cola.
+* **Corrección de Rutas DISM en VHD**: Solucionado un error que impedía inyectar o eliminar drivers cuando la imagen montada era un disco virtual (VHD/VHDX), causado por la barra invertida final en la ruta de montaje.
 
 ## Características Principales
 
 * **Interfaz Híbrida e Intuitiva**: Combina la fluidez de la consola para la orquestación principal con interfaces gráficas modernas (Windows Forms) para una gestión visual de servicios, aplicaciones, configuraciones y despliegues.
 * **Gestión Integral de Imágenes**: Capacidad total para montar, editar y empaquetar formatos WIM y ESD. Soporte nativo para manipulación de discos virtuales (VHD/VHDX) con aplicación de cambios en tiempo real.
-* **Centro de Personalización Avanzada**: Plataforma centralizada para la optimización del sistema que incluye la eliminación de aplicaciones preinstaladas (Bloatware), administración de características opcionales y optimización selectiva de servicios del sistema.
+* **Suite de Personalización Modular**: Organizada en menús dedicados —Contenido (Bloatware, Appx, Addons), Sistema y Comportamiento (Features, Servicios, Tweaks) y OOBE y Marca (Unattend, OEM Branding)— para una gestión más clara del sistema.
+* **Inyector de Addons con Soporte DeltaPack**: Integra utilidades sueltas (`.tpk`/`.bpk`/`.reg`) o paquetes completos generados por **DeltaPack Dual-Engine**, respetando el orden de despliegue (WIM → Acciones → Eliminaciones → Registro → Acciones) declarado en su manifiesto.
 * **Sistema de Tweaks y Automatización**: Integra un potente motor para aplicar optimizaciones de rendimiento de forma gráfica, importar archivos `.reg` en lote y generar archivos `Unattend.xml` para instalaciones desatendidas (incluyendo la evasión de los requisitos de hardware de Windows 11).
 * **Control de Controladores y OSD**: Gestor visual para inyectar carpetas enteras de drivers o desinstalar controladores OEM específicos. Soporte integrado para editar los metadatos de la imagen (Nombres y Descripciones) y gestionar paquetes de idioma (LP) o características bajo demanda (FOD).
 * **Herramientas de Arranque y Despliegue**: Creación automatizada de imágenes ISO booteables, modificación directa de los entornos de recuperación (WinRE) y medios de instalación (`boot.wim`), y despliegue rápido del sistema a unidades de almacenamiento físicas o virtuales.
@@ -107,14 +108,13 @@ A continuación se desglosan las principales opciones del entorno y cómo utiliz
 ### [ 1 ] Gestión de Imagen
 Este es el núcleo de la herramienta. Controla el ciclo de vida del montaje de la imagen.
 
-* **Montar Imagen:** Te permite seleccionar un archivo `.wim`, `.esd` (solo lectura/exportación) o disco virtual (`.vhd`/`.vhdx`).
+* **Montar / Guardar / Desmontar Imagen:** Submenú unificado con el ciclo de vida completo del montaje:
 
-  * *Novedad:* Puedes elegir **"Extraer desde una ISO"**. El script montará la ISO, vaciará de forma segura una carpeta de extracción temporal y volcará el contenido usando `Robocopy` a máxima velocidad.
-  * *Discos Virtuales (VHD):* Si seleccionas un VHD, el script hace un escaneo inteligente saltándose las particiones EFI/Recovery, encuentra la partición de Windows, le asigna una letra de unidad dinámica y la monta. **Importante:** Los cambios en un VHD se guardan en tiempo real.
-* **Desmontar / Guardar Cambios (Commit):** \* Si usas WIM, la opción *Commit* re-comprimirá los cambios en el archivo.
-
-  * Si hay bloqueos de registro, el script fuerza un `\[GC]::Collect()` (Recolección de basura en .NET) para liberar *handles* huérfanos antes de desmontar, evitando corrupciones.
-* **Editar Metadatos:** Cambia el nombre interno y la descripción de la imagen (ej. de "Windows 10 Pro" a "Mi Custom OS").
+  * **Montar Imagen:** Selecciona un archivo `.wim`, `.esd` (solo lectura/exportación) o disco virtual (`.vhd`/`.vhdx`). Incluye la opción **"Extraer desde una ISO"**, que monta la ISO, vacía de forma segura una carpeta de extracción temporal y vuelca el contenido usando `Robocopy` a máxima velocidad. Con discos virtuales (VHD), el script escanea inteligentemente saltándose las particiones EFI/Recovery, localiza la partición de Windows, le asigna una letra de unidad dinámica y la monta. **Importante:** los cambios en un VHD se guardan en tiempo real.
+  * **Recargar Imagen:** Desmonta y vuelve a montar para descartar cambios sin salir del flujo.
+  * **Guardar Cambios:** Sobrescribir el índice actual, agregarlos como un nuevo índice (*Append*) o exportarlos a un archivo `.wim` completamente nuevo (*Save As*).
+  * **Guardar y Desmontar (Commit) / Desmontar sin Guardar:** Si hay bloqueos de registro, el script fuerza un `[GC]::Collect()` (recolección de basura en .NET) para liberar *handles* huérfanos antes de desmontar, evitando corrupciones.
+* **Editar Info/Metadatos:** Cambia el nombre interno y la descripción de la imagen (ej. de "Windows 10 Pro" a "Mi Custom OS").
 * **Editar Índices:** Permite Exportar un índice específico para crear una imagen más ligera o Eliminar índices que no necesitas permanentemente.
 
 ### [ 2 ] Convertir Formatos
@@ -123,42 +123,48 @@ Herramientas de conversión e ingesta de imágenes.
 * **Convertir ESD a WIM:** Los archivos `.esd` tienen compresión sólida y no pueden ser modificados directamente. Esta opción extrae un índice del ESD y lo convierte a formato `.wim` estándar para su posterior montaje y edición.
 * **Convertir VHD/VHDX a WIM:** Monta un disco virtual silenciosamente, detecta la partición del sistema operativo, le aplica un *Trim* (Optimización) si es posible, y captura todo el volumen hacia un archivo `.wim` usando compresión máxima.
 
-### [ 3 ] Herramientas de Arranque y Medios
+### [ 3 ] Herramientas de Arranque y Medios (Boot Tools)
 Diseñado para preparar la distribución y el despliegue final de tu sistema personalizado:
 
 * **Editar boot.wim:** Accede al entorno de preinstalación para inyectar controladores de almacenamiento y garantizar que equipos modernos (con tecnologías Intel RST o VMD) reconozcan los discos duros durante la instalación.
+* **Gestionar WinRE (Entorno de Recuperación):** Va a `Windows\System32\Recovery`, extrae el `winre.wim`, lo monta en el *Scratch*, permite inyectar DaRT o Drivers, y al guardar, utiliza `/Export-Image /Bootable` para destruir los diccionarios viejos y recomprimir el entorno, ahorrando cientos de megabytes de "peso muerto".
 * **Crear ISO Booteable:** Genera de manera eficiente un archivo ISO listo para ser empleado en herramientas como Rufus o Ventoy, asegurando compatibilidad integral con sistemas UEFI y BIOS Legacy.
-* **Despliegue a VHD:** Aplica directamente tu imagen de Windows a una unidad de almacenamiento externa o a un disco virtual, particionando y configurando los sectores de arranque de manera totalmente automatizada.
+* **Despliegue a VHD / Disco Físico:** Aplica directamente tu imagen de Windows a una unidad de almacenamiento externa o a un disco virtual, particionando y configurando los sectores de arranque de manera totalmente automatizada.
 
-### [ U ] Integrar Actualizaciones
-Motor de servicing offline para medios extraídos (`install.wim`, `winre.wim`, `boot.wim`) que clasifica paquetes CAB/MSU por identidad y contenido interno (sin depender de listas de KB), respeta el orden SSU → Enablement/ESU → LCU, aplica Setup Dynamic Update y reinyecta `winre.wim` ya actualizado. Crea un respaldo *Preflight* antes de tocar el medio y genera reportes JSON/HTML de cada operación. Guía completa en [README_Modulo-Actualizaciones.md](README_Modulo-Actualizaciones.md).
+### [ 4 ] Actualizaciones e Idiomas (Servicing)
+Menú unificado para los dos motores de servicing offline:
 
-### [ M ] Integrar Idiomas / Crear Medio Multilingüe
-Integra Language Packs, Language Features on Demand y recursos MUI en un medio extraído, con detección automática de ADK/WinPE Add-on y validación de idioma/arquitectura/familia de build antes de modificar nada. Igual que el módulo de Actualizaciones, trabaja de forma transaccional con respaldo *Preflight* y verificación SHA-256. Guía completa en [README_Modulo-Lenguajes.md](README_Modulo-Lenguajes.md).
+* **Integrar Actualizaciones:** Motor de servicing para medios extraídos (`install.wim`, `winre.wim`, `boot.wim`) que clasifica paquetes CAB/MSU por identidad y contenido interno (sin depender de listas de KB), respeta el orden SSU → Enablement/ESU → LCU, aplica Setup Dynamic Update y reinyecta `winre.wim` ya actualizado. Crea un respaldo *Preflight* antes de tocar el medio y genera reportes JSON/HTML de cada operación. Guía completa en [README_Modulo-Actualizaciones.md](README_Modulo-Actualizaciones.md).
+* **Integrar Idiomas / Crear Medio Multilingüe:** Integra Language Packs, Language Features on Demand y recursos MUI en un medio extraído, con detección automática de ADK/WinPE Add-on y validación de idioma/arquitectura/familia de build antes de modificar nada. Igual que el módulo de Actualizaciones, trabaja de forma transaccional con respaldo *Preflight* y verificación SHA-256. Guía completa en [README_Modulo-Lenguajes.md](README_Modulo-Lenguajes.md).
 
-### [ 4 ] Drivers (Inyectar / Eliminar)
+### [ 5 ] Drivers (Inyectar / Eliminar)
 Gestión completa de los controladores *offline*.
 
-* **Inyectar Drivers:** Selecciona una carpeta con archivos `.inf`. El motor de DISM inyectará los controladores en el almacén del sistema. Ideal para integrar drivers de red o video antes de instalar.
-* **Desinstalar Drivers:** Interfaz gráfica que lista todos los controladores de terceros (OEM) instalados en la imagen montada, permitiendo eliminarlos selectivamente.
+* **Inyectar Drivers:** Selecciona una carpeta con archivos `.inf`. El motor de DISM inyectará los controladores en el almacén del sistema, con barra de progreso y una casilla para forzar la instalación de drivers sin firmar (`/ForceUnsigned`). Ideal para integrar drivers de red o video antes de instalar.
+* **Desinstalar Drivers:** Interfaz gráfica que lista todos los controladores de terceros (OEM) instalados en la imagen montada, permitiendo eliminarlos selectivamente con advertencia reforzada al tocar clases de hardware críticas.
 
-### [ 5 ] Centro de Personalización y Ajustes
-El ecosistema gráfico más amplio del proyecto, estructurado para adaptar Windows a escenarios corporativos o de alto rendimiento:
+### [ 6 ] Contenido de la Imagen (Apps y Paquetes)
+Gestión de todo lo que se ejecuta o se preinstala dentro de la imagen:
 
-1. * **Eliminar Bloatware (Apps):** Interfaz categorizada para purgar aplicaciones preinstaladas indeseadas, salvaguardando los componentes vitales del sistema operativo.
-2. * **Características y .NET 3.5:** Activa funciones nativas del sistema como Hyper-V, WSL o añade el soporte clásico de .NET Framework de manera offline.
-3. * **Optimización de Servicios:** Interfaz de fácil lectura para deshabilitar procesos innecesarios de diagnóstico o telemetría, con capacidad de restaurar los valores a su estado original de fábrica.
-4. * **Tweaks y Registro Offline:** Motor visual que aplica configuraciones predefinidas para mejorar la privacidad y el rendimiento. Facilita la inyección inteligente y masiva de archivos `.reg` al sistema.
-5. * **Inyector de Apps y Addons:** Integra paquetes universales UWP (`.appx`) o automatiza la instalación de utilidades estándar, organizándolas por arquitectura.
-6. * **Automatización OOBE:** Genera respuestas XML para instalaciones desatendidas, omitiendo pantallas molestas, configurando redes y cuentas de usuario.
-7. * **Inyector de Addons (.wim, .tpk, .bpk, .reg):**
-   * **Uso:** Integra paquetes de utilidades (7-Zip, Visual C++, etc.).
-   * **Lógica Inteligente:** Si incluyes sufijos en el nombre del archivo (ej. `\_x64`, `\_x86`), el motor activa el **Escudo de Arquitectura** y omitirá los paquetes que no coincidan con la arquitectura de la imagen montada. Si usas `\_main`, les dará prioridad de inyección en la cola. Extrae los empaquetados usando firma binaria para evitar fallos.
-8. **Gestionar WinRE (Entorno de Recuperación):**
-   * **Lógica:** Va a `Windows\\System32\\Recovery`, extrae el `winre.wim`, lo monta en el *Scratch*, permite inyectar DaRT o Drivers, y al guardar, utiliza `/Export-Image /Bootable` para destruir los diccionarios viejos y recomprimir el entorno, ahorrando cientos de megabytes de "peso muerto".
-9. * **OEM Branding:** Personaliza fondos de pantalla predeterminados, la pantalla de bloqueo y la información del fabricante (Soporte) en las propiedades del sistema, permite bloquear permanentemente los fondos de pantalla y pantallas de bloqueo aplicados mediante políticas del sistema, junto con un escalado perfecto de las imágenes de perfil para Windows 11.
+* **Eliminar Bloatware (Apps):** Interfaz categorizada para purgar aplicaciones preinstaladas indeseadas, salvaguardando los componentes vitales del sistema operativo.
+* **Inyector de Apps Modernas (Appx/MSIX):** Integra paquetes universales UWP y sus dependencias de forma offline, organizándolos por arquitectura.
+* **Inyector de Addons (.wim, .tpk, .bpk, .reg):**
+  * **Uso:** Integra paquetes de utilidades sueltos (7-Zip, Visual C++, etc.).
+  * **Lógica Inteligente:** Si incluyes sufijos en el nombre del archivo (ej. `_x64`, `_x86`), el motor activa el **Escudo de Arquitectura** y omitirá los paquetes que no coincidan con la arquitectura de la imagen montada. Si usas `_main`, les dará prioridad de inyección en la cola. Extrae los empaquetados usando firma binaria para evitar fallos.
+  * **Paquetes DeltaPack Dual-Engine:** Al seleccionar un `manifest_*.json`, el motor detecta el paquete como una unidad DeltaPack y ejecuta su `deployment.order` (WIM → Acciones → Eliminaciones → Registro → Acciones) en lugar de tratarlo como un addon suelto.
 
-### [ 6 ] Limpieza y Reparación
+### [ 7 ] Sistema y Comportamiento (Ajustes del OS)
+
+* **Características de Windows y .NET 3.5:** Activa funciones nativas del sistema como Hyper-V, WSL o añade el soporte clásico de .NET Framework de manera offline.
+* **Servicios del Sistema:** Interfaz de fácil lectura para deshabilitar procesos innecesarios de diagnóstico o telemetría, con capacidad de restaurar los valores a su estado original de fábrica.
+* **Tweaks y Registro Offline:** Motor visual que aplica configuraciones predefinidas para mejorar la privacidad y el rendimiento. Facilita la inyección inteligente y masiva de archivos `.reg` al sistema.
+
+### [ 8 ] OOBE y Marca (Branding)
+
+* **Automatización OOBE (Unattend.xml):** Genera respuestas XML para instalaciones desatendidas, omitiendo pantallas molestas, configurando redes, cuentas de usuario, contraseñas que nunca expiran y ajustes de la barra de tareas.
+* **OEM Branding:** Personaliza fondos de pantalla predeterminados, la pantalla de bloqueo y la información del fabricante (Soporte) en las propiedades del sistema, permite bloquear permanentemente los fondos de pantalla y pantallas de bloqueo aplicados mediante políticas del sistema, junto con un escalado perfecto de las imágenes de perfil para Windows 11.
+
+### [ 9 ] Limpieza y Reparación
 Mantenimiento de la integridad de la imagen.
 
 * **CheckHealth / ScanHealth:** Verifica daños en el almacén de componentes.
@@ -166,7 +172,7 @@ Mantenimiento de la integridad de la imagen.
 * **SFC Offline:** Ejecuta el comprobador de archivos del sistema apuntando a la unidad montada.
 * **Limpiar Componentes (StartComponentCleanup):** Pule el tamaño de la imagen borrando actualizaciones obsoletas. Te preguntará si deseas usar `/ResetBase` (mayor compresión, pero impide desinstalar actualizaciones previas).
 
-### [ 7 ] Cambiar Edición
+### [ 10 ] Cambiar Edición
 Permite actualizar la versión de Windows (ej. de `Home` a `Professional` o `Enterprise LTSC`).
 
 * **Nota Técnica:** El script consulta las ediciones de destino viables (`Get-TargetEditions`). Esta operación en archivos WIM es reversible si no se guardan los cambios, pero en un **VHD** es un proceso destructivo e irreversible en tiempo real. El script mostrará una advertencia de seguridad roja si intentas hacer esto sobre un disco virtual.
