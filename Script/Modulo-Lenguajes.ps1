@@ -1787,8 +1787,7 @@ function Get-AIOLangRepositoryInventory {
             if (-not $skipFullScan) {
                 $position = 0
                 foreach ($file in $scanFiles) {
-                    $position++
-                    Write-Progress -Activity "Analizando $SourceName" -Status $file.Name -PercentComplete (($position / $scanFiles.Count) * 100)
+                    Write-Progress -Activity "Analizando $SourceName" -Status "$position de $($scanFiles.Count) procesados; actual: $($file.Name)" -PercentComplete ([int][math]::Floor(($position * 100.0) / [math]::Max(1, $scanFiles.Count)))
                     try {
                         $item = Get-AIOLangPackageMetadata -PackagePath $file.FullName -MetadataRoot $metadataRoot
                         if ($item.Category -ne 'Unknown') {
@@ -1804,6 +1803,10 @@ function Get-AIOLangRepositoryInventory {
                     }
                     catch {
                         Write-AIOLangLog -Level WARN -Message "No se pudo analizar '$($file.FullName)': $($_.Exception.Message)"
+                    }
+                    finally {
+                        $position++
+                        Write-Progress -Activity "Analizando $SourceName" -Status "$position de $($scanFiles.Count) procesados: $($file.Name)" -PercentComplete ([int][math]::Floor(($position * 100.0) / [math]::Max(1, $scanFiles.Count)))
                     }
                 }
                 if ($script:AIOLangAdkScanSummary) {
@@ -2887,17 +2890,18 @@ function Copy-AIOLangBackupPlanEntry {
     if ([string]$PlanEntry.Type -eq 'File') {
         Initialize-AIOLangDirectory -Path (Split-Path -Parent $destination)
         $file = @($PlanEntry.Files)[0]
+        $showDetail = ([string]$file.MediaRelativePath -match '(?i)^sources\\(boot|install)\.(wim|esd)$')
+        if ($showDetail) {
+            Write-Host ("   [{0}/{1}] Copiando y verificando {2}..." -f ([int]$ProgressState.Current + 1), $ProgressState.Total, $file.MediaRelativePath) -ForegroundColor Gray
+        }
+        $copy = Copy-AIOLangFileVerified -Source $file.SourcePath -Destination $destination
+        # Solo una copia cuya verificacion SHA-256 termino cuenta como respaldada.
         $ProgressState.Current = [int]$ProgressState.Current + 1
         $percent = if ([int]$ProgressState.Total -gt 0) {
             [math]::Min(100, [math]::Floor(([double]$ProgressState.Current / [double]$ProgressState.Total) * 100))
         }
         else { 100 }
         Write-Progress -Activity 'Respaldo previo obligatorio' -Status ("{0}/{1} archivos verificados ({2}%)" -f $ProgressState.Current, $ProgressState.Total, $percent) -PercentComplete $percent
-        $showDetail = ([string]$file.MediaRelativePath -match '(?i)^sources\\(boot|install)\.(wim|esd)$')
-        if ($showDetail) {
-            Write-Host ("   [{0}/{1}] Copiando y verificando {2}..." -f $ProgressState.Current, $ProgressState.Total, $file.MediaRelativePath) -ForegroundColor Gray
-        }
-        $copy = Copy-AIOLangFileVerified -Source $file.SourcePath -Destination $destination
         if ($showDetail) {
             Write-Host '      [VERIFICADO] SHA-256 coincide.' -ForegroundColor Green
         }
@@ -2909,17 +2913,18 @@ function Copy-AIOLangBackupPlanEntry {
     [int64]$totalBytes = 0
     foreach ($file in @($PlanEntry.Files)) {
         $target = Join-Path $destination ([string]$file.RelativeInTarget)
+        $showDetail = ([string]$file.MediaRelativePath -match '(?i)^sources\\(boot|install)\.(wim|esd)$')
+        if ($showDetail) {
+            Write-Host ("   [{0}/{1}] Copiando y verificando {2}..." -f ([int]$ProgressState.Current + 1), $ProgressState.Total, $file.MediaRelativePath) -ForegroundColor Gray
+        }
+        $copy = Copy-AIOLangFileVerified -Source $file.SourcePath -Destination $target
+        # Solo una copia cuya verificacion SHA-256 termino cuenta como respaldada.
         $ProgressState.Current = [int]$ProgressState.Current + 1
         $percent = if ([int]$ProgressState.Total -gt 0) {
             [math]::Min(100, [math]::Floor(([double]$ProgressState.Current / [double]$ProgressState.Total) * 100))
         }
         else { 100 }
         Write-Progress -Activity 'Respaldo previo obligatorio' -Status ("{0}/{1} archivos verificados ({2}%)" -f $ProgressState.Current, $ProgressState.Total, $percent) -PercentComplete $percent
-        $showDetail = ([string]$file.MediaRelativePath -match '(?i)^sources\\(boot|install)\.(wim|esd)$')
-        if ($showDetail) {
-            Write-Host ("   [{0}/{1}] Copiando y verificando {2}..." -f $ProgressState.Current, $ProgressState.Total, $file.MediaRelativePath) -ForegroundColor Gray
-        }
-        $copy = Copy-AIOLangFileVerified -Source $file.SourcePath -Destination $target
         if ($showDetail) {
             Write-Host '      [VERIFICADO] SHA-256 coincide.' -ForegroundColor Green
         }
@@ -2973,6 +2978,7 @@ function New-AIOLangPreflightBackup {
     [int64]$totalBytes = 0
     [int]$hashedFileCount = 0
     $progress = @{ Current = 0; Total = [int]$plan.TotalFiles }
+    Write-Progress -Activity 'Respaldo previo obligatorio' -Status ("0/{0} archivos verificados (0%)" -f $progress.Total) -PercentComplete 0
 
     try {
         foreach ($planEntry in @($plan.Entries)) {
@@ -5099,7 +5105,7 @@ function Start-AIOLangIntegrationWizard {
         Write-Host " Salida edicion unica : $exportSingle" -ForegroundColor White
         Write-Host ' Respaldo previo      : Obligatorio y verificado' -ForegroundColor White
         Write-Host ''
-        $start = (Read-Host 'Escribe I para INICIAR o V para volver').Trim().ToUpperInvariant()
+        $start = (Read-MenuOption 'Escribe I para INICIAR o V para volver').Trim().ToUpperInvariant()
         if ($start -ne 'I') {
             $script:AIOLangLastTerminalState.Status = 'Cancelled'
             $script:AIOLangLastTerminalState.Phase = 'Confirmacion del plan'
@@ -5154,7 +5160,7 @@ function Show-LanguageIntegrator-Menu {
         Write-Host '       Revierte WIM y archivos localizados del medio' -ForegroundColor Gray
         Write-Host ''
         Write-Host '   [V] Volver al menu principal' -ForegroundColor Red
-        $choice = (Read-Host "`nSelecciona una opcion").Trim().ToUpperInvariant()
+        $choice = (Read-MenuOption "`nSelecciona una opcion").Trim().ToUpperInvariant()
         switch ($choice) {
             '1' { Start-AIOLangIntegrationWizard }
             '2' { Show-AIOLangRestoreMenu }

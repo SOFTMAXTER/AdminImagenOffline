@@ -2716,10 +2716,10 @@ function Find-AIOUpdateWimlib {
     }
 
     # Directorio compartido de herramientas de AdminImagenOffline:
-    #   <AdminImagenOffline>\Tools\wimlib-imagex.exe
+    #   <AdminImagenOffline>\Tools\wimlib\wimlib-imagex.exe
     $applicationRoot = Split-Path -Parent $PSScriptRoot
     $candidates = New-Object System.Collections.Generic.List[string]
-    [void]$candidates.Add((Join-Path $applicationRoot 'Tools\wimlib-imagex.exe'))
+    [void]$candidates.Add((Join-Path $applicationRoot 'Tools\wimlib\wimlib-imagex.exe'))
 
     try {
         $command = Get-Command wimlib-imagex.exe -ErrorAction Stop
@@ -3372,7 +3372,7 @@ function Set-AIOUpdateWimCreationTime {
 
     $wimlib = Find-AIOUpdateWimlib
     if (-not $wimlib) {
-        throw 'No se encontro wimlib-imagex.exe. Copialo en AdminImagenOffline\Tools o agregalo al PATH del sistema para modificar la fecha interna del WIM.'
+        throw 'No se encontro wimlib-imagex.exe. Copialo en AdminImagenOffline\Tools\wimlib o agregalo al PATH del sistema para modificar la fecha interna del WIM.'
     }
 
     $xmlPath = Join-Path $ScratchRoot ([System.IO.Path]::GetFileName($WimPath) + '.xml')
@@ -3443,69 +3443,74 @@ function Get-AIOUpdatePackageInventory {
 
     $inventory = New-Object System.Collections.Generic.List[object]
     $position = 0
-    foreach ($file in $files) {
-        $position++
-        Write-Progress -Activity 'Clasificando actualizaciones' -Status "$position de $($files.Count): $($file.Name)" -PercentComplete ([int](($position * 100) / [math]::Max(1, $files.Count)))
-        $classification = Get-AIOUpdatePackageCategory -File $file -RepositoryRoot $resolvedRoot -ScratchRoot $ScratchRoot
-        $metadata = $classification.Metadata
-        $versionInfo = if ($metadata) {
-            [pscustomobject]@{
-                Version  = [version]$metadata.Version
-                Build    = [int]$metadata.VersionBuild
-                Reliable = [bool]$metadata.VersionReliable
-                Source   = [string]$metadata.VersionSource
+    try {
+        foreach ($file in $files) {
+            Write-Progress -Activity 'Clasificando actualizaciones' -Status "$position de $($files.Count) procesados; actual: $($file.Name)" -PercentComplete ([int][math]::Floor(($position * 100.0) / [math]::Max(1, $files.Count)))
+            $classification = Get-AIOUpdatePackageCategory -File $file -RepositoryRoot $resolvedRoot -ScratchRoot $ScratchRoot
+            $metadata = $classification.Metadata
+            $versionInfo = if ($metadata) {
+                [pscustomobject]@{
+                    Version  = [version]$metadata.Version
+                    Build    = [int]$metadata.VersionBuild
+                    Reliable = [bool]$metadata.VersionReliable
+                    Source   = [string]$metadata.VersionSource
+                }
             }
-        }
-        else {
-            Get-AIOUpdatePackageVersionInfo -FileName $file.Name -UpdateMumText $null
-        }
-        $version = [version]$versionInfo.Version
-        $isCheckpoint = $false
-        if ($classification.Category -eq 'LCU' -and $file.Extension -ieq '.msu' -and $metadata) {
-            $checkpointProbe = @(
-                $metadata.IdentityNames
-                $metadata.PackageIdentifiers
-                $metadata.MetadataNames
-                $metadata.Names
-                $metadata.Text
-            ) -join "`n"
-            $isCheckpoint = (
-                $metadata.HasBaseline -or
-                $checkpointProbe -match '(?i)(?:Checkpoint|Baseline)(?:[-_. ]?(?:LCU|Cumulative|Package|Update))?'
-            )
-        }
+            else {
+                Get-AIOUpdatePackageVersionInfo -FileName $file.Name -UpdateMumText $null
+            }
+            $version = [version]$versionInfo.Version
+            $isCheckpoint = $false
+            if ($classification.Category -eq 'LCU' -and $file.Extension -ieq '.msu' -and $metadata) {
+                $checkpointProbe = @(
+                    $metadata.IdentityNames
+                    $metadata.PackageIdentifiers
+                    $metadata.MetadataNames
+                    $metadata.Names
+                    $metadata.Text
+                ) -join "`n"
+                $isCheckpoint = (
+                    $metadata.HasBaseline -or
+                    $checkpointProbe -match '(?i)(?:Checkpoint|Baseline)(?:[-_. ]?(?:LCU|Cumulative|Package|Update))?'
+                )
+            }
 
-        $identityHints = @()
-        if ($metadata) {
-            $identityHints = @(
-                $metadata.UpdateMumPackageIdentifiers
-                $metadata.PackageIdentifiers
-                $metadata.UpdateMumIdentityNames
-            ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique
-        }
+            $identityHints = @()
+            if ($metadata) {
+                $identityHints = @(
+                    $metadata.UpdateMumPackageIdentifiers
+                    $metadata.PackageIdentifiers
+                    $metadata.UpdateMumIdentityNames
+                ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique
+            }
 
-        [void]$inventory.Add([pscustomobject]@{
-            File          = $file
-            FullName      = $file.FullName
-            Name          = $file.Name
-            Extension     = $file.Extension.ToLowerInvariant()
-            Category      = $classification.Category
-            Reason        = $classification.Reason
-            KB            = Get-AIOUpdateKbId -Text $file.Name
-            Version       = $version
-            VersionBuild  = [int]$versionInfo.Build
-            VersionReliable = [bool]$versionInfo.Reliable
-            VersionSource = [string]$versionInfo.Source
-            Size          = [long]$file.Length
-            Auxiliary     = ($classification.Category -eq 'Auxiliary')
-            Installable   = ($classification.Category -notin @('Auxiliary', 'Unknown'))
-            IsCheckpoint  = [bool]$isCheckpoint
-            Metadata      = $metadata
-            Architectures = [string[]](Get-AIOUpdatePackageArchitectureHints -File $file -Metadata $metadata)
-            Editions      = [string[]](Get-AIOUpdatePackageEditionHints -Metadata $metadata)
-            ProductHint   = Get-AIOUpdatePackageProductHint -File $file -Metadata $metadata -Category $classification.Category
-            IdentityHints = [string[]]$identityHints
-        })
+            [void]$inventory.Add([pscustomobject]@{
+                File          = $file
+                FullName      = $file.FullName
+                Name          = $file.Name
+                Extension     = $file.Extension.ToLowerInvariant()
+                Category      = $classification.Category
+                Reason        = $classification.Reason
+                KB            = Get-AIOUpdateKbId -Text $file.Name
+                Version       = $version
+                VersionBuild  = [int]$versionInfo.Build
+                VersionReliable = [bool]$versionInfo.Reliable
+                VersionSource = [string]$versionInfo.Source
+                Size          = [long]$file.Length
+                Auxiliary     = ($classification.Category -eq 'Auxiliary')
+                Installable   = ($classification.Category -notin @('Auxiliary', 'Unknown'))
+                IsCheckpoint  = [bool]$isCheckpoint
+                Metadata      = $metadata
+                Architectures = [string[]](Get-AIOUpdatePackageArchitectureHints -File $file -Metadata $metadata)
+                Editions      = [string[]](Get-AIOUpdatePackageEditionHints -Metadata $metadata)
+                ProductHint   = Get-AIOUpdatePackageProductHint -File $file -Metadata $metadata -Category $classification.Category
+                IdentityHints = [string[]]$identityHints
+            })
+            $position++
+            Write-Progress -Activity 'Clasificando actualizaciones' -Status "$position de $($files.Count) procesados: $($file.Name)" -PercentComplete ([int][math]::Floor(($position * 100.0) / [math]::Max(1, $files.Count)))
+        }
+    } finally {
+        Write-Progress -Activity 'Clasificando actualizaciones' -Completed
     }
 
     $lcuMsu = @(
@@ -3536,7 +3541,6 @@ function Get-AIOUpdatePackageInventory {
         }
     }
 
-    Write-Progress -Activity 'Clasificando actualizaciones' -Completed
     $resultInventory = [object[]]($inventory.ToArray())
     Initialize-AIOUpdateServicingBuildRelations -Inventory $resultInventory
     $script:AIOUpdateRepositoryInventoryCache[$inventoryCacheKey] = $resultInventory
@@ -3942,7 +3946,6 @@ function Initialize-AIOUpdateEmbeddedSsuStaging {
     )
 
     $script:AIOUpdateEmbeddedSsuPackages = @()
-$script:AIOUpdateWimlibPath = $null
     $lcuPackages = @(
         Get-AIOUpdatePackages -Inventory $Inventory -Category @('LCU') |
             Sort-Object @{ Expression = { [version]$_.Version }; Ascending = $true }, Name
@@ -6880,7 +6883,7 @@ function Show-AIOUpdatePreflightRestoreMenu {
     Write-Host ' [4] Restaurar Setup, sources y archivos de arranque' -ForegroundColor White
     Write-Host ' [V] Volver' -ForegroundColor DarkGray
 
-    $selection = (Read-Host 'Seleccion').Trim().ToUpperInvariant()
+    $selection = (Read-MenuOption 'Seleccion').Trim().ToUpperInvariant()
     $scope = switch ($selection) {
         '1' { 'All' }
         '2' { 'InstallWim' }
@@ -6947,7 +6950,7 @@ function Show-UpdatesIntegrator-Menu {
     Write-Host ' [1] Integrar actualizaciones' -ForegroundColor White
     Write-Host ' [2] Restaurar un respaldo Preflight' -ForegroundColor White
     Write-Host ' [V] Volver' -ForegroundColor DarkGray
-    $operationMode = (Read-Host 'Seleccion').Trim().ToUpperInvariant()
+    $operationMode = (Read-MenuOption 'Seleccion').Trim().ToUpperInvariant()
     if ($operationMode -eq '2') {
         try {
             $adkInfo = Initialize-AIOUpdateServicingEnvironment
@@ -7120,7 +7123,7 @@ function Show-UpdatesIntegrator-Menu {
             $updateWimCreationTime = Read-AIOUpdateYesNo -Prompt 'Igualar CREATIONTIME interno con LASTMODIFICATIONTIME' -Default $true
         }
         else {
-            Write-Host ' [OMITIDO] Fecha interna del WIM: falta AdminImagenOffline\Tools\wimlib-imagex.exe o una instalacion disponible en PATH.' -ForegroundColor DarkGray
+            Write-Host ' [OMITIDO] Fecha interna del WIM: falta AdminImagenOffline\Tools\wimlib\wimlib-imagex.exe o una instalacion disponible en PATH.' -ForegroundColor DarkGray
         }
 
         Write-Host "`n=======================================================" -ForegroundColor DarkCyan
@@ -7149,7 +7152,7 @@ function Show-UpdatesIntegrator-Menu {
         Write-Host " Respaldo previo     : Obligatorio, antes del primer montaje" -ForegroundColor White
         Write-Host ''
 
-        $start = (Read-Host 'Escribe I para INICIAR o V para volver').Trim().ToUpperInvariant()
+        $start = (Read-MenuOption 'Escribe I para INICIAR o V para volver').Trim().ToUpperInvariant()
         if ($start -ne 'I') {
             $script:AIOUpdateLastTerminalState.Status = 'Cancelled'
             $script:AIOUpdateLastTerminalState.Phase = 'Confirmacion del plan'

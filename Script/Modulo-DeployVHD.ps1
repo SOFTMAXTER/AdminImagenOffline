@@ -54,6 +54,99 @@ function Show-Deploy-To-VHD-GUI {
 
     $script:isDeploying = $false
 
+    # Los lectores nativos drenan ambos canales en segundo plano. Solo el hilo
+    # de WinForms actualiza los controles; no se ejecutan scriptblocks en esos hilos.
+    if (-not ('AIODeployNativeReader' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+
+public sealed class AIODeployNativeReader : IDisposable {
+    private readonly Process process;
+    public readonly ConcurrentQueue<string> Output = new ConcurrentQueue<string>();
+    public readonly ConcurrentQueue<string> Error = new ConcurrentQueue<string>();
+
+    public AIODeployNativeReader(string fileName, string arguments) {
+        process = new Process();
+        process.StartInfo = new ProcessStartInfo {
+            FileName = fileName, Arguments = arguments,
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        process.OutputDataReceived += (sender, args) => {
+            if (args.Data != null) Output.Enqueue(args.Data);
+        };
+        process.ErrorDataReceived += (sender, args) => {
+            if (args.Data != null) Error.Enqueue(args.Data);
+        };
+    }
+
+    public void Start() {
+        if (!process.Start()) throw new InvalidOperationException("No se pudo iniciar el proceso.");
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+    }
+    public bool HasExited { get { return process.HasExited; } }
+    public int ExitCode { get { return process.ExitCode; } }
+    public void WaitForExit() { process.WaitForExit(); }
+    public void Dispose() { process.Dispose(); }
+}
+'@
+    }
+
+    function Invoke-AIODeployNativeProcess {
+        param([string]$FileName, [string]$Arguments, [scriptblock]$OnPercent)
+
+        $reader = New-Object AIODeployNativeReader($FileName, $Arguments)
+        $started = $false
+        $lastPercent = -1.0
+        $tail = New-Object System.Collections.Generic.List[string]
+        try {
+            $reader.Start()
+            $started = $true
+            do {
+                $exited = $reader.HasExited
+                # WaitForExit sin timeout tambien termina las entregas asincronas.
+                if ($exited) { $reader.WaitForExit() }
+                $line = $null
+                while ($reader.Output.TryDequeue([ref]$line)) {
+                    if ($OnPercent) {
+                        foreach ($match in [regex]::Matches($line, '(?<![\d.,])(?<percent>\d{1,3}(?:[.,]\d+)?)\s*%')) {
+                            $percent = [double]::Parse($match.Groups['percent'].Value.Replace(',', '.'), [System.Globalization.CultureInfo]::InvariantCulture)
+                            if ($percent -ge 0 -and $percent -le 100 -and $percent -gt $lastPercent) {
+                                $lastPercent = $percent
+                                & $OnPercent $percent
+                            }
+                        }
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($line)) {
+                        [void]$tail.Add($line)
+                        if ($tail.Count -gt 20) { $tail.RemoveAt(0) }
+                    }
+                }
+                while ($reader.Error.TryDequeue([ref]$line)) {
+                    if (-not [string]::IsNullOrWhiteSpace($line)) {
+                        [void]$tail.Add($line)
+                        if ($tail.Count -gt 20) { $tail.RemoveAt(0) }
+                    }
+                }
+                [System.Windows.Forms.Application]::DoEvents()
+                if (-not $exited) { Start-Sleep -Milliseconds 100 }
+            } while (-not $exited)
+
+            $exitCode = [int]$reader.ExitCode
+            if ($exitCode -ne 0 -and $tail.Count -gt 0) {
+                Write-Log -LogLevel ERROR -Message ("DEPLOY: {0} devolvio {1}: {2}" -f $FileName, $exitCode, ($tail -join ' | '))
+            }
+            return $exitCode
+        } finally {
+            # Nunca entregar el control a la limpieza mientras DISM siga escribiendo.
+            if ($started) { $reader.WaitForExit() }
+            $reader.Dispose()
+        }
+    }
+
     # ------------------------------------------------------------------
     # 2. Construccion del formulario
     # ------------------------------------------------------------------
@@ -270,20 +363,77 @@ function Show-Deploy-To-VHD-GUI {
     # Etiqueta de estado y boton principal
     $lblStatus           = New-Object System.Windows.Forms.Label
     $lblStatus.Text      = "Esperando configuracion..."
-    $lblStatus.Location  = "20, 570"
-    $lblStatus.AutoSize  = $true
+    $lblStatus.Location  = "20, 438"
+    $lblStatus.Size      = "660, 36"
+    $lblStatus.AutoSize  = $false
     $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
     $form.Controls.Add($lblStatus)
 
     $btnDeploy           = New-Object System.Windows.Forms.Button
     $btnDeploy.Text      = "EJECUTAR DESPLIEGUE"
-    $btnDeploy.Location  = "380, 550"
-    $btnDeploy.Size      = "300, 50"
+    $btnDeploy.Location  = "380, 586"
+    $btnDeploy.Size      = "300, 40"
     $btnDeploy.BackColor = [System.Drawing.Color]::SeaGreen
     $btnDeploy.ForeColor = [System.Drawing.Color]::White
     $btnDeploy.FlatStyle = "Flat"
     $btnDeploy.Font      = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
     $form.Controls.Add($btnDeploy)
+
+    $lblDeployProgress           = New-Object System.Windows.Forms.Label
+    $lblDeployProgress.Text      = "Progreso general: esperando inicio."
+    $lblDeployProgress.Location  = "20, 478"
+    $lblDeployProgress.Size      = "660, 20"
+    $lblDeployProgress.ForeColor = [System.Drawing.Color]::Silver
+    $form.Controls.Add($lblDeployProgress)
+
+    $progressDeploy          = New-Object System.Windows.Forms.ProgressBar
+    $progressDeploy.Location = "20, 502"
+    $progressDeploy.Size     = "660, 18"
+    $progressDeploy.Style    = "Continuous"
+    $progressDeploy.Minimum  = 0
+    $progressDeploy.Maximum  = 6
+    $progressDeploy.Value    = 0
+    $form.Controls.Add($progressDeploy)
+
+    $lblImageProgress           = New-Object System.Windows.Forms.Label
+    $lblImageProgress.Text      = "Aplicacion de imagen: en espera."
+    $lblImageProgress.Location  = "20, 530"
+    $lblImageProgress.Size      = "660, 20"
+    $lblImageProgress.ForeColor = [System.Drawing.Color]::Silver
+    $form.Controls.Add($lblImageProgress)
+
+    $progressImage          = New-Object System.Windows.Forms.ProgressBar
+    $progressImage.Location = "20, 554"
+    $progressImage.Size     = "660, 14"
+    $progressImage.Style    = "Continuous"
+    $progressImage.Minimum  = 0
+    $progressImage.Maximum  = 1000
+    $progressImage.Value    = 0
+    $form.Controls.Add($progressImage)
+
+    $deployProgress = @{ Completed = 0; Total = 6 }
+    $CompleteDeployStage = {
+        # Cada etapa vale una unidad y se contabiliza al terminar sus operaciones.
+        $deployProgress.Completed++
+        $progressDeploy.Value = [math]::Min($deployProgress.Completed, $progressDeploy.Maximum)
+        $percent = [int][math]::Floor(100.0 * $deployProgress.Completed / $deployProgress.Total)
+        $lblDeployProgress.Text = "Progreso general: $($deployProgress.Completed) de $($deployProgress.Total) etapas completadas ($percent%)."
+        $form.Refresh()
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+
+    $ReportImagePercent = {
+        param([double]$Percent)
+        # DISM puede imprimir 100% antes de devolver un error final. Solo su salida
+        # exitosa permite completar esta barra y contabilizar la etapa de imagen.
+        $progressImage.Value = [int][math]::Floor([math]::Min(99.9, $Percent) * 10)
+        if ($Percent -ge 100) {
+            $lblImageProgress.Text = "Aplicacion de imagen: finalizando y comprobando resultado..."
+        } else {
+            $lblImageProgress.Text = "Aplicacion de imagen: $($Percent.ToString('0.#'))%."
+        }
+        $form.Refresh()
+    }
 
     # ------------------------------------------------------------------
     # 3. Eventos de interfaz
@@ -395,6 +545,7 @@ function Show-Deploy-To-VHD-GUI {
     # 4. Motor de despliegue
     # ------------------------------------------------------------------
     $btnDeploy.Add_Click({
+        if ($script:isDeploying) { return }
 
         # Validaciones previas
         if (-not $txtWim.Text) {
@@ -471,7 +622,22 @@ function Show-Deploy-To-VHD-GUI {
 
         $script:isDeploying   = $true
         $btnDeploy.Enabled    = $false
+        $grpSource.Enabled    = $false
+        $grpTargetMode.Enabled = $false
+        $grpDest.Enabled      = $false
         $form.Cursor          = [System.Windows.Forms.Cursors]::WaitCursor
+
+        $deployProgress.Completed = 0
+        $deployProgress.Total = if ($isVhdMode) { 6 } else { 5 }
+        $progressDeploy.Value = 0
+        $progressDeploy.Maximum = $deployProgress.Total
+        $progressImage.Value = 0
+        $lblDeployProgress.Text = "Progreso general: 0 de $($deployProgress.Total) etapas completadas (0%)."
+        $lblImageProgress.Text = "Aplicacion de imagen: en espera."
+        $lblImageProgress.ForeColor = [System.Drawing.Color]::Silver
+        $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
+        $form.Refresh()
+        [System.Windows.Forms.Application]::DoEvents()
 
         try {
             # Bug 1 corregido: acumulador en memoria para evitar colisiones de letras por latencia VDS
@@ -498,6 +664,7 @@ function Show-Deploy-To-VHD-GUI {
                 # Bucle de espera activa: evalúa cada 500ms si el disco ya está expuesto
                 while ($null -eq $diskNum -and $retryCount -lt $maxRetries) {
                     Start-Sleep -Milliseconds 500
+                    [System.Windows.Forms.Application]::DoEvents()
                     $vhdInfo = Get-VHD -Path $vhdPath -ErrorAction SilentlyContinue
                     if ($vhdInfo -and $vhdInfo.DiskNumber -ge 0) {
                         $diskNum = $vhdInfo.DiskNumber
@@ -521,7 +688,11 @@ function Show-Deploy-To-VHD-GUI {
                 Clear-Disk -Number $diskNum -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop
             }
 
+            & $CompleteDeployStage
+
             # ── Fase 2: Inicializacion y particionado ─────────────────
+            $lblStatus.Text = "Inicializando disco y preparando particiones..."
+            $form.Refresh()
             $partStyle = if ($isGPT) { "GPT" } else { "MBR" }
             Initialize-Disk -Number $diskNum -PartitionStyle $partStyle -ErrorAction Stop
 
@@ -616,17 +787,26 @@ function Show-Deploy-To-VHD-GUI {
                 }
             }
 
+            & $CompleteDeployStage
+
             # ── Fase 3: Aplicacion de la imagen principal ─────────────────
             $lblStatus.Text = "Desplegando imagen (Esto tardara varios minutos)..."
+            $lblImageProgress.Text = "Aplicacion de imagen: 0%."
             $form.Refresh()
 
             Write-Log -LogLevel ACTION -Message "DEPLOY: Ejecutando DISM nativo hacia $driveLetterSystem\ ..."
-            $dismArgs = "/Apply-Image /ImageFile:`"$wimPath`" /Index:$idx /ApplyDir:$driveLetterSystem\"
-            $proc     = Start-Process "dism.exe" -ArgumentList $dismArgs -Wait -NoNewWindow -PassThru
+            $dismArgs = "/English /Apply-Image /ImageFile:`"$wimPath`" /Index:$idx /ApplyDir:$driveLetterSystem\"
+            $dismExitCode = Invoke-AIODeployNativeProcess -FileName "dism.exe" -Arguments $dismArgs -OnPercent $ReportImagePercent
 
-            if ($proc.ExitCode -ne 0) {
-                throw "Fallo DISM al aplicar la imagen. Codigo: $($proc.ExitCode)"
+            if ($dismExitCode -ne 0) {
+                $lblImageProgress.Text = "Aplicacion de imagen: error (codigo $dismExitCode)."
+                $lblImageProgress.ForeColor = [System.Drawing.Color]::Red
+                throw "Fallo DISM al aplicar la imagen. Codigo: $dismExitCode"
             }
+            $progressImage.Value = $progressImage.Maximum
+            $lblImageProgress.Text = "Aplicacion de imagen: 100%, completada."
+            $lblImageProgress.ForeColor = [System.Drawing.Color]::LightGreen
+            & $CompleteDeployStage
 
             # ── Fase 4: Escritura del sector de arranque ───────────────
             $lblStatus.Text = "Escribiendo sectores de arranque..."
@@ -635,12 +815,12 @@ function Show-Deploy-To-VHD-GUI {
             $fw       = if ($isGPT) { "UEFI" } else { "BIOS" }
             Write-Log -LogLevel ACTION -Message "DEPLOY: Escribiendo BCD ($fw)..."
 
-            $procBcd = Start-Process "bcdboot.exe" `
-                -ArgumentList "$driveLetterSystem\Windows /s $driveLetterBoot /f $fw" `
-                -Wait -NoNewWindow -PassThru
-            if ($procBcd.ExitCode -ne 0) {
+            $bcdExitCode = Invoke-AIODeployNativeProcess -FileName "bcdboot.exe" `
+                -Arguments "$driveLetterSystem\Windows /s $driveLetterBoot /f $fw"
+            if ($bcdExitCode -ne 0) {
                 throw "Fallo la creacion de archivos de arranque (BCDBOOT)."
             }
+            & $CompleteDeployStage
 
             # ── Fase 5: Ocultar y proteger particiones de sistema ─────────
             if ($sizeRecMB -gt 0 -and $driveLetterRecovery) {
@@ -686,11 +866,14 @@ function Show-Deploy-To-VHD-GUI {
                 $driveLetterBoot = $null
             }
 
+            & $CompleteDeployStage
+
             # ── Fase 6: Desmontar VHD si aplica ───────────────────────
             if ($isVhdMode) {
                 $lblStatus.Text = "Desmontando disco virtual..."
                 $form.Refresh()
                 Dismount-VHD -Path $vhdPath -ErrorAction Stop
+                & $CompleteDeployStage
             }
 
             $lblStatus.Text      = "Completado."
@@ -703,6 +886,12 @@ function Show-Deploy-To-VHD-GUI {
         } catch {
             $lblStatus.Text      = "Error Critico."
             $lblStatus.ForeColor = [System.Drawing.Color]::Red
+            $lblDeployProgress.Text = "Detenido: $($deployProgress.Completed) de $($deployProgress.Total) etapas completadas."
+            if ($deployProgress.Completed -eq 2 -and $progressImage.Value -lt $progressImage.Maximum) {
+                $lblImageProgress.Text = "Aplicacion de imagen: no completada."
+                $lblImageProgress.ForeColor = [System.Drawing.Color]::Red
+            }
+            $form.Refresh()
             Write-Log -LogLevel ERROR -Message "DEPLOY: FALLO - $($_.Exception.Message)"
 
             # Limpiar letras de unidad asignadas antes del fallo
@@ -735,6 +924,9 @@ function Show-Deploy-To-VHD-GUI {
         } finally {
             $script:isDeploying = $false
             $btnDeploy.Enabled  = $true
+            $grpSource.Enabled = $true
+            $grpTargetMode.Enabled = $true
+            $grpDest.Enabled = $true
             $form.Cursor        = [System.Windows.Forms.Cursors]::Default
         }
     })
@@ -770,8 +962,11 @@ function Show-Deploy-To-VHD-GUI {
     $toolTip.SetToolTip($numMsrSize,      "Size de la particion MSR. Solo aplica en GPT/UEFI.")
     $toolTip.SetToolTip($numRecSize,      "Size de la particion de Recuperacion (WinRE). Se recomienda 1024 MB.")
     $toolTip.SetToolTip($btnDeploy,       "ADVERTENCIA: Iniciara el proceso de creacion/formateo y aplicacion de imagen.")
+    $toolTip.SetToolTip($progressDeploy,  "Cuenta las etapas terminadas. El porcentaje no representa el tiempo restante.")
+    $toolTip.SetToolTip($progressImage,   "Muestra el avance informado al aplicar la imagen. Solo llega a 100% cuando la aplicacion termina correctamente.")
 
-    $form.Add_FormClosing({ 
+    $form.Add_FormClosing({
+        if ($script:isDeploying -or $_.Cancel) { return }
         $confirm = [System.Windows.Forms.MessageBox]::Show(
             "Estas seguro de que deseas salir?", 
             "Confirmar Salida", 

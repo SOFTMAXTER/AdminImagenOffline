@@ -252,7 +252,7 @@ function Show-Drivers-GUI {
     })
 
     $btnInstall.Add_Click({
-        $checkedItems = $listView.CheckedItems
+        $checkedItems = @($listView.CheckedItems)
         if ($checkedItems.Count -eq 0) { return }
 
         if ([System.Windows.Forms.MessageBox]::Show("Inyectar $($checkedItems.Count) drivers?", "Confirmar", 'YesNo') -ne 'Yes') { return }
@@ -261,8 +261,8 @@ function Show-Drivers-GUI {
         $btnCancelAfterCurrent.Enabled = $true
         $chkForceUnsigned.Enabled = $false
         $script:cancelDrivers = $false
-        $progressBar.Maximum = $checkedItems.Count
         $progressBar.Value = 0
+        $progressBar.Maximum = $checkedItems.Count
         $progressBar.Visible = $true
 
         $count = 0; $errs = 0; $success = 0; $total = $checkedItems.Count
@@ -274,17 +274,15 @@ function Show-Drivers-GUI {
 
             foreach ($item in $checkedItems) {
                 if ($script:cancelDrivers) { break }
-                $count++
-                $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
                 $driverName = $item.SubItems[1].Text
                 $driverPath = $item.Tag
 
-                $lblStatus.Text = "Instalando ($count/$total): $driverName..."
+                $lblStatus.Text = "Instalando ($($count + 1)/$total): $driverName..."
                 $form.Refresh()
 
                 try {
                     $dismLogPath = Join-Path $scratchBase "dism_drv_$([Guid]::NewGuid().ToString('N').Substring(0,8)).log"
-                    $args = "/Image:`"$Script:MOUNT_DIR`" /Add-Driver /Driver:`"$driverPath`" /LogPath:`"$dismLogPath`" /LogLevel:3"
+                    $args = "/Image:`"$($Script:MOUNT_DIR.TrimEnd('\'))`" /Add-Driver /Driver:`"$driverPath`" /LogPath:`"$dismLogPath`" /LogLevel:3"
                     if ($chkForceUnsigned.Checked) { $args += " /ForceUnsigned" }
                     
                     $proc = Start-Process "dism.exe" -ArgumentList $args -WindowStyle Hidden -PassThru
@@ -308,6 +306,11 @@ function Show-Drivers-GUI {
                     Write-Log -LogLevel ERROR -Message "Driver_Injector: Excepcion [$driverName] - $($_.Exception.Message)"
                 } finally {
                     if (Test-Path -LiteralPath $dismLogPath -ErrorAction SilentlyContinue) { Remove-Item $dismLogPath -Force -ErrorAction SilentlyContinue }
+                    # Contar el objeto solo despues de terminar su procesamiento.
+                    $count++
+                    $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
+                    $form.Refresh()
+                    [System.Windows.Forms.Application]::DoEvents()
                 }
             }
 
@@ -475,7 +478,7 @@ function Show-Uninstall-Drivers-GUI {
     })
 
     $btnDelete.Add_Click({
-        $checkedItems = $listView.CheckedItems
+        $checkedItems = @($listView.CheckedItems)
         if ($checkedItems.Count -eq 0) { return }
 
         $criticalClasses = @("SCSIAdapter", "HDC", "System", "USB", "Firmware", "Display")
@@ -493,8 +496,8 @@ function Show-Uninstall-Drivers-GUI {
         $btnDelete.Enabled = $false
         $btnCancelAfterCurrent.Enabled = $true
         $script:cancelDrivers = $false
-        $progressBar.Maximum = $checkedItems.Count
         $progressBar.Value = 0
+        $progressBar.Maximum = $checkedItems.Count
         $progressBar.Visible = $true
 
         $count = 0; $errors = 0; $total = $checkedItems.Count
@@ -506,17 +509,15 @@ function Show-Uninstall-Drivers-GUI {
 
             foreach ($item in $checkedItems) {
                 if ($script:cancelDrivers) { break }
-                $count++
-                $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
                 $oemInf  = $item.Tag
                 $origName = $item.SubItems[1].Text
 
-                $lblStatus.Text = "Eliminando ($count/$total): $origName ($oemInf)..."
+                $lblStatus.Text = "Eliminando ($($count + 1)/$total): $origName ($oemInf)..."
                 $form.Refresh()
 
                 try {
                     $dismLogPath = Join-Path $scratchBase "dism_rmdrv_$([Guid]::NewGuid().ToString('N').Substring(0,8)).log"
-                    $args = "/Image:`"$Script:MOUNT_DIR`" /Remove-Driver /Driver:`"$oemInf`" /LogPath:`"$dismLogPath`" /LogLevel:3"
+                    $args = "/Image:`"$($Script:MOUNT_DIR.TrimEnd('\'))`" /Remove-Driver /Driver:`"$oemInf`" /LogPath:`"$dismLogPath`" /LogLevel:3"
                     
                     $proc = Start-Process "dism.exe" -ArgumentList $args -WindowStyle Hidden -PassThru
                     while (-not $proc.HasExited) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
@@ -538,6 +539,11 @@ function Show-Uninstall-Drivers-GUI {
                     Write-Log -LogLevel ERROR -Message "Driver_Remove: Excepcion al eliminar [$oemInf] - $($_.Exception.Message)"
                 } finally {
                     if (Test-Path -LiteralPath $dismLogPath -ErrorAction SilentlyContinue) { Remove-Item $dismLogPath -Force -ErrorAction SilentlyContinue }
+                    # Contar el objeto solo despues de terminar su procesamiento.
+                    $count++
+                    $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
+                    $form.Refresh()
+                    [System.Windows.Forms.Application]::DoEvents()
                 }
             }
 

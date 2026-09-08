@@ -43,7 +43,7 @@
 # ==============================================================================
 
 # =================================================================
-#  MODULO DE INYECCION DE ADDONS (.WIM, .TPK, .BPK, .REG,)
+#  MODULO DE INYECCION DE ADDONS (.TPK, .BPK, .REG,)
 # =================================================================
 # --- HELPER: Extractor Inteligente por Analisis de Cabecera ---
 function Expand-AddonArchive {
@@ -158,6 +158,259 @@ function Install-OfflineAddon {
     throw "Formato no soportado para inyeccion automatica."
 }
 
+# ============================================================================
+# --- COMPATIBILIDAD: Paquetes DeltaPack Dual-Engine (manifest_*.json) ------
+# ============================================================================
+
+function Get-DeltaPackManifest {
+    param([Parameter(Mandatory=$true)][string]$PackagePath)
+
+    $manifestFile = Get-ChildItem -Path $PackagePath -Filter "manifest_*.json" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $manifestFile) {
+        throw "No se encontro 'manifest_*.json' en '$PackagePath'. No es un paquete DeltaPack Dual-Engine valido."
+    }
+
+    try {
+        $manifest = Get-Content -Path $manifestFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        throw "El manifest '$($manifestFile.Name)' no es un JSON valido: $($_.Exception.Message)"
+    }
+
+    if (-not $manifest.generatedBy -or $manifest.generatedBy -notmatch 'DeltaPack') {
+        throw "El manifest '$($manifestFile.Name)' no fue generado por DeltaPack Dual-Engine."
+    }
+    if (-not $manifest.outputs) {
+        throw "El manifest '$($manifestFile.Name)' no contiene la seccion 'outputs' esperada (esquema no soportado)."
+    }
+
+    Add-Member -InputObject $manifest -NotePropertyName '_ManifestPath' -NotePropertyValue $manifestFile.FullName -Force
+    Add-Member -InputObject $manifest -NotePropertyName '_PackagePath'  -NotePropertyValue (Resolve-Path $PackagePath).Path -Force
+    return $manifest
+}
+
+function Invoke-DeltaPackDeletions {
+    param([Parameter(Mandatory=$true)][string]$DeletionsPath)
+
+    $deletions = Get-Content -Path $DeletionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $applied = 0; $notFound = 0; $failed = 0
+
+    foreach ($entry in @($deletions.entries)) {
+        if ($entry.operation -ne 'delete') { continue }
+        $targetPath = Join-Path $Script:MOUNT_DIR $entry.path
+        try {
+            if (Test-Path -LiteralPath $targetPath) {
+                if ($entry.kind -eq 'directory') {
+                    Remove-Item -LiteralPath $targetPath -Recurse -Force -ErrorAction Stop
+                } else {
+                    Remove-Item -LiteralPath $targetPath -Force -ErrorAction Stop
+                }
+                $applied++
+                Write-Log -LogLevel INFO -Message "DeltaPackDeletions: Tombstone aplicado -> $($entry.path)"
+            } else {
+                $notFound++
+                Write-Log -LogLevel INFO -Message "DeltaPackDeletions: Ruta ya inexistente (omitido) -> $($entry.path)"
+            }
+        } catch {
+            $failed++
+            Write-Log -LogLevel ERROR -Message "DeltaPackDeletions: Fallo al eliminar '$($entry.path)': $($_.Exception.Message)"
+        }
+    }
+
+    Write-Log -LogLevel ACTION -Message "DeltaPackDeletions: Aplicadas=$applied Inexistentes=$notFound Fallidas=$failed (Total accionables: $($deletions.actionableEntryCount))"
+
+    if ($failed -gt 0) {
+        throw "$failed eliminacion(es) obligatorias del paquete (Deletions JSON) no se pudieron aplicar. Revisa el log."
+    }
+    return $applied
+}
+
+function Invoke-DeltaPackActions {
+    param(
+        [Parameter(Mandatory=$true)][string]$ActionsPath,
+        [Parameter(Mandatory=$true)][ValidateSet('afterWimBeforeRegistry','afterRegistry')][string]$Phase
+    )
+
+    $actions = Get-Content -Path $ActionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $phaseData = $actions.phases.$Phase
+    if (-not $phaseData) { return }
+
+    if ($Phase -eq 'afterWimBeforeRegistry') {
+        foreach ($drv in @($phaseData.driverPackages)) {
+            $infFull = Join-Path $Script:MOUNT_DIR $drv.infPath
+            if (Test-Path -LiteralPath $infFull) {
+                Write-Log -LogLevel ACTION -Message "DeltaPackActions: Registrando driver offline -> $($drv.infPath)"
+                $proc = Start-Process "dism.exe" -ArgumentList "/Image:`"$($Script:MOUNT_DIR.TrimEnd('\'))`" /Add-Driver /Driver:`"$infFull`" /ForceUnsigned" -Wait -NoNewWindow -PassThru
+                if ($proc.ExitCode -ne 0) {
+                    throw "DISM /Add-Driver fallo con codigo $($proc.ExitCode) para '$($drv.infPath)'."
+                }
+            } else {
+                Write-Log -LogLevel WARN -Message "DeltaPackActions: INF de driver referenciado no encontrado tras aplicar el WIM: $($drv.infPath)"
+            }
+        }
+        foreach ($cat in @($phaseData.protectedCatalogs)) {
+            Write-Log -LogLevel WARN -Message "DeltaPackActions: Catalogo/controlador protegido requiere revision manual (no automatizable): $($cat.path)"
+        }
+    }
+    else {
+        foreach ($task in @($phaseData.scheduledTasks)) {
+            Write-Log -LogLevel INFO -Message "DeltaPackActions: Tarea programada pendiente de validacion post-arranque: $($task.taskFile)"
+        }
+        foreach ($rp in @($phaseData.reparsePoints)) {
+            Write-Log -LogLevel INFO -Message "DeltaPackActions: Punto de reanalisis reportado por el paquete: $rp"
+        }
+    }
+}
+
+# --- MOTOR PRINCIPAL: Inyector de Paquetes DeltaPack Dual-Engine (respeta manifest.deployment.order) ---
+function Install-DeltaPackPackage {
+    param(
+        [Parameter(Mandatory=$true)][string]$PackagePath,
+        [int]$WimIndex = 1
+    )
+
+    $manifest = Get-DeltaPackManifest -PackagePath $PackagePath
+    $fullName = $manifest.package.fullName
+
+    # --- Validacion de arquitectura contra la imagen montada (bloqueante) ---
+    $imgArch =
+        if     (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysArm32")) { "ARM64" }
+        elseif (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysWOW64")) { "x64" }
+        else                                                                { "x86" }
+
+    if ($manifest.compatibility.architecture -and $manifest.compatibility.architecture -ne $imgArch) {
+        throw "Arquitectura del paquete '$fullName' ($($manifest.compatibility.architecture)) no coincide con la imagen montada ($imgArch)."
+    }
+
+    # --- Aviso no bloqueante de linea base de servicing (build de captura vs. imagen) ---
+    $regData = Get-ItemProperty -Path "Registry::HKLM\OfflineSoftware\Microsoft\Windows NT\CurrentVersion" -ErrorAction SilentlyContinue
+    if ($regData -and $manifest.compatibility.buildNumber -and $regData.CurrentBuildNumber -and
+        ([string]$regData.CurrentBuildNumber -ne [string]$manifest.compatibility.buildNumber)) {
+        Write-Log -LogLevel WARN -Message "DeltaPack [$fullName]: Build de captura ($($manifest.compatibility.buildNumber)) difiere del build de la imagen montada ($($regData.CurrentBuildNumber)). Continuando (politica declarada: '$($manifest.compatibility.policy)')."
+    }
+
+    $hasWim = $false; $hasReg = $false; $hasDeletions = $false; $hasActions = $false
+
+    # --- PASO 1 (deployment.order): Aplicar WIM ---
+    $wimRel = $manifest.outputs.wimFile
+    if ($wimRel) {
+        $wimFull = Join-Path $PackagePath $wimRel
+        if (Test-Path -LiteralPath $wimFull) {
+
+            # 1a. Integridad del artefacto WIM contra Artifacts_*.sha256
+            $artifactsRel = $manifest.outputs.artifactChecksumsFile
+            if ($artifactsRel) {
+                $artifactsFull = Join-Path $PackagePath $artifactsRel
+                if (Test-Path -LiteralPath $artifactsFull) {
+                    $line = Select-String -Path $artifactsFull -Pattern $wimRel -SimpleMatch | Select-Object -First 1
+                    if ($line -and $line.Line -match '^([0-9a-fA-F]{64})\s{2}') {
+                        $expectedHash = $Matches[1]
+                        $actualHash = (Get-FileHash -Path $wimFull -Algorithm SHA256).Hash
+                        if ($actualHash -ne $expectedHash) {
+                            throw "El hash SHA256 de '$wimRel' no coincide con '$artifactsRel'. El paquete puede estar corrupto o manipulado."
+                        }
+                        Write-Log -LogLevel INFO -Message "DeltaPack [$fullName]: Integridad del WIM verificada contra $artifactsRel."
+                    }
+                }
+            }
+
+            # 1b. Extraccion del payload + 1c. Verificacion opcional contra Checksums_*.sha256 + 1d. Despliegue con seguridad NTFS completa
+            $tempExtract = Join-Path $Script:Scratch_DIR "DeltaPack_$fullName`_$([System.Guid]::NewGuid().ToString('N').Substring(0,6))"
+            try {
+                $dismInfo = dism.exe /Get-WimInfo /WimFile:"$wimFull" /English | Select-String "Index :"
+                $indexCount = @($dismInfo).Count
+                $actualIndex = if ($indexCount -le 1) { 1 } else { $WimIndex }
+
+                New-Item -Path $tempExtract -ItemType Directory -Force | Out-Null
+                Write-Log -LogLevel ACTION -Message "DeltaPack [$fullName]: Extrayendo WIM (Indice $actualIndex)..."
+                $proc = Start-Process "dism.exe" -ArgumentList "/Apply-Image /ImageFile:`"$wimFull`" /Index:$actualIndex /ApplyDir:`"$tempExtract`"" -Wait -NoNewWindow -PassThru
+                if ($proc.ExitCode -ne 0) { throw "DISM /Apply-Image fallo al extraer '$wimRel' (Codigo: $($proc.ExitCode))." }
+
+                $checksumsRel = $manifest.outputs.checksumsFile
+                if ($checksumsRel) {
+                    $checksumsFull = Join-Path $PackagePath $checksumsRel
+                    if (Test-Path -LiteralPath $checksumsFull) {
+                        $mismatch = 0; $verified = 0
+                        Get-Content -Path $checksumsFull -Encoding UTF8 | ForEach-Object {
+                            if ($_ -match '^([0-9a-fA-F]{64})\s{2}(.+)$') {
+                                $expected = $Matches[1]; $relFile = $Matches[2].TrimEnd("`r")
+                                $absFile = Join-Path $tempExtract $relFile
+                                if (Test-Path -LiteralPath $absFile) {
+                                    $actual = (Get-FileHash -Path $absFile -Algorithm SHA256).Hash
+                                    if ($actual -eq $expected) { $verified++ } else { $mismatch++ }
+                                } else { $mismatch++ }
+                            }
+                        }
+                        Write-Log -LogLevel INFO -Message "DeltaPack [$fullName]: Checksums de payload verificados=$verified, discrepancias=$mismatch."
+                        if ($mismatch -gt 0) {
+                            Write-Log -LogLevel WARN -Message "DeltaPack [$fullName]: $mismatch archivo(s) no coinciden con $checksumsRel."
+                        }
+                    }
+                }
+
+                Enable-Privileges
+                $safeMountDir = $Script:MOUNT_DIR.TrimEnd('\', '/')
+                $roboArgs = "`"$tempExtract`" `"$safeMountDir`" /E /B /IS /IT $xdArg /R:0 /W:0 /NJH /NJS /NDL /NC /NS /NP"
+                $proc = Start-Process robocopy.exe -ArgumentList $roboArgs -Wait -PassThru -WindowStyle Hidden
+                if ($proc.ExitCode -ge 8) {
+                    throw "Robocopy fallo desplegando el WIM de '$fullName' en $safeMountDir (Codigo: $($proc.ExitCode))."
+                }
+                $hasWim = $true
+            } finally {
+                if (Test-Path $tempExtract) { Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
+            }
+        } else {
+            Write-Log -LogLevel WARN -Message "DeltaPack [$fullName]: outputs.wimFile ('$wimRel') no esta presente en el paquete (ej. omitido por tamaño). Se omite el despliegue de archivos."
+        }
+    }
+
+    # --- PASO 2 (deployment.order): Actions afterWimBeforeRegistry, si existen ---
+    $actionsRel = $manifest.outputs.actionsFile
+    if ($actionsRel) {
+        $actionsFull = Join-Path $PackagePath $actionsRel
+        if (Test-Path -LiteralPath $actionsFull) {
+            Invoke-DeltaPackActions -ActionsPath $actionsFull -Phase 'afterWimBeforeRegistry'
+            $hasActions = $true
+        }
+    }
+
+    # --- PASO 3 (deployment.order): Entries accionables de Deletions JSON, si existen ---
+    $deletionsRel = $manifest.outputs.deletionsFile
+    if ($deletionsRel) {
+        $deletionsFull = Join-Path $PackagePath $deletionsRel
+        if ((Test-Path -LiteralPath $deletionsFull) -and $manifest.deletions.actionableEntryCount -gt 0) {
+            Invoke-DeltaPackDeletions -DeletionsPath $deletionsFull | Out-Null
+            $hasDeletions = $true
+        }
+    }
+
+    # --- PASO 4 (deployment.order): Importar REG ---
+    $regRel = $manifest.outputs.regFile
+    if ($regRel) {
+        $regFull = Join-Path $PackagePath $regRel
+        if (Test-Path -LiteralPath $regFull) {
+            Import-OfflineReg -FilePath $regFull
+            $hasReg = $true
+        } else {
+            Write-Log -LogLevel WARN -Message "DeltaPack [$fullName]: outputs.regFile ('$regRel') no encontrado en el paquete."
+        }
+    }
+
+    # --- PASO 5 (deployment.order): Validar Actions afterRegistry ---
+    if ($actionsRel) {
+        $actionsFull = Join-Path $PackagePath $actionsRel
+        if (Test-Path -LiteralPath $actionsFull) {
+            Invoke-DeltaPackActions -ActionsPath $actionsFull -Phase 'afterRegistry'
+        }
+    }
+
+    $msg = "DeltaPack '$fullName': "
+    $msg += if ($hasWim) { "[WIM] " } else { "[WIM omitido] " }
+    if ($hasActions)   { $msg += "[Actions] " }
+    if ($hasDeletions) { $msg += "[Eliminaciones] " }
+    if ($hasReg)       { $msg += "[Registro] " }
+    return $msg.Trim()
+}
+
 # --- INTERFAZ GRÁFICA DEL GESTOR DE ADDONS ---
 function Show-Addons-GUI {
     # Los ensamblados deben cargarse ANTES de cualquier MessageBox (incluido el guard de
@@ -165,9 +418,9 @@ function Show-Addons-GUI {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
-    if ($Script:IMAGE_MOUNTED -eq 0) {
+    if ($Script:IMAGE_MOUNTED -eq 0) { 
         [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
-        return
+        return 
     }
 
     if (-not (Mount-Hives)) { return }
@@ -179,7 +432,7 @@ function Show-Addons-GUI {
 
     try {
         $form = New-Object System.Windows.Forms.Form
-        $form.Text = "Instalador de Addons y Paquetes Avanzados (.WIM .TPK, .BPK, .REG)"
+        $form.Text = "Instalador de Addons y Paquetes Avanzados (.TPK, .BPK, .REG, DeltaPack)"
         $form.Size = New-Object System.Drawing.Size(950, 660)
         $form.StartPosition = "CenterScreen"
         $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -205,7 +458,7 @@ function Show-Addons-GUI {
         $form.Controls.Add($btnHelp)
 
         $btnAddFiles = New-Object System.Windows.Forms.Button
-        $btnAddFiles.Text = "+ Agregar Addons (.wim, .tpk, .bpk, .reg)..."
+        $btnAddFiles.Text = "+ Agregar Addons / Paquete DeltaPack..."
         $btnAddFiles.Location = "670, 12"
         $btnAddFiles.Size = "240, 30"
         $btnAddFiles.BackColor = [System.Drawing.Color]::RoyalBlue
@@ -222,14 +475,15 @@ function Show-Addons-GUI {
         $form.Controls.Add($lblNomenclatura)
 
         # --- DETECCIÓN INTELIGENTE DE ARQUITECTURA (INSTANTÁNEA) ---
+        # Mismo criterio que la deteccion global del script (SysArm32 / SysWOW64).
         $defaultIdx = 1 # Asumimos x86 por defecto
         if     (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysArm32")) { $defaultIdx = 3 } # ARM64
         elseif (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysWOW64")) { $defaultIdx = 2 } # x64
 
         # --- SELECTOR DE ARQUITECTURA (GRUPO) ---
         $grpArch = New-Object System.Windows.Forms.GroupBox
-        $grpArch.Text = " Arquitectura del Addon (Solo aplica para desempaquetar .wim/.tpk/.bpk) "
-        $grpArch.Location = "20, 65"
+        $grpArch.Text = " Arquitectura del Addon (Solo aplica para desempaquetar .tpk/.bpk) "
+        $grpArch.Location = "20, 65" 
         $grpArch.Size = "890, 55"
         $grpArch.ForeColor = [System.Drawing.Color]::Orange
         $form.Controls.Add($grpArch)
@@ -267,19 +521,19 @@ function Show-Addons-GUI {
         $lv.GridLines = $true
         $lv.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
         $lv.ForeColor = [System.Drawing.Color]::White
-
+        
         $lv.Columns.Add("Estado", 150) | Out-Null
         $lv.Columns.Add("Archivo", 250) | Out-Null
         $lv.Columns.Add("Tipo Detectado", 120) | Out-Null
         $lv.Columns.Add("Ruta Completa", 360) | Out-Null
         $form.Controls.Add($lv)
 
-        # --- PALETA DE COLORES DE ESTADO ---
-        $ColorEspera     = [System.Drawing.Color]::Silver
-        $ColorProcesando = [System.Drawing.Color]::Cyan
-        $ColorCompletado = [System.Drawing.Color]::LimeGreen
-        $ColorError      = [System.Drawing.Color]::Tomato
-        $ColorOmitido    = [System.Drawing.Color]::Goldenrod
+        # --- PALETA DE COLORES DE ESTADO (centralizada para mantenimiento) ---
+        $ColorEspera     = [System.Drawing.Color]::Silver       # Neutral: en cola, sin actividad aun
+        $ColorProcesando = [System.Drawing.Color]::Cyan         # Activo: se esta procesando AHORA MISMO
+        $ColorCompletado = [System.Drawing.Color]::LimeGreen    # Exito
+        $ColorError      = [System.Drawing.Color]::Tomato       # Fallo critico
+        $ColorOmitido    = [System.Drawing.Color]::Goldenrod    # Omitido por arquitectura (advertencia, no error)
 
         # --- ESTADO Y BOTONES INFERIORES ---
         $lblStatus = New-Object System.Windows.Forms.Label
@@ -325,7 +579,10 @@ function Show-Addons-GUI {
             $helpMsg += "Por que es importante?`n"
             $helpMsg += "Si agregas una carpeta entera de Addons, el script leera estos sufijos y "
             $helpMsg += "OMITIRA automaticamente los paquetes/Registro de una arquitectura distinta a la "
-            $helpMsg += "seleccionada (x86, x64 o ARM64), evitando pantallas azules y corrupcion en la instalacion."
+            $helpMsg += "seleccionada (x86, x64 o ARM64), evitando pantallas azules y corrupcion en la instalacion.`n`n"
+            $helpMsg += "Paquetes DeltaPack Dual-Engine:`n"
+            $helpMsg += "Selecciona el archivo 'manifest_*.json' dentro de la carpeta del paquete para agregarlo "
+            $helpMsg += "como una unidad completa (WIM + REG + Eliminaciones + Acciones, en el orden que declare el manifest)."
 
             [System.Windows.Forms.MessageBox]::Show($helpMsg, "Reglas de Empaquetado", 'OK', 'Information')
         })
@@ -333,11 +590,38 @@ function Show-Addons-GUI {
         # --- EVENTOS ---
         $btnAddFiles.Add_Click({
             $ofd = New-Object System.Windows.Forms.OpenFileDialog
-            $ofd.Filter = "Addons Windows (*.tpk;*.bpk;*.wim;*.reg;*)|*.tpk;*.bpk;*.wim;*.reg|Todos los archivos (*.*)|*.*"
+            $ofd.Filter = "Addons Windows (*.tpk;*.bpk;*.reg)|*.tpk;*.bpk;*.reg|Paquetes DeltaPack Dual-Engine (manifest_*.json)|manifest_*.json|Todos los archivos (*.*)|*.*"
             $ofd.Multiselect = $true
             if ($ofd.ShowDialog() -eq 'OK') {
                 $lv.BeginUpdate()
                 foreach ($file in $ofd.FileNames) {
+
+                    # --- Paquete DeltaPack Dual-Engine: se agrega seleccionando su manifest_*.json ---
+                    if ([System.IO.Path]::GetFileName($file) -match '^(?i)manifest_.*\.json$') {
+                        $packageFolder = Split-Path $file -Parent
+                        try {
+                            $dpManifest = Get-DeltaPackManifest -PackagePath $packageFolder
+                        } catch {
+                            [System.Windows.Forms.MessageBox]::Show("No se pudo leer el paquete DeltaPack en `"$packageFolder`":`n`n$($_.Exception.Message)", "Paquete DeltaPack invalido", 'OK', 'Error')
+                            continue
+                        }
+
+                        $yaAgregado = $lv.Items | Where-Object { $_.Tag -is [pscustomobject] -and $_.Tag.Kind -eq 'DeltaPack' -and $_.Tag.Path -eq $packageFolder }
+                        if ($yaAgregado) { continue }
+
+                        $displayName = if ($dpManifest.outputs.wimFile) { $dpManifest.outputs.wimFile } else { "$($dpManifest.package.fullName).wim" }
+
+                        $item = New-Object System.Windows.Forms.ListViewItem("EN ESPERA")
+                        $item.SubItems.Add($displayName) | Out-Null
+                        $item.SubItems.Add("DELTAPACK") | Out-Null
+                        $item.SubItems.Add($packageFolder) | Out-Null
+                        $item.ForeColor = $ColorEspera
+                        $item.Tag = [pscustomobject]@{ Kind = 'DeltaPack'; Path = $packageFolder }
+                        $lv.Items.Add($item) | Out-Null
+                        continue
+                    }
+
+                    # --- Addon suelto (.wim / .tpk / .bpk / .reg) ---
                     $item = New-Object System.Windows.Forms.ListViewItem("EN ESPERA")
                     $item.SubItems.Add([System.IO.Path]::GetFileName($file)) | Out-Null
                     $item.SubItems.Add([System.IO.Path]::GetExtension($file).ToUpper()) | Out-Null
@@ -355,17 +639,19 @@ function Show-Addons-GUI {
         })
 
         $btnInstall.Add_Click({
-            if ($lv.Items.Count -eq 0) {
+            if ($lv.Items.Count -eq 0) { 
                 Write-Log -LogLevel WARN -Message "AddonInjector: Intento de ejecucion sin addons en la lista."
-                return
+                return 
             }
             $confirm = [System.Windows.Forms.MessageBox]::Show("Iniciar la inyeccion en lote? Esto fusionara archivos y claves de registro en el orden correcto.", "Confirmar", 'YesNo', 'Warning')
-            if ($confirm -ne 'Yes') {
+            if ($confirm -ne 'Yes') { 
                 Write-Log -LogLevel INFO -Message "AddonInjector: Operacion cancelada por el usuario en el cuadro de confirmacion."
-                return
+                return 
             }
 
+            # --- Limpiar caché SDDL residual de ejecuciones previas fallidas ---
             $Script:SDDL_Backups.Clear()
+
             Write-Log -LogLevel ACTION -Message "AddonInjector: Iniciando motor de inyeccion inteligente de Addons."
 
             $script:AddonBusy      = $true
@@ -376,6 +662,7 @@ function Show-Addons-GUI {
             $errors = 0; $success = 0; $skipped = 0
 
             try {
+                # Capturamos la arquitectura de la UI (1=x86, 2=x64, 3=ARM64 dentro del .wim/.tpk/.bpk)
                 $targetArch = if ($radX86.Checked) { "x86" } elseif ($radX64.Checked) { "x64" } else { "ARM64" }
                 $selectedIndex = if ($radX86.Checked) { 1 } elseif ($radX64.Checked) { 2 } else { 3 }
                 Write-Log -LogLevel INFO -Message "AddonInjector: Destino arquitectonico -> $targetArch | Indice WIM local: $selectedIndex"
@@ -388,83 +675,105 @@ function Show-Addons-GUI {
                     }
                 }
 
-                # --- 2. ORDENAMIENTO INTELIGENTE ---
+                if ($pendingItems.Count -eq 0) {
+                    [System.Windows.Forms.MessageBox]::Show("No hay addons pendientes de procesar.", "Sin pendientes", 'OK', 'Information') | Out-Null
+                    return
+                }
+
+                # --- 2. ORDENAMIENTO INTELIGENTE (Prioridad + Alfabeto) ---
                 $lblStatus.Text = "Calculando orden de inyeccion..."
                 $form.Refresh()
 
-                $sortedItems = $pendingItems | Sort-Object {
+                $sortedItems = @($pendingItems | Sort-Object {
                     $fileName = $_.SubItems[1].Text.ToLower()
-                    $priority = 5
+                    $priority = 5 # Prioridad por defecto (otros)
+                    
+                    # Asignacion de pesos (1 es lo primero que se instala)
+                    if ($fileName -match "_main\.(tpk|bpk|wim)$") { $priority = 1 } # Paquetes Principales
+                    elseif ($fileName -match "_main\.reg$")               { $priority = 2 } # Registro Principal
+                    elseif ($fileName -match "\.(tpk|bpk|wim)$")   { $priority = 3 } # Paquetes de Idioma / Extras
+                    elseif ($fileName -match "\.reg$")                     { $priority = 4 } # Registros de Idioma / Extras
 
-                    if ($fileName -match "_main\.(tpk|bpk|wim)$") { $priority = 1 }
-                    elseif ($fileName -match "_main\.reg$")       { $priority = 2 }
-                    elseif ($fileName -match "\.(tpk|bpk|wim)$")  { $priority = 3 }
-                    elseif ($fileName -match "\.reg$")            { $priority = 4 }
-
+                    # Al retornar "Prioridad-Nombre", PowerShell agrupa primero por fase y luego alfabeticamente
+                    # Ej: "1-firefox_main.tpk" se procesara antes que "2-firefox_x64_main.reg"
                     "$priority-$fileName"
-                }
+                })
                 Write-Log -LogLevel INFO -Message "AddonInjector: Fase 2 - $($sortedItems.Count) elementos ordenados por algoritmo de prioridad."
 
-                $progressBar.Maximum = $sortedItems.Count
                 $progressBar.Value   = 0
+                $progressBar.Maximum = $sortedItems.Count
                 $progressBar.Visible = $true
                 $count = 0
 
                 # --- 3. PROCESAMIENTO E INYECCION ---
                 foreach ($item in $sortedItems) {
-                    $count++
-                    $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
-                    [System.Windows.Forms.Application]::DoEvents()
-
-                    $fileName = $item.SubItems[1].Text.ToLower()
-
-                    $is64BitFile = $fileName -match "(\b|_|\.|-)(x64|64-?bit|amd64)(\b|_|\.|-)"
-                    $is32BitFile = $fileName -match "(\b|_|\.|-)(x86|32-?bit)(\b|_|\.|-)"
-                    $isArm64File = $fileName -match "(\b|_|\.|-)(arm64|aarch64)(\b|_|\.|-)"
-
-                    $archMismatch = $false
-                    $archReason   = ""
-                    switch ($targetArch) {
-                        "x86"   { if ($is64BitFile)  { $archMismatch = $true; $archReason = "Solo x64" }
-                                  elseif ($isArm64File) { $archMismatch = $true; $archReason = "Solo ARM64" } }
-                        "x64"   { if ($is32BitFile)  { $archMismatch = $true; $archReason = "Solo x86" }
-                                  elseif ($isArm64File) { $archMismatch = $true; $archReason = "Solo ARM64" } }
-                        "ARM64" { if ($is32BitFile)  { $archMismatch = $true; $archReason = "Solo x86" }
-                                  elseif ($is64BitFile) { $archMismatch = $true; $archReason = "Solo x64" } }
-                    }
-
-                    if ($archMismatch) {
-                        $item.Text = "OMITIDO (Arch)"
-                        $item.SubItems[2].Text = "Ignorado ($archReason)"
-                        $item.ForeColor = $ColorOmitido
-                        $skipped++
-                        Write-Log -LogLevel INFO -Message "AddonInjector: Omitiendo [$fileName] ($archReason, imagen destino $targetArch)."
-                        continue
-                    }
-
-                    $lblStatus.Text = "Inyectando: $($item.SubItems[1].Text)..."
-                    $item.Text = "PROCESANDO..."
-                    $item.ForeColor = $ColorProcesando
-
-                    $item.EnsureVisible()
-                    $form.Refresh()
-
-                    Write-Log -LogLevel INFO -Message "AddonInjector: Instalando -> [$fileName]"
-
                     try {
-                        $resultado = Install-OfflineAddon -FilePath $item.Tag -WimIndex $selectedIndex
+                        [System.Windows.Forms.Application]::DoEvents()
 
-                        $item.Text = "COMPLETADO"
-                        $item.SubItems[2].Text = $resultado
-                        $item.ForeColor = $ColorCompletado
-                        $success++
-                        Write-Log -LogLevel INFO -Message "AddonInjector: Completado. Motor devolvio: $resultado"
-                    } catch {
-                        $item.Text = "ERROR"
-                        $item.SubItems[2].Text = $_.Exception.Message
-                        $item.ForeColor = $ColorError
-                        $errors++
-                        Write-Log -LogLevel ERROR -Message "AddonInjector: Fallo critico instalando addon [$fileName] - $($_.Exception.Message)"
+                        $fileName = $item.SubItems[1].Text.ToLower()
+
+                        # --- CONDICION 1: FILTRO DE ARQUITECTURA (x86 / x64 / ARM64, mutuamente excluyentes) ---
+                        $is64BitFile = $fileName -match "(\b|_|\.|-)(x64|64-?bit|amd64)(\b|_|\.|-)"
+                        $is32BitFile = $fileName -match "(\b|_|\.|-)(x86|32-?bit)(\b|_|\.|-)"
+                        $isArm64File = $fileName -match "(\b|_|\.|-)(arm64|aarch64)(\b|_|\.|-)"
+
+                        $archMismatch = $false
+                        $archReason   = ""
+                        switch ($targetArch) {
+                            "x86"   { if ($is64BitFile)  { $archMismatch = $true; $archReason = "Solo x64" }
+                                      elseif ($isArm64File) { $archMismatch = $true; $archReason = "Solo ARM64" } }
+                            "x64"   { if ($is32BitFile)  { $archMismatch = $true; $archReason = "Solo x86" }
+                                      elseif ($isArm64File) { $archMismatch = $true; $archReason = "Solo ARM64" } }
+                            "ARM64" { if ($is32BitFile)  { $archMismatch = $true; $archReason = "Solo x86" }
+                                      elseif ($is64BitFile) { $archMismatch = $true; $archReason = "Solo x64" } }
+                        }
+
+                        if ($archMismatch) {
+                            $item.Text = "OMITIDO (Arch)"
+                            $item.SubItems[2].Text = "Ignorado ($archReason)"
+                            $item.ForeColor = $ColorOmitido
+                            $skipped++
+                            Write-Log -LogLevel INFO -Message "AddonInjector: Omitiendo [$fileName] ($archReason, imagen destino $targetArch)."
+                            continue
+                        }
+
+                        # --- CONDICION 2: INYECCION EN ORDEN ---
+                        $lblStatus.Text = "Inyectando: $($item.SubItems[1].Text)..."
+                        $item.Text = "PROCESANDO..."
+                        $item.ForeColor = $ColorProcesando
+
+                        # Hacemos auto-scroll en la UI para ver por donde va
+                        $item.EnsureVisible()
+                        $form.Refresh()
+
+                        Write-Log -LogLevel INFO -Message "AddonInjector: Instalando -> [$fileName]"
+
+                        try {
+                            # Motor correspondiente segun el tipo de addon en cola (archivo suelto vs. paquete DeltaPack)
+                            if ($item.Tag -is [pscustomobject] -and $item.Tag.Kind -eq 'DeltaPack') {
+                                $resultado = Install-DeltaPackPackage -PackagePath $item.Tag.Path -WimIndex $selectedIndex
+                            } else {
+                                $resultado = Install-OfflineAddon -FilePath $item.Tag -WimIndex $selectedIndex
+                            }
+
+                            $item.Text = "COMPLETADO"
+                            $item.SubItems[2].Text = $resultado
+                            $item.ForeColor = $ColorCompletado
+                            $success++
+                            Write-Log -LogLevel INFO -Message "AddonInjector: Completado. Motor devolvio: $resultado"
+                        } catch {
+                            $item.Text = "ERROR"
+                            $item.SubItems[2].Text = $_.Exception.Message
+                            $item.ForeColor = $ColorError
+                            $errors++
+                            Write-Log -LogLevel ERROR -Message "AddonInjector: Fallo critico instalando addon [$fileName] - $($_.Exception.Message)"
+                        }
+                    } finally {
+                        # Contar el objeto solo despues de terminar su procesamiento.
+                        $count++
+                        $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
+                        $form.Refresh()
+                        [System.Windows.Forms.Application]::DoEvents()
                     }
                 }
 
@@ -491,7 +800,8 @@ function Show-Addons-GUI {
             }
         })
 
-        $form.Add_FormClosing({
+        # Cierre seguro (Desmontar Hives de registro)
+        $form.Add_FormClosing({ 
             if ($script:AddonBusy) {
                 [System.Windows.Forms.MessageBox]::Show(
                     "Hay una inyeccion de addons en curso. Espera a que termine antes de cerrar esta ventana.",
@@ -501,9 +811,9 @@ function Show-Addons-GUI {
             }
 
             $confirm = [System.Windows.Forms.MessageBox]::Show(
-                "Estas seguro de que deseas salir?",
-                "Confirmar Salida",
-                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                "Estas seguro de que deseas salir?", 
+                "Confirmar Salida", 
+                [System.Windows.Forms.MessageBoxButtons]::YesNo, 
                 [System.Windows.Forms.MessageBoxIcon]::Question
             )
 
@@ -519,7 +829,7 @@ function Show-Addons-GUI {
                 }
             }
         })
-
+        
         $form.ShowDialog() | Out-Null
         $form.Dispose()
     } catch {

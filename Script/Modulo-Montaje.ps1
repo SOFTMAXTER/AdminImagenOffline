@@ -12,6 +12,7 @@
 #    - Select-PathDialog      : ui para seleccion de rutas
 #    - Get-UnusedDriveLetter  : deteccion de unidades libres para VHD
 #    - Unmount-Hives          : desmontar colmenas offline del registro
+#    - Read-MenuOption        : lectura de opcion de menu (V = Volver instantaneo)
 #  CARGA       : . "$PSScriptRoot\Modulo-Montaje.ps1"
 #
 #  NO modificar las firmas de funcion; el nucleo las invoca por nombre.
@@ -192,7 +193,7 @@ function Mount-Image {
     Write-Host "   [V] Cancelar y Volver" -ForegroundColor Red
     Write-Host ""
     
-    $sourceType = Read-Host "Elige una opcion"
+    $sourceType = Read-MenuOption "Elige una opcion"
 
     if ($sourceType.ToUpper() -eq 'V') { return }
 

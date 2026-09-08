@@ -324,8 +324,8 @@ function Show-Bloatware-GUI {
         # ==============================================================
         $windowsAppsPath = Join-Path $Script:MOUNT_DIR "Program Files\WindowsApps"
 
-        $progressBar.Maximum = $selectedApps.Count
         $progressBar.Value   = 0
+        $progressBar.Maximum = $selectedApps.Count
         $progressBar.Visible = $true
 
         foreach ($appInfo in $selectedApps) {
@@ -398,6 +398,8 @@ function Show-Bloatware-GUI {
                 Write-Log -LogLevel ERROR -Message "AppxManager: Falla al eliminar paquete [$pkg] - $($_.Exception.Message)"
             } finally {
                 $progressBar.Value = [Math]::Min($progressBar.Value + 1, $progressBar.Maximum)
+                $form.Refresh()
+                [System.Windows.Forms.Application]::DoEvents()
             }
         }
 

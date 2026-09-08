@@ -490,9 +490,13 @@ function Show-RegQueue-GUI {
 
     # --- EVENTO MAESTRO ---
     $btnProcess.Add_Click({
-        if ($lvQ.Items.Count -eq 0) { return }
+        $pendingItems = @($lvQ.Items | Where-Object { $_.Text -eq "EN ESPERA" -or $_.Text -eq "ERROR LECTURA" })
+        if ($pendingItems.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show("No hay archivos REG pendientes de procesar.", "Sin pendientes", 'OK', 'Information') | Out-Null
+            return
+        }
 
-        $res = [System.Windows.Forms.MessageBox]::Show("Se importaran $($lvQ.Items.Count) archivos utilizando el motor de streaming seguro.`nDesea continuar?", "Confirmar Lote", 'YesNo', 'Question')
+        $res = [System.Windows.Forms.MessageBox]::Show("Se importaran $($pendingItems.Count) archivos utilizando el motor de streaming seguro.`nDesea continuar?", "Confirmar Lote", 'YesNo', 'Question')
         if ($res -ne 'Yes') { return }
 
         $Script:SDDL_Backups.Clear()
@@ -502,8 +506,8 @@ function Show-RegQueue-GUI {
         $btnAdd.Enabled = $false; $btnRemove.Enabled = $false; $btnClear.Enabled = $false; $btnPreview.Enabled = $false; $btnLoadProfile.Enabled = $false; $btnSaveProfile.Enabled = $false; $btnProcess.Enabled = $false
         $frmQ.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
 
-        $progressBarQ.Maximum = $lvQ.Items.Count
         $progressBarQ.Value = 0
+        $progressBarQ.Maximum = $pendingItems.Count
         $progressBarQ.Visible = $true
         
         $errors = 0
@@ -511,11 +515,7 @@ function Show-RegQueue-GUI {
         $count = 0
 
         try {
-            foreach ($item in $lvQ.Items) {
-                if ($item.Text -ne "EN ESPERA" -and $item.Text -ne "ERROR LECTURA") { continue }
-                
-                $count++
-                $progressBarQ.Value = [Math]::Min($count, $progressBarQ.Maximum)
+            foreach ($item in $pendingItems) {
                 
                 $item.Text = "PROCESANDO"
                 $item.ForeColor = [System.Drawing.Color]::Cyan
@@ -534,6 +534,12 @@ function Show-RegQueue-GUI {
                     $item.ForeColor = [System.Drawing.Color]::Red
                     $errors++
                     Write-Log -LogLevel ERROR -Message "RegBatch: Fallo la inyeccion de $($item.Tag) - $($_.Exception.Message)"
+                } finally {
+                    # Contar el objeto solo despues de terminar su procesamiento.
+                    $count++
+                    $progressBarQ.Value = [Math]::Min($count, $progressBarQ.Maximum)
+                    $frmQ.Refresh()
+                    [System.Windows.Forms.Application]::DoEvents()
                 }
             }
 
@@ -891,8 +897,8 @@ function Show-Tweaks-Offline-GUI {
         $btnSelectAllGlobal.Enabled = $false
         $btnSelectInactive.Enabled = $false
         
-        $progressBar.Maximum = $allCheckedItems.Count
         $progressBar.Value = 0
+        $progressBar.Maximum = $allCheckedItems.Count
         $progressBar.Visible = $true
 
         $lblStatus.Text = "Procesando registro... ($Mode)"
@@ -910,203 +916,209 @@ function Show-Tweaks-Offline-GUI {
 
         try {
             foreach ($it in $allCheckedItems) {
-                $count++
-                $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
                 
-                $t = $it.Tag 
-                $targetPath = if ($t.Method -eq "RegistryPayload") { $t.PrimaryPath } else { $t.RegistryPath }
-                $pathRaw = Translate-OfflinePath -OnlinePath $targetPath
+                try {
+                    $t = $it.Tag 
+                    $targetPath = if ($t.Method -eq "RegistryPayload") { $t.PrimaryPath } else { $t.RegistryPath }
+                    $pathRaw = Translate-OfflinePath -OnlinePath $targetPath
                 
-                if ($pathRaw) {
-                    $psPath = $pathRaw -replace "^HKLM\\", "HKLM:\"
-                    $subPathNet = $pathRaw -replace "^HKLM\\", "" 
+                    if ($pathRaw) {
+                        $psPath = $pathRaw -replace "^HKLM\\", "HKLM:\"
+                        $subPathNet = $pathRaw -replace "^HKLM\\", "" 
 
-                    if ($t.Method -eq "RegistryPayload") {
-                        try {
-                            if ($Mode -eq 'Apply') {
-                                $tempReg = Join-Path $Script:Scratch_DIR "payload_apply_$([Guid]::NewGuid().ToString('N')).reg"
-                                [System.IO.File]::WriteAllText($tempReg, $t.PayloadApply, [System.Text.Encoding]::Unicode)
+                        if ($t.Method -eq "RegistryPayload") {
+                            try {
+                                if ($Mode -eq 'Apply') {
+                                    $tempReg = Join-Path $Script:Scratch_DIR "payload_apply_$([Guid]::NewGuid().ToString('N')).reg"
+                                    [System.IO.File]::WriteAllText($tempReg, $t.PayloadApply, [System.Text.Encoding]::Unicode)
                                 
-                                Import-OfflineReg -FilePath $tempReg
-                                Remove-Item $tempReg -Force -ErrorAction SilentlyContinue
-
-                                $it.SubItems[1].Text = "ACTIVO"
-                                $it.ForeColor = [System.Drawing.Color]::Cyan
-                            } 
-                            else {
-                                if ($t.PayloadRestore -eq "DeleteKey") {
-                                    $lastSlashIdx = $subPathNet.LastIndexOf("\")
-                                    if ($lastSlashIdx -gt 0) {
-                                        $parentPathNet = $subPathNet.Substring(0, $lastSlashIdx)
-                                        $parentPathPS = "HKLM:\$parentPathNet"
-                                        
-                                        Unlock-OfflineKey -KeyPath $parentPathPS
-                                        Unlock-OfflineKey -KeyPath $psPath
-
-                                        $checkKey = $hiveObj.OpenSubKey($subPathNet)
-                                        if ($null -ne $checkKey) {
-                                            $checkKey.Close() 
-                                            $hiveObj.DeleteSubKeyTree($subPathNet)
-                                            Write-Log -LogLevel INFO -Message "Tweak_Engine: Arbol de Payload borrado -> $subPathNet"
-                                        }
-                                        Restore-KeyOwner -KeyPath $parentPathPS
-                                    }
-                                } 
-                                else {
-                                    if ([string]::IsNullOrWhiteSpace($t.PayloadRestore)) {
-                                        throw "El ajuste $($t.Name) no tiene definido un codigo de restauracion."
-                                    }
-                                    $tempReg = Join-Path $Script:Scratch_DIR "payload_restore_$([Guid]::NewGuid().ToString('N')).reg"
-                                    [System.IO.File]::WriteAllText($tempReg, $t.PayloadRestore, [System.Text.Encoding]::Unicode)
-                                    
                                     Import-OfflineReg -FilePath $tempReg
                                     Remove-Item $tempReg -Force -ErrorAction SilentlyContinue
-                                    Write-Log -LogLevel INFO -Message "Tweak_Engine: Payload revertido vía inyección .reg -> $subPathNet"
-                                }
 
+                                    $it.SubItems[1].Text = "ACTIVO"
+                                    $it.ForeColor = [System.Drawing.Color]::Cyan
+                                } 
+                                else {
+                                    if ($t.PayloadRestore -eq "DeleteKey") {
+                                        $lastSlashIdx = $subPathNet.LastIndexOf("\")
+                                        if ($lastSlashIdx -gt 0) {
+                                            $parentPathNet = $subPathNet.Substring(0, $lastSlashIdx)
+                                            $parentPathPS = "HKLM:\$parentPathNet"
+                                        
+                                            Unlock-OfflineKey -KeyPath $parentPathPS
+                                            Unlock-OfflineKey -KeyPath $psPath
+
+                                            $checkKey = $hiveObj.OpenSubKey($subPathNet)
+                                            if ($null -ne $checkKey) {
+                                                $checkKey.Close() 
+                                                $hiveObj.DeleteSubKeyTree($subPathNet)
+                                                Write-Log -LogLevel INFO -Message "Tweak_Engine: Arbol de Payload borrado -> $subPathNet"
+                                            }
+                                            Restore-KeyOwner -KeyPath $parentPathPS
+                                        }
+                                    } 
+                                    else {
+                                        if ([string]::IsNullOrWhiteSpace($t.PayloadRestore)) {
+                                            throw "El ajuste $($t.Name) no tiene definido un codigo de restauracion."
+                                        }
+                                        $tempReg = Join-Path $Script:Scratch_DIR "payload_restore_$([Guid]::NewGuid().ToString('N')).reg"
+                                        [System.IO.File]::WriteAllText($tempReg, $t.PayloadRestore, [System.Text.Encoding]::Unicode)
+                                    
+                                        Import-OfflineReg -FilePath $tempReg
+                                        Remove-Item $tempReg -Force -ErrorAction SilentlyContinue
+                                        Write-Log -LogLevel INFO -Message "Tweak_Engine: Payload revertido vía inyección .reg -> $subPathNet"
+                                    }
+
+                                    $it.SubItems[1].Text = "RESTAURADO"
+                                    $it.ForeColor = [System.Drawing.Color]::Silver
+                                }
+                                $it.Checked = $false 
+                                $success++
+                                [System.Windows.Forms.Application]::DoEvents()
+                            } catch {
+                                $errors++
+                                $it.SubItems[1].Text = "ERROR"
+                                $it.ForeColor = [System.Drawing.Color]::Red
+                                Write-Log -LogLevel ERROR -Message "Tweak_Engine: Falla procesando Payload $($t.Name) - $($_.Exception.Message)"
+                            }
+                            continue 
+                        }
+
+                        $valToSet = $null
+                        $isDeleteProperty = $false
+                        $isDeleteKey = $false
+
+                        if ($Mode -eq 'Apply') {
+                            $valToSet = $t.EnabledValue
+                        } else {
+                            $valToSet = $t.DefaultValue
+                            if ($valToSet -eq "DeleteKey") { $isDeleteKey = $true }
+                            elseif ($valToSet -eq "DeleteValue") { $isDeleteProperty = $true }
+                        }
+
+                        if ($isDeleteKey) {
+                            $parentPathPS = $null
+                            try {
+                                $lastSlashIdx = $subPathNet.LastIndexOf("\")
+                                if ($lastSlashIdx -gt 0) {
+                                    $parentPathNet = $subPathNet.Substring(0, $lastSlashIdx)
+                                    $parentPathPS  = "HKLM:\$parentPathNet"
+
+                                    Unlock-OfflineKey -KeyPath $parentPathPS
+                                    Unlock-OfflineKey -KeyPath $psPath
+
+                                    $checkKey = $hiveObj.OpenSubKey($subPathNet)
+                                    if ($null -ne $checkKey) {
+                                        $checkKey.Close()
+                                        $hiveObj.DeleteSubKeyTree($subPathNet)
+                                        Write-Log -LogLevel INFO -Message "Tweak_Engine: Arbol borrado nativamente -> $subPathNet"
+                                    }
+                                }
                                 $it.SubItems[1].Text = "RESTAURADO"
                                 $it.ForeColor = [System.Drawing.Color]::Silver
+                                $it.Checked = $false
+                                $success++
+                                [System.Windows.Forms.Application]::DoEvents()
+                            } catch {
+                                $errors++
+                                $it.SubItems[1].Text = "ERROR"
+                                $it.ForeColor = [System.Drawing.Color]::Red
+                                Write-Log -LogLevel ERROR -Message "Tweak_Engine: Falla borrando clave $($t.Name) - $($_.Exception.Message)"
+                            } finally {
+                                if ($null -ne $parentPathPS) { Restore-KeyOwner -KeyPath $parentPathPS }
                             }
-                            $it.Checked = $false 
-                            $success++
-                            [System.Windows.Forms.Application]::DoEvents()
-                        } catch {
-                            $errors++
-                            $it.SubItems[1].Text = "ERROR"
-                            $it.ForeColor = [System.Drawing.Color]::Red
-                            Write-Log -LogLevel ERROR -Message "Tweak_Engine: Falla procesando Payload $($t.Name) - $($_.Exception.Message)"
+                            continue
                         }
-                        continue 
-                    }
 
-                    $valToSet = $null
-                    $isDeleteProperty = $false
-                    $isDeleteKey = $false
-
-                    if ($Mode -eq 'Apply') {
-                        $valToSet = $t.EnabledValue
-                    } else {
-                        $valToSet = $t.DefaultValue
-                        if ($valToSet -eq "DeleteKey") { $isDeleteKey = $true }
-                        elseif ($valToSet -eq "DeleteValue") { $isDeleteProperty = $true }
-                    }
-
-                    if ($isDeleteKey) {
-                        $parentPathPS = $null
+                        $keyObj = $null
                         try {
-                            $lastSlashIdx = $subPathNet.LastIndexOf("\")
-                            if ($lastSlashIdx -gt 0) {
-                                $parentPathNet = $subPathNet.Substring(0, $lastSlashIdx)
-                                $parentPathPS  = "HKLM:\$parentPathNet"
+                            Unlock-OfflineKey -KeyPath $psPath
 
-                                Unlock-OfflineKey -KeyPath $parentPathPS
-                                Unlock-OfflineKey -KeyPath $psPath
+                            $keyObj = $hiveObj.CreateSubKey($subPathNet)
 
-                                $checkKey = $hiveObj.OpenSubKey($subPathNet)
-                                if ($null -ne $checkKey) {
-                                    $checkKey.Close()
-                                    $hiveObj.DeleteSubKeyTree($subPathNet)
-                                    Write-Log -LogLevel INFO -Message "Tweak_Engine: Arbol borrado nativamente -> $subPathNet"
+                            if ($null -ne $keyObj) {
+                                $targetRegKey = $t.RegistryKey
+
+                                if ($targetRegKey -match "^\(Default\)$|^\(Predeterminado\)$") {
+                                    $targetRegKey = ""
                                 }
+
+                                if ($isDeleteProperty) {
+                                    $keyObj.DeleteValue($targetRegKey, $false)
+                                    Write-Log -LogLevel INFO -Message "Tweak_Engine: Valor borrado -> [$targetRegKey] en $subPathNet"
+                                } else {
+                                    $type = switch ($t.RegistryType) {
+                                        "String"       { [Microsoft.Win32.RegistryValueKind]::String }
+                                        "ExpandString" { [Microsoft.Win32.RegistryValueKind]::ExpandString }
+                                        "Binary"       { [Microsoft.Win32.RegistryValueKind]::Binary }
+                                        "DWord"        { [Microsoft.Win32.RegistryValueKind]::DWord }
+                                        "MultiString"  { [Microsoft.Win32.RegistryValueKind]::MultiString }
+                                        "QWord"        { [Microsoft.Win32.RegistryValueKind]::QWord }
+                                        Default        { [Microsoft.Win32.RegistryValueKind]::DWord }
+                                    }
+
+                                    $safeVal = $valToSet
+                                    if ([string]::IsNullOrWhiteSpace($safeVal)) {
+                                        $safeVal = if ($type -eq [Microsoft.Win32.RegistryValueKind]::DWord -or
+                                                       $type -eq [Microsoft.Win32.RegistryValueKind]::QWord) { 0 } else { "" }
+                                    }
+
+                                    try {
+                                        if ($type -eq [Microsoft.Win32.RegistryValueKind]::DWord) {
+                                            $uintVal = if ($safeVal -match "^(?i)0x") { [Convert]::ToUInt32($safeVal, 16) } else { [uint32]$safeVal }
+                                            $safeVal = [BitConverter]::ToInt32([BitConverter]::GetBytes($uintVal), 0)
+                                        } elseif ($type -eq [Microsoft.Win32.RegistryValueKind]::QWord) {
+                                            $uint64Val = if ($safeVal -match "^(?i)0x") { [Convert]::ToUInt64($safeVal, 16) } else { [uint64]$safeVal }
+                                            $safeVal = [BitConverter]::ToInt64([BitConverter]::GetBytes($uint64Val), 0)
+                                        } elseif ($type -eq [Microsoft.Win32.RegistryValueKind]::MultiString) {
+                                            $safeVal = [string[]]$safeVal
+                                        } elseif ($type -eq [Microsoft.Win32.RegistryValueKind]::Binary) {
+                                            $safeVal = [byte[]]$safeVal
+                                        } elseif ($type -eq [Microsoft.Win32.RegistryValueKind]::String -or
+                                                  $type -eq [Microsoft.Win32.RegistryValueKind]::ExpandString) {
+                                            $safeVal = [string]$safeVal
+                                        }
+                                    } catch {
+                                        Write-Log -LogLevel WARN -Message "Tweak_Engine: Fallo casting para $($t.Name). Valor: '$valToSet'. Error: $($_.Exception.Message)"
+                                    }
+
+                                    $keyObj.SetValue($targetRegKey, $safeVal, $type)
+                                }
+                            } else {
+                                throw "CreateSubKey devolvio nulo para la ruta: $subPathNet"
                             }
-                            $it.SubItems[1].Text = "RESTAURADO"
-                            $it.ForeColor = [System.Drawing.Color]::Silver
+
+                            if ($Mode -eq 'Apply') {
+                                $it.SubItems[1].Text = "ACTIVO"
+                                $it.ForeColor = [System.Drawing.Color]::Cyan
+                            } else {
+                                $it.SubItems[1].Text = "RESTAURADO"
+                                $it.ForeColor = [System.Drawing.Color]::LightGray
+                            }
                             $it.Checked = $false
                             $success++
                             [System.Windows.Forms.Application]::DoEvents()
+
                         } catch {
                             $errors++
                             $it.SubItems[1].Text = "ERROR"
                             $it.ForeColor = [System.Drawing.Color]::Red
-                            Write-Log -LogLevel ERROR -Message "Tweak_Engine: Falla borrando clave $($t.Name) - $($_.Exception.Message)"
+                            Write-Log -LogLevel ERROR -Message "Tweak_Engine: Falla critica procesando $($t.Name) ($Mode) - $($_.Exception.Message)"
                         } finally {
-                            if ($null -ne $parentPathPS) { Restore-KeyOwner -KeyPath $parentPathPS }
-                        }
-                        continue
-                    }
-
-                    $keyObj = $null
-                    try {
-                        Unlock-OfflineKey -KeyPath $psPath
-
-                        $keyObj = $hiveObj.CreateSubKey($subPathNet)
-
-                        if ($null -ne $keyObj) {
-                            $targetRegKey = $t.RegistryKey
-
-                            if ($targetRegKey -match "^\(Default\)$|^\(Predeterminado\)$") {
-                                $targetRegKey = ""
-                            }
-
-                            if ($isDeleteProperty) {
-                                $keyObj.DeleteValue($targetRegKey, $false)
-                                Write-Log -LogLevel INFO -Message "Tweak_Engine: Valor borrado -> [$targetRegKey] en $subPathNet"
-                            } else {
-                                $type = switch ($t.RegistryType) {
-                                    "String"       { [Microsoft.Win32.RegistryValueKind]::String }
-                                    "ExpandString" { [Microsoft.Win32.RegistryValueKind]::ExpandString }
-                                    "Binary"       { [Microsoft.Win32.RegistryValueKind]::Binary }
-                                    "DWord"        { [Microsoft.Win32.RegistryValueKind]::DWord }
-                                    "MultiString"  { [Microsoft.Win32.RegistryValueKind]::MultiString }
-                                    "QWord"        { [Microsoft.Win32.RegistryValueKind]::QWord }
-                                    Default        { [Microsoft.Win32.RegistryValueKind]::DWord }
-                                }
-
-                                $safeVal = $valToSet
-                                if ([string]::IsNullOrWhiteSpace($safeVal)) {
-                                    $safeVal = if ($type -eq [Microsoft.Win32.RegistryValueKind]::DWord -or
-                                                   $type -eq [Microsoft.Win32.RegistryValueKind]::QWord) { 0 } else { "" }
-                                }
-
-                                try {
-                                    if ($type -eq [Microsoft.Win32.RegistryValueKind]::DWord) {
-                                        $uintVal = if ($safeVal -match "^(?i)0x") { [Convert]::ToUInt32($safeVal, 16) } else { [uint32]$safeVal }
-                                        $safeVal = [BitConverter]::ToInt32([BitConverter]::GetBytes($uintVal), 0)
-                                    } elseif ($type -eq [Microsoft.Win32.RegistryValueKind]::QWord) {
-                                        $uint64Val = if ($safeVal -match "^(?i)0x") { [Convert]::ToUInt64($safeVal, 16) } else { [uint64]$safeVal }
-                                        $safeVal = [BitConverter]::ToInt64([BitConverter]::GetBytes($uint64Val), 0)
-                                    } elseif ($type -eq [Microsoft.Win32.RegistryValueKind]::MultiString) {
-                                        $safeVal = [string[]]$safeVal
-                                    } elseif ($type -eq [Microsoft.Win32.RegistryValueKind]::Binary) {
-                                        $safeVal = [byte[]]$safeVal
-                                    } elseif ($type -eq [Microsoft.Win32.RegistryValueKind]::String -or
-                                              $type -eq [Microsoft.Win32.RegistryValueKind]::ExpandString) {
-                                        $safeVal = [string]$safeVal
-                                    }
-                                } catch {
-                                    Write-Log -LogLevel WARN -Message "Tweak_Engine: Fallo casting para $($t.Name). Valor: '$valToSet'. Error: $($_.Exception.Message)"
-                                }
-
-                                $keyObj.SetValue($targetRegKey, $safeVal, $type)
-                            }
-                        } else {
-                            throw "CreateSubKey devolvio nulo para la ruta: $subPathNet"
+                            if ($null -ne $keyObj) { $keyObj.Close(); $keyObj = $null }
+                            Restore-KeyOwner -KeyPath $psPath
                         }
 
-                        if ($Mode -eq 'Apply') {
-                            $it.SubItems[1].Text = "ACTIVO"
-                            $it.ForeColor = [System.Drawing.Color]::Cyan
-                        } else {
-                            $it.SubItems[1].Text = "RESTAURADO"
-                            $it.ForeColor = [System.Drawing.Color]::LightGray
-                        }
-                        $it.Checked = $false
-                        $success++
-                        [System.Windows.Forms.Application]::DoEvents()
-
-                    } catch {
+                    } else {
+                        Write-Log -LogLevel ERROR -Message "Tweak_Engine: No se pudo traducir la ruta Offline para el Tweak: $($t.Name)"
                         $errors++
-                        $it.SubItems[1].Text = "ERROR"
-                        $it.ForeColor = [System.Drawing.Color]::Red
-                        Write-Log -LogLevel ERROR -Message "Tweak_Engine: Falla critica procesando $($t.Name) ($Mode) - $($_.Exception.Message)"
-                    } finally {
-                        if ($null -ne $keyObj) { $keyObj.Close(); $keyObj = $null }
-                        Restore-KeyOwner -KeyPath $psPath
                     }
-
-                } else {
-                    Write-Log -LogLevel ERROR -Message "Tweak_Engine: No se pudo traducir la ruta Offline para el Tweak: $($t.Name)"
-                    $errors++
+                } finally {
+                    # Contar el objeto solo despues de terminar su procesamiento.
+                    $count++
+                    $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
+                    $form.Refresh()
+                    [System.Windows.Forms.Application]::DoEvents()
                 }
             }
 

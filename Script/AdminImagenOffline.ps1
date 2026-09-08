@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.4"
+$script:Version = "1.5.5"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -852,6 +852,48 @@ function Select-SavePathDialog {
 # =============================================
 #  FUNCIONES DE MENU (Interfaz de Usuario)
 # =============================================
+# --- Lee una opcion de menu; presionar "V" regresa de inmediato (sin Enter) ---
+function Read-MenuOption {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Prompt
+    )
+
+    try {
+        Write-Host -NoNewline "${Prompt}: "
+        $buffer = ""
+
+        while ($true) {
+            $key = [Console]::ReadKey($true)
+
+            # Atajo de "Volver": si V es la primera tecla presionada, regresa sin esperar Enter
+            if ($buffer.Length -eq 0 -and ($key.KeyChar -eq 'v' -or $key.KeyChar -eq 'V')) {
+                Write-Host "V"
+                return "V"
+            }
+
+            switch ($key.Key) {
+                'Enter' { Write-Host ""; return $buffer }
+                'Backspace' {
+                    if ($buffer.Length -gt 0) {
+                        $buffer = $buffer.Substring(0, $buffer.Length - 1)
+                        Write-Host -NoNewline "`b `b"
+                    }
+                }
+                default {
+                    if (-not [char]::IsControl($key.KeyChar)) {
+                        $buffer += $key.KeyChar
+                        Write-Host -NoNewline $key.KeyChar
+                    }
+                }
+            }
+        }
+    } catch {
+        # Fallback por si la consola no soporta ReadKey (ej. entrada redirigida)
+        return Read-Host $Prompt
+    }
+}
+
 # --- Menu de Configuracion de Rutas ---
 function Show-ConfigMenu {
     while ($true) {
@@ -873,7 +915,7 @@ function Show-ConfigMenu {
         Write-Host ""
         Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
         Write-Host ""
-        $opcionC = Read-Host "Selecciona una opcion"
+        $opcionC = Read-MenuOption "Selecciona una opcion"
 
         switch ($opcionC.ToUpper()) {
             "1" {
@@ -908,101 +950,86 @@ function Show-ConfigMenu {
     }
 }
 
-function Mount-Unmount-Menu {
+function Mount-Save-Menu {
     while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "             Gestion de Montaje de Imagen              " -ForegroundColor Cyan
+        Write-Host "         Ciclo de Vida de la Imagen (Montaje/Guardado) " -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
+        Write-Host " [ MONTAJE ]" -ForegroundColor Yellow
         Write-Host "   [1] Montar Imagen"
         Write-Host "       (Carga un .wim o .vhd/vhdx en $Script:MOUNT_DIR)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Desmontar Imagen (Descartar Cambios)"
-        Write-Host "       (Descarga la imagen. Cambios no guardados se pierden!)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "   [3] Guardar y Desmontar Imagen (Commit)" -ForegroundColor Green
-        Write-Host "       (Guarda todos los cambios y luego descarga la imagen)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "   [4] Recargar Imagen (Descartar Cambios)"
+        Write-Host "   [2] Recargar Imagen (Descartar Cambios)"
         Write-Host "       (Desmonta y vuelve a montar. util para revertir)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host ""
-        Write-Host "   [V] Volver al menu anterior" -ForegroundColor Red
-        Write-Host ""
-        $opcionMU = Read-Host "Selecciona una opcion"
-        
-        switch ($opcionMU.ToUpper()) {
-            "1" { 
-                Write-Log -LogLevel INFO -Message "MenuMount: Accediendo a 'Mount-Image' (Montar una nueva imagen en el directorio de trabajo)."
-                Mount-Image 
-            }
-            "2" { 
-                Write-Log -LogLevel INFO -Message "MenuMount: Accediendo a 'Unmount-Image' (Descartar todos los cambios y desmontar la imagen actual)."
-                Unmount-Image 
-            }
-            "3" { 
-                Write-Log -LogLevel INFO -Message "MenuMount: Accediendo a 'Unmount-Image -Commit' (Confirmar guardado y desmontar la imagen actual)."
-                Unmount-Image -Commit 
-            }
-            "4" { 
-                Write-Log -LogLevel INFO -Message "MenuMount: Accediendo a 'Reload-Image' (Forzar recarga del estado de la imagen montada)."
-                Reload-Image 
-            }
-            "V" { 
-                return 
-            }
-            default { 
-                Write-Warning "Opcion no valida."
-                Start-Sleep 1 
-            }
+        if ($Script:IMAGE_MOUNTED -gt 0) {
+            Write-Host " [ GUARDADO ]" -ForegroundColor Yellow
+            Write-Host "   [3] Guardar cambios en el Indice actual ($($Script:MOUNTED_INDEX))"
+            Write-Host "       (Sobrescribe el indice actual, sin desmontar)" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "   [4] Guardar cambios en un nuevo Indice (Append)"
+            Write-Host "       (Agrega un nuevo indice al final, sin desmontar)" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "   [5] Guardar en un NUEVO archivo WIM (Save As...)" -ForegroundColor Green
+            Write-Host "       (Crea un archivo .wim nuevo sin tocar el original)" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host " [ DESMONTAJE ]" -ForegroundColor Yellow
+            Write-Host "   [6] Guardar y Desmontar Imagen (Commit)" -ForegroundColor Green
+            Write-Host "       (Guarda todos los cambios y luego descarga la imagen)" -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "   [7] Desmontar Imagen (Descartar Cambios)"
+            Write-Host "       (Descarga la imagen. Cambios no guardados se pierden!)" -ForegroundColor Gray
+            Write-Host ""
         }
-    }
-}
-
-function Save-Changes-Menu {
-    while ($true) {
-        Clear-Host
-        if ($Script:IMAGE_MOUNTED -eq 0) { Write-Warning "No hay imagen montada para guardar."; Pause; return }
-        Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "                 Guardar Cambios (Save)                " -ForegroundColor Cyan
-        Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "   [1] Guardar cambios en el Indice actual ($($Script:MOUNTED_INDEX))"
-        Write-Host "       (Sobrescribe el indice actual del archivo original)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "   [2] Guardar cambios en un nuevo Indice (Append)"
-        Write-Host "       (Agrega un nuevo indice al final del archivo original)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "   [3] Guardar en un NUEVO archivo WIM (Save As...)" -ForegroundColor Green
-        Write-Host "       (Crea un archivo .wim nuevo sin tocar el original)" -ForegroundColor Gray
-        Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
         Write-Host "   [V] Volver al menu anterior" -ForegroundColor Red
         Write-Host ""
-        $opcionSC = Read-Host "Selecciona una opcion"
+        $opcionMS = Read-MenuOption "Selecciona una opcion"
 
-        switch ($opcionSC.ToUpper()) {
-            "1" { 
-                Write-Log -LogLevel INFO -Message "MenuSave: Accediendo a 'Save-Changes' (Modo: Commit - Sobrescribir indice actual en la imagen base)."
-                Save-Changes -Mode 'Commit' 
+        if ($opcionMS.ToUpper() -in @("3","4","5","6","7") -and $Script:IMAGE_MOUNTED -eq 0) {
+            Write-Warning "No hay imagen montada para guardar/desmontar."
+            Pause
+            continue
+        }
+
+        switch ($opcionMS.ToUpper()) {
+            "1" {
+                Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Mount-Image' (Montar una nueva imagen en el directorio de trabajo)."
+                Mount-Image
             }
-            "2" { 
-                Write-Log -LogLevel INFO -Message "MenuSave: Accediendo a 'Save-Changes' (Modo: Append - Guardar cambios como un indice WIM nuevo)."
-                Save-Changes -Mode 'Append' 
+            "2" {
+                Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Reload-Image' (Forzar recarga del estado de la imagen montada)."
+                Reload-Image
             }
-            "3" { 
-                Write-Log -LogLevel INFO -Message "MenuSave: Accediendo a 'Save-Changes' (Modo: NewWim - Exportar montaje a un archivo WIM completamente independiente)."
-                Save-Changes -Mode 'NewWim' 
+            "3" {
+                Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Save-Changes' (Modo: Commit - Sobrescribir indice actual en la imagen base)."
+                Save-Changes -Mode 'Commit'
             }
-            "V" { 
-                return 
+            "4" {
+                Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Save-Changes' (Modo: Append - Guardar cambios como un indice WIM nuevo)."
+                Save-Changes -Mode 'Append'
             }
-            default { 
+            "5" {
+                Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Save-Changes' (Modo: NewWim - Exportar montaje a un archivo WIM completamente independiente)."
+                Save-Changes -Mode 'NewWim'
+            }
+            "6" {
+                Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Unmount-Image -Commit' (Confirmar guardado y desmontar la imagen actual)."
+                Unmount-Image -Commit
+            }
+            "7" {
+                Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Unmount-Image' (Descartar todos los cambios y desmontar la imagen actual)."
+                Unmount-Image
+            }
+            "V" {
+                return
+            }
+            default {
                 Write-Warning "Opcion no valida."
-                Start-Sleep 1 
+                Start-Sleep 1
             }
         }
     }
@@ -1025,7 +1052,7 @@ function Edit-Indexes-Menu {
         Write-Host ""
         Write-Host "   [V] Volver al menu anterior" -ForegroundColor Red
         Write-Host ""
-        $opcionEI = Read-Host "Selecciona una opcion"
+        $opcionEI = Read-MenuOption "Selecciona una opcion"
                 
         switch ($opcionEI.ToUpper()) {
             "1" { 
@@ -1064,7 +1091,7 @@ function Convert-Image-Menu {
         Write-Host ""
         Write-Host "   [V] Volver al menu anterior" -ForegroundColor Red
         Write-Host ""
-        $opcionCI = Read-Host "Selecciona una opcion"
+        $opcionCI = Read-MenuOption "Selecciona una opcion"
                 
         switch ($opcionCI.ToUpper()) {
             "1" { 
@@ -1093,47 +1120,40 @@ function Image-Management-Menu {
         Write-Host "                  Gestion de Imagen                    " -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "   [1] Montar/Desmontar Imagen" -ForegroundColor White
-        Write-Host "       (Cargar o descargar la imagen del WIM)" -ForegroundColor Gray
+        Write-Host "   [1] Montar / Guardar / Desmontar Imagen" -ForegroundColor White
+        Write-Host "       (Ciclo de vida completo del montaje)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Guardar Cambios (Commit)" -ForegroundColor White
-        Write-Host "       (Guarda cambios en imagen montada, sin desmontar)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "   [3] Editar Info/Metadatos (Nombre, Descripcion, etc..)" -ForegroundColor Green
+        Write-Host "   [2] Editar Info/Metadatos (Nombre, Descripcion, etc..)" -ForegroundColor Green
         Write-Host "       (Cambia el nombre que aparece al instalar Windows)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [4] Editar Indices (Exportar/Eliminar)" -ForegroundColor White
+        Write-Host "   [3] Editar Indices (Exportar/Eliminar)" -ForegroundColor White
         Write-Host "       (Gestiona los indices dentro de un .wim)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
         Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
         Write-Host ""
-        $opcionIM = Read-Host "Selecciona una opcion"
-                
+        $opcionIM = Read-MenuOption "Selecciona una opcion"
+
         switch ($opcionIM.ToUpper()) {
-            "1" { 
-                Write-Log -LogLevel INFO -Message "MenuImageMgmt: Accediendo a 'Mount-Unmount-Menu' (Montar/Desmontar Imagen)."
-                Mount-Unmount-Menu 
+            "1" {
+                Write-Log -LogLevel INFO -Message "MenuImageMgmt: Accediendo a 'Mount-Save-Menu' (Ciclo de vida de montaje/guardado)."
+                Mount-Save-Menu
             }
-            "2" { 
-                Write-Log -LogLevel INFO -Message "MenuImageMgmt: Accediendo a 'Save-Changes-Menu' (Guardar Cambios)."
-                Save-Changes-Menu 
-            }
-            "3" { 
+            "2" {
                 Write-Log -LogLevel INFO -Message "MenuImageMgmt: Accediendo a 'Show-WimMetadata-GUI' (Edicion de Metadatos XML)."
-                Show-WimMetadata-GUI 
+                Show-WimMetadata-GUI
             }
-            "4" { 
+            "3" {
                 Write-Log -LogLevel INFO -Message "MenuImageMgmt: Accediendo a 'Edit-Indexes-Menu' (Gestion de Indices WIM/ESD)."
-                Edit-Indexes-Menu 
+                Edit-Indexes-Menu
             }
-            "V" { 
-                return 
+            "V" {
+                return
             }
-            default { 
+            default {
                 Write-Warning "Opcion no valida."
-                Start-Sleep 1 
+                Start-Sleep 1
             }
         }
     }
@@ -1322,7 +1342,7 @@ function Cambio-Edicion-Menu {
     Write-Host ""
     Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
     Write-Host ""
-    $opcionEdicion = Read-Host "Seleccione la edicion a la que desea cambiar (1-$($targetEditions.Count)) o V"
+    $opcionEdicion = Read-MenuOption "Seleccione la edicion a la que desea cambiar (1-$($targetEditions.Count)) o V"
 
     if ($opcionEdicion.ToUpper() -eq "V") { return }
 
@@ -1367,7 +1387,7 @@ function Drivers-Menu {
         Write-Host "-------------------------------------------------------"
         Write-Host "   [V] Volver" -ForegroundColor Red
         
-        $opcionD = Read-Host "`nSelecciona una opcion"
+        $opcionD = Read-MenuOption "`nSelecciona una opcion"
         
         switch ($opcionD.ToUpper()) {
             "1" { 
@@ -1401,11 +1421,11 @@ function Drivers-Menu {
     }
 }
 
-function Customization-Menu {
+function Content-Menu {
     while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "          Centro de Personalizacion y Ajustes          " -ForegroundColor Cyan
+        Write-Host "         Contenido de la Imagen (Apps y Paquetes)      " -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host " Estado: " -NoNewline
         switch ($Script:IMAGE_MOUNTED) {
@@ -1417,58 +1437,155 @@ function Customization-Menu {
         Write-Host "   [1] Eliminar Bloatware (Apps)" -ForegroundColor White
         Write-Host "       (Gestor grafico para borrar aplicaciones preinstaladas)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Caracteristicas de Windows y .NET 3.5" -ForegroundColor White
-        Write-Host "       (Habilitar/Deshabilitar SMB, Hyper-V, WSL e Integrar .NET 3.5)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "   [3] Servicios del Sistema" -ForegroundColor White
-        Write-Host "       (Optimizar el arranque deshabilitando servicios inecesarios (Seguros))" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "   [4] Tweaks y Registro" -ForegroundColor White
-        Write-Host "       (Ajustes de rendimiento, privacidad e importador .REG)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "   [5] Inyector de Apps Modernas (Appx/MSIX)" -ForegroundColor Green
+        Write-Host "   [2] Inyector de Apps Modernas (Appx/MSIX)" -ForegroundColor Green
         Write-Host "       (Aprovisiona aplicaciones UWP y sus dependencias offline)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [6] Automatizacion OOBE (Unattend.xml)" -ForegroundColor White
-        Write-Host "       (Configurar usuario, saltar EULA y privacidad automaticamente)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "   [7] Inyector de Addons (.wim, .tpk, .bpk, .reg)" -ForegroundColor Magenta
+        Write-Host "   [3] Inyector de Addons (.wim, .tpk, .bpk, .reg)" -ForegroundColor Magenta
         Write-Host "       (Preinstalar programas y utilidades extra como 7-Zip o Visual C++)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [8] Gestionar WinRE (Inyectar DaRT / Herramientas)" -ForegroundColor Yellow
-        Write-Host "       (Extrae, monta y modifica el entorno de recuperacion nativo)" -ForegroundColor Gray
+        Write-Host "-------------------------------------------------------"
+        Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
         Write-Host ""
-        Write-Host "   [9] OEM Branding (Fondos y Metadatos del Sistema)" -ForegroundColor Cyan
+
+        $opcionCont = Read-MenuOption "Selecciona una opcion"
+
+        if ($opcionCont.ToUpper() -ne "V" -and $Script:IMAGE_MOUNTED -eq 0) {
+            Write-Log -LogLevel WARN -Message "MenuContent: Acceso denegado a la opcion [$opcionCont]. No hay ninguna imagen montada."
+            Write-Warning "Debes montar una imagen antes de usar estas herramientas."
+            Pause
+            continue
+        }
+
+        switch ($opcionCont.ToUpper()) {
+            "1" { Write-Log -LogLevel INFO -Message "MenuContent: Accediendo a 'Show-Bloatware-GUI'"; Show-Bloatware-GUI }
+            "2" { Write-Log -LogLevel INFO -Message "MenuContent: Accediendo a 'Show-AppxInjector-GUI'"; Show-AppxInjector-GUI }
+            "3" { Write-Log -LogLevel INFO -Message "MenuContent: Accediendo a 'Show-Addons-GUI'"; Show-Addons-GUI }
+            "V" { return }
+            default {
+                Write-Warning "Opcion no valida."
+                Start-Sleep 1
+            }
+        }
+    }
+}
+
+function System-Tweaks-Menu {
+    while ($true) {
+        Clear-Host
+        Write-Host "=======================================================" -ForegroundColor Cyan
+        Write-Host "         Sistema y Comportamiento (Ajustes del OS)     " -ForegroundColor Cyan
+        Write-Host "=======================================================" -ForegroundColor Cyan
+        Write-Host " Estado: " -NoNewline
+        switch ($Script:IMAGE_MOUNTED) {
+            1 { Write-Host "IMAGEN WIM MONTADA" -ForegroundColor Green }
+            2 { Write-Host "DISCO VHD MONTADO" -ForegroundColor Cyan }
+            Default { Write-Host "NO MONTADA" -ForegroundColor Red }
+        }
+        Write-Host ""
+        Write-Host "   [1] Caracteristicas de Windows y .NET 3.5" -ForegroundColor White
+        Write-Host "       (Habilitar/Deshabilitar SMB, Hyper-V, WSL e Integrar .NET 3.5)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   [2] Servicios del Sistema" -ForegroundColor White
+        Write-Host "       (Optimizar el arranque deshabilitando servicios inecesarios (Seguros))" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   [3] Tweaks y Registro" -ForegroundColor White
+        Write-Host "       (Ajustes de rendimiento, privacidad e importador .REG)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "-------------------------------------------------------"
+        Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
+        Write-Host ""
+
+        $opcionSys = Read-MenuOption "Selecciona una opcion"
+
+        if ($opcionSys.ToUpper() -ne "V" -and $Script:IMAGE_MOUNTED -eq 0) {
+            Write-Log -LogLevel WARN -Message "MenuSystemTweaks: Acceso denegado a la opcion [$opcionSys]. No hay ninguna imagen montada."
+            Write-Warning "Debes montar una imagen antes de usar estas herramientas."
+            Pause
+            continue
+        }
+
+        switch ($opcionSys.ToUpper()) {
+            "1" { Write-Log -LogLevel INFO -Message "MenuSystemTweaks: Accediendo a 'Show-Features-GUI'"; Show-Features-GUI }
+            "2" { Write-Log -LogLevel INFO -Message "MenuSystemTweaks: Accediendo a 'Show-Services-Offline-GUI'"; Show-Services-Offline-GUI }
+            "3" { Write-Log -LogLevel INFO -Message "MenuSystemTweaks: Accediendo a 'Show-Tweaks-Offline-GUI'"; Show-Tweaks-Offline-GUI }
+            "V" { return }
+            default {
+                Write-Warning "Opcion no valida."
+                Start-Sleep 1
+            }
+        }
+    }
+}
+
+function OOBE-Branding-Menu {
+    while ($true) {
+        Clear-Host
+        Write-Host "=======================================================" -ForegroundColor Cyan
+        Write-Host "          Despliegue OOBE y Marca (Branding)           " -ForegroundColor Cyan
+        Write-Host "=======================================================" -ForegroundColor Cyan
+        Write-Host " Estado: " -NoNewline
+        switch ($Script:IMAGE_MOUNTED) {
+            1 { Write-Host "IMAGEN WIM MONTADA" -ForegroundColor Green }
+            2 { Write-Host "DISCO VHD MONTADO" -ForegroundColor Cyan }
+            Default { Write-Host "NO MONTADA" -ForegroundColor Red }
+        }
+        Write-Host ""
+        Write-Host "   [1] Automatizacion OOBE (Unattend.xml)" -ForegroundColor White
+        Write-Host "       (Configurar usuario, saltar EULA y privacidad automaticamente)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   [2] OEM Branding (Fondos y Metadatos del Sistema)" -ForegroundColor Cyan
         Write-Host "       (Aplica wallpaper/lockscreen e informacion del fabricante)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
         Write-Host ""
 
-        $opcionCust = Read-Host "Selecciona una opcion"
-        
-        # Validacion global de montaje antes de llamar a las funciones
-        if ($opcionCust.ToUpper() -ne "V" -and $Script:IMAGE_MOUNTED -eq 0) {
-            Write-Log -LogLevel WARN -Message "MenuCustomization: Acceso denegado a la opcion [$opcionCust]. No hay ninguna imagen montada en el sistema."
+        $opcionOOBE = Read-MenuOption "Selecciona una opcion"
+
+        if ($opcionOOBE.ToUpper() -ne "V" -and $Script:IMAGE_MOUNTED -eq 0) {
+            Write-Log -LogLevel WARN -Message "MenuOOBEBranding: Acceso denegado a la opcion [$opcionOOBE]. No hay ninguna imagen montada."
             Write-Warning "Debes montar una imagen antes de usar estas herramientas."
             Pause
             continue
         }
 
-        switch ($opcionCust.ToUpper()) {
-            "1" { Write-Log -LogLevel INFO -Message "MenuCustomization: Accediendo a 'Show-Bloatware-GUI'"; Show-Bloatware-GUI }
-            "2" { Write-Log -LogLevel INFO -Message "MenuCustomization: Accediendo a 'Show-Features-GUI'"; Show-Features-GUI }
-            "3" { Write-Log -LogLevel INFO -Message "MenuCustomization: Accediendo a 'Show-Services-Offline-GUI'"; Show-Services-Offline-GUI }
-            "4" { Write-Log -LogLevel INFO -Message "MenuCustomization: Accediendo a 'Show-Tweaks-Offline-GUI'"; Show-Tweaks-Offline-GUI }
-            "5" { Write-Log -LogLevel INFO -Message "MenuCustomization: Accediendo a 'Show-AppxInjector-GUI'"; Show-AppxInjector-GUI }
-            "6" { Write-Log -LogLevel INFO -Message "MenuCustomization: Accediendo a 'Show-Unattend-GUI'"; Show-Unattend-GUI }
-            "7" { Write-Log -LogLevel INFO -Message "MenuCustomization: Accediendo a 'Show-Addons-GUI'"; Show-Addons-GUI }
-            "8" { Write-Log -LogLevel INFO -Message "MenuCustomization: Accediendo a 'Manage-WinRE-Menu'"; Manage-WinRE-Menu }
-            "9" { Write-Log -LogLevel INFO -Message "MenuCustomization: Accediendo a 'Show-OEMBranding-GUI'"; Show-OEMBranding-GUI }
+        switch ($opcionOOBE.ToUpper()) {
+            "1" { Write-Log -LogLevel INFO -Message "MenuOOBEBranding: Accediendo a 'Show-Unattend-GUI'"; Show-Unattend-GUI }
+            "2" { Write-Log -LogLevel INFO -Message "MenuOOBEBranding: Accediendo a 'Show-OEMBranding-GUI'"; Show-OEMBranding-GUI }
             "V" { return }
-            default { 
+            default {
                 Write-Warning "Opcion no valida."
-                Start-Sleep 1 
+                Start-Sleep 1
+            }
+        }
+    }
+}
+
+function Updates-Languages-Menu {
+    while ($true) {
+        Clear-Host
+        Write-Host "=======================================================" -ForegroundColor Cyan
+        Write-Host "          Actualizaciones e Idiomas (Servicing)        " -ForegroundColor Cyan
+        Write-Host "=======================================================" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "   [1] Integrar Actualizaciones" -ForegroundColor Green
+        Write-Host "       (install.wim, winre.wim, boot.wim y SetupDU)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   [2] Integrar Idiomas / Crear Medio Multilingue" -ForegroundColor Cyan
+        Write-Host "       (Agrega Language Packs, FODs y LXPs a la imagen)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "-------------------------------------------------------"
+        Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
+        Write-Host ""
+
+        $opcionUL = (Read-MenuOption "Selecciona una opcion").Trim().ToUpper()
+        switch ($opcionUL) {
+            "1" { Write-Log -LogLevel INFO -Message "MenuUpdatesLang: Accediendo a 'WindowsUpdate-Menu'"; WindowsUpdate-Menu }
+            "2" { Write-Log -LogLevel INFO -Message "MenuUpdatesLang: Accediendo a 'LanguagePack-Menu'"; LanguagePack-Menu }
+            "V" { return }
+            default {
+                Write-Warning "Opcion no valida."
+                Start-Sleep 1
             }
         }
     }
@@ -1568,7 +1685,7 @@ function Limpieza-Menu {
         Write-Host "-------------------------------------------------------"
         Write-Host "   [V] Volver" -ForegroundColor Red
 
-        $opcionL = Read-Host "`nSelecciona una opcion"
+        $opcionL = Read-MenuOption "`nSelecciona una opcion"
         Write-Log -LogLevel INFO -Message "MENU_LIMPIEZA: Usuario selecciono '$opcionL'."
 
         switch ($opcionL.ToUpper()) {
@@ -2087,7 +2204,38 @@ function Mount-Hives {
             $resumenMount.Omitidas++
         }
 
-        # UsrClass.dat (No existe en Boot.wim)
+        # UsrClass.dat (No existe en Boot.wim ni antes del primer inicio de sesion del perfil)
+        if (-not (Test-Path $classHive) -and (Test-Path $userHive)) {
+            # El perfil Default tiene NTUSER.DAT pero aun no genero UsrClass.dat (nadie ha iniciado
+            # sesion todavia). Lo creamos en blanco -exactamente igual que hace Windows en el primer
+            # logon- para poder provisionar asociaciones HKCU\Software\Classes (ej. handlers de PDF)
+            # antes de que exista un usuario real.
+			try {
+                $classDir = Split-Path $classHive -Parent
+                if (-not (Test-Path $classDir)) { New-Item -Path $classDir -ItemType Directory -Force | Out-Null }
+
+                $tempKeyName = "_TempEmptyHive_$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+                $softwareRoot = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("OfflineSoftware", $true)
+                if ($null -eq $softwareRoot) { throw "No se pudo abrir OfflineSoftware para crear la key de andamiaje." }
+                $tempKey = $softwareRoot.CreateSubKey($tempKeyName, $true)
+                if ($null -ne $tempKey) { $tempKey.Dispose() }
+                $softwareRoot.Dispose()
+
+                $pSave = Start-Process reg.exe -ArgumentList "save `"HKLM\OfflineSoftware\$tempKeyName`" `"$classHive`"" -Wait -PassThru -NoNewWindow
+
+                $softwareRoot2 = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("OfflineSoftware", $true)
+                if ($null -ne $softwareRoot2) {
+                    $softwareRoot2.DeleteSubKeyTree($tempKeyName, $false)
+                    $softwareRoot2.Dispose()
+                }
+
+                if ($pSave.ExitCode -ne 0) { throw "reg.exe save fallo (Codigo: $($pSave.ExitCode))" }
+                Write-Log -LogLevel INFO -Message "HIVES: UsrClass.dat no existia para el perfil Default; se creo un hive vacio (igual que el primer inicio de sesion de Windows)."
+            } catch {
+                Write-Log -LogLevel WARN -Message "HIVES: No se pudo crear UsrClass.dat vacio para Default -> $($_.Exception.Message)"
+            }
+        }
+
         if (Test-Path $classHive) {
             Write-Host "Cargando CLASSES..." -NoNewline
             $p = Start-Process reg.exe -ArgumentList "load HKLM\OfflineUserClasses `"$classHive`"" -Wait -PassThru -NoNewWindow
@@ -2913,20 +3061,24 @@ function Boot-Tools-Menu {
         Write-Host "   [1] Editar boot.wim (Inyectar DaRT/Drivers)" -ForegroundColor Yellow
         Write-Host "       (Modifica el entorno de instalacion o rescate)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Crear ISO Booteable" -ForegroundColor White
+        Write-Host "   [2] Gestionar WinRE (Inyectar DaRT / Herramientas)" -ForegroundColor Yellow
+        Write-Host "       (Extrae, monta y modifica el entorno de recuperacion nativo)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   [3] Crear ISO Booteable" -ForegroundColor White
         Write-Host "       (Genera una ISO compatible con BIOS/UEFI)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [3] Despliegue a VHD / Disco Fisico" -ForegroundColor White
+        Write-Host "   [4] Despliegue a VHD / Disco Fisico" -ForegroundColor White
         Write-Host "       (Aplica una imagen WIM/ESD a un VHDX o disco USB/externo)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
         Write-Host ""
 
-        $bootOpt = (Read-Host " Elige una opcion").Trim().ToUpper()
+        $bootOpt = (Read-MenuOption " Elige una opcion").Trim().ToUpper()
         switch ($bootOpt) {
             "1" { Write-Log -LogLevel INFO -Message "MenuBoot: Accediendo a 'Manage-BootWim-Menu'"; Manage-BootWim-Menu }
-            "2" { Write-Log -LogLevel INFO -Message "MenuBoot: Accediendo a 'Show-IsoMaker-GUI'"; Show-IsoMaker-GUI }
-            "3" { Write-Log -LogLevel INFO -Message "MenuBoot: Accediendo a 'Show-Deploy-To-VHD-GUI'"; Show-Deploy-To-VHD-GUI }
+            "2" { Invoke-IfMounted "Manage-WinRE-Menu" { Manage-WinRE-Menu } }
+            "3" { Write-Log -LogLevel INFO -Message "MenuBoot: Accediendo a 'Show-IsoMaker-GUI'"; Show-IsoMaker-GUI }
+            "4" { Write-Log -LogLevel INFO -Message "MenuBoot: Accediendo a 'Show-Deploy-To-VHD-GUI'"; Show-Deploy-To-VHD-GUI }
             "V" { Write-Log -LogLevel INFO -Message "MenuBoot: Volviendo al menu principal"; return }
             default {
                 Write-Log -LogLevel WARN -Message "MenuBoot: Opcion invalida seleccionada ($bootOpt)."
@@ -3060,24 +3212,27 @@ function Main-Menu {
 
         # Menu de Opciones
         Write-Host " [ GESTION DE IMAGEN ]" -ForegroundColor Yellow
-        Write-Host "   1. Montar / Desmontar / Guardar Imagen" 
+        Write-Host "   1. Montar / Guardar / Desmontar Imagen"
         Write-Host "   2. Convertir Formatos (ESD -> WIM, VHD -> WIM)"
-        Write-Host "   3. Herramientas de Arranque y Medios (Boot.wim, ISO, VHD)"
-        Write-Host "   [U] Integrar Actualizaciones (install.wim, winre.wim, boot.wim y SetupDU)" -ForegroundColor Green
-        Write-Host "   [M] Integrar Idiomas / Crear Medio Multilingue" -ForegroundColor Cyan
+        Write-Host "   3. Herramientas de Arranque y Medios (Boot.wim, WinRE, ISO, VHD)"
+        Write-Host "   4. Actualizaciones e Idiomas (install.wim, winre.wim, boot.wim, LangPacks)" -ForegroundColor Green
         Write-Host ""
         Write-Host " [ INGENIERIA & AJUSTES ]" -ForegroundColor Yellow
         if ($Script:IMAGE_MOUNTED -gt 0) {
-            Write-Host "   4. Drivers (Inyectar/Eliminar)"                  -ForegroundColor White
-            Write-Host "   5. Personalizacion (Apps, Tweaks, Unattend.xml)" -ForegroundColor White
-            Write-Host "   6. Limpieza y Reparacion (DISM/SFC)"             -ForegroundColor White
-            Write-Host "   7. Cambiar Edicion (Home -> Pro)"                -ForegroundColor White
+            Write-Host "   5. Drivers (Inyectar/Eliminar)"                            -ForegroundColor White
+            Write-Host "   6. Contenido de la Imagen (Bloatware, Appx, Addons)"       -ForegroundColor White
+            Write-Host "   7. Sistema y Comportamiento (Features, Servicios, Tweaks)" -ForegroundColor White
+            Write-Host "   8. OOBE y Marca (Unattend, OEM Branding)"                  -ForegroundColor White
+            Write-Host "   9. Limpieza y Reparacion (DISM/SFC)"                       -ForegroundColor White
+            Write-Host "   10. Cambiar Edicion (Home -> Pro)"                         -ForegroundColor White
         } else {
             # Opciones deshabilitadas visualmente
-            Write-Host "   4. Drivers (Requiere Montaje)"               -ForegroundColor DarkGray
-            Write-Host "   5. Personalizacion (Requiere Montaje)"        -ForegroundColor DarkGray
-            Write-Host "   6. Limpieza y Reparacion (Requiere Montaje)"  -ForegroundColor DarkGray
-            Write-Host "   7. Cambiar Edicion (Requiere Montaje)"        -ForegroundColor DarkGray
+            Write-Host "   5. Drivers (Requiere Montaje)"                       -ForegroundColor DarkGray
+            Write-Host "   6. Contenido de la Imagen (Requiere Montaje)"        -ForegroundColor DarkGray
+            Write-Host "   7. Sistema y Comportamiento (Requiere Montaje)"      -ForegroundColor DarkGray
+            Write-Host "   8. OOBE y Marca (Requiere Montaje)"                  -ForegroundColor DarkGray
+            Write-Host "   9. Limpieza y Reparacion (Requiere Montaje)"         -ForegroundColor DarkGray
+            Write-Host "   10. Cambiar Edicion (Requiere Montaje)"              -ForegroundColor DarkGray
         }
         Write-Host ""
         Write-Host " [ SISTEMA ]" -ForegroundColor Yellow
@@ -3093,16 +3248,17 @@ function Main-Menu {
         
         # Manejo de Errores y Navegacion
         switch ($opcionM) {
-            "1" { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Image-Management-Menu'"; Image-Management-Menu }
-            "2" { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Convert-Image-Menu'";    Convert-Image-Menu    }
-            "3" { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Boot-Tools-Menu'";       Boot-Tools-Menu       }
-            "U" { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'WindowsUpdate-Menu'"; WindowsUpdate-Menu }
-            "M" { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'LanguagePack-Menu'"; LanguagePack-Menu }
-            "4" { Invoke-IfMounted "Drivers-Menu"        { Drivers-Menu        } }
-            "5" { Invoke-IfMounted "Customization-Menu"  { Customization-Menu  } }
-            "6" { Invoke-IfMounted "Limpieza-Menu"       { Limpieza-Menu       } }
-            "7" { Invoke-IfMounted "Cambio-Edicion-Menu" { Cambio-Edicion-Menu } }
-            "R" { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Show-ConfigMenu'"; Show-ConfigMenu }
+            "1"  { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Image-Management-Menu'";  Image-Management-Menu  }
+            "2"  { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Convert-Image-Menu'";     Convert-Image-Menu     }
+            "3"  { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Boot-Tools-Menu'";        Boot-Tools-Menu        }
+            "4"  { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Updates-Languages-Menu'"; Updates-Languages-Menu }
+            "5"  { Invoke-IfMounted "Drivers-Menu"        { Drivers-Menu        } }
+            "6"  { Invoke-IfMounted "Content-Menu"        { Content-Menu        } }
+            "7"  { Invoke-IfMounted "System-Tweaks-Menu"  { System-Tweaks-Menu  } }
+            "8"  { Invoke-IfMounted "OOBE-Branding-Menu"  { OOBE-Branding-Menu  } }
+            "9"  { Invoke-IfMounted "Limpieza-Menu"       { Limpieza-Menu       } }
+            "10" { Invoke-IfMounted "Cambio-Edicion-Menu" { Cambio-Edicion-Menu } }
+            "R"  { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Show-ConfigMenu'"; Show-ConfigMenu }
             "L" {
                 if ($null -ne $script:logFile -and (Test-Path $script:logFile)) {
                     Write-Log -LogLevel INFO -Message "MenuMain: El usuario abrio el archivo de Log principal."
@@ -3113,7 +3269,6 @@ function Main-Menu {
                 }
             }
             "H" {
-                Write-Log -LogLevel INFO -Message "MenuMain: El usuario abrio el panel 'Acerca de'."
                 $msg = "AdminImagenOffline v$($script:Version)`n" +
                        "Desarrollado por SOFTMAXTER`n`n" +
                        "Email: softmaxter@hotmail.com`n" +

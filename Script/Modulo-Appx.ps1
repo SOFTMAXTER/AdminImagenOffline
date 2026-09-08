@@ -324,13 +324,14 @@ function Show-AppxInjector-GUI {
         }
     }
 
-    function Remove-AppxDeprovisionedMarks ([string[]]$FamilyNames) {
+    function Remove-AppxDeprovisionedMarks ([string[]]$FamilyNames, [switch]$StopOnFailure) {
         $families = @($FamilyNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
         if ($families.Count -eq 0) { return 0 }
 
         $mountedHere = $false
         if (-not (Mount-Hives)) {
             Write-Log -LogLevel WARN -Message "AppxInjector: No se pudieron montar hives para limpiar marcas Deprovisioned."
+            if ($StopOnFailure) { throw "No se pudieron montar hives para reparar la marca Deprovisioned." }
             return 0
         }
         $mountedHere = $true
@@ -338,10 +339,11 @@ function Show-AppxInjector-GUI {
         try {
             $removed = 0
             $deprovPath = "HKLM:\OfflineSoftware\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore\Deprovisioned"
-            if (-not (Test-Path $deprovPath)) { return 0 }
+            $readErrorAction = if ($StopOnFailure) { 'Stop' } else { 'SilentlyContinue' }
+            if (-not (Test-Path $deprovPath -ErrorAction $readErrorAction)) { return 0 }
 
             foreach ($family in $families) {
-                $matches = @(Get-ChildItem -Path $deprovPath -ErrorAction SilentlyContinue |
+                $matches = @(Get-ChildItem -Path $deprovPath -ErrorAction $readErrorAction |
                     Where-Object { $_.PSChildName -like "$family*" })
 
                 foreach ($key in $matches) {
@@ -351,6 +353,7 @@ function Show-AppxInjector-GUI {
                         Write-Log -LogLevel INFO -Message "AppxInjector: Marca Deprovisioned eliminada: $($key.PSChildName)"
                     } catch {
                         Write-Log -LogLevel WARN -Message "AppxInjector: No se pudo eliminar Deprovisioned '$($key.PSChildName)' - $($_.Exception.Message)"
+                        if ($StopOnFailure) { throw }
                     }
                 }
             }
@@ -1117,42 +1120,53 @@ function Show-AppxInjector-GUI {
                             @($pendingItems | Where-Object { $_.SubItems[1].Text -ne "LIBRERIA" })
 
             # 5. Bucle de inyeccion
-            $progressBar.Maximum = $total
             $progressBar.Value   = 0
+            $progressBar.Maximum = $total
             $progressBar.Visible = $true
 
             foreach ($item in $orderedQueue) {
+                [System.Windows.Forms.Application]::DoEvents()
                 if ($script:cancelAppxAfterCurrent) {
                     $cancelled = $true
                     Write-Log -LogLevel WARN -Message "AppxInjector: Despliegue cancelado de forma segura antes del siguiente paquete."
                     break
                 }
 
-                [System.Windows.Forms.Application]::DoEvents()
-                $count++
-                $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
-
                 $appData    = $item.Tag
                 $familyName = $item.SubItems[2].Text
 
-                if ($item.Text -eq "REPARAR") {
+                if ($item.Text -in @("REPARAR", "REPARACION PENDIENTE")) {
                     $item.Text      = "REPARANDO..."
                     $item.ForeColor = [System.Drawing.Color]::Orange
                     $item.EnsureVisible()
-                    $lblStatus.Text = "[$count/$total] Reparando marca Deprovisioned: $familyName..."
+                    $lblStatus.Text = "[$($count + 1)/$total] Reparando marca Deprovisioned: $familyName..."
                     $form.Refresh()
-                    $successFamilies += $familyName
-                    $success++
-                    $item.Text      = "REPARADO"
-                    $item.ForeColor = [System.Drawing.Color]::LightGreen
-                    Write-Log -LogLevel INFO -Message "AppxInjector: Reparacion programada para limpiar Deprovisioned [$familyName]"
+                    try {
+                        # Completar la reparacion de este objeto antes de avanzar al siguiente.
+                        $cleanedRepair = Remove-AppxDeprovisionedMarks -FamilyNames @($familyName) -StopOnFailure
+                        $item.Text      = "REPARADO"
+                        $item.ForeColor = [System.Drawing.Color]::LightGreen
+                        $success++
+                        Write-Log -LogLevel INFO -Message "AppxInjector: Reparacion completada [$familyName]; marcas limpiadas: $cleanedRepair"
+                    } catch {
+                        $item.Text      = "ERROR REPARACION"
+                        $item.ForeColor = [System.Drawing.Color]::Red
+                        $errors++
+                        Write-Log -LogLevel ERROR -Message "AppxInjector: Fallo reparando [$familyName] - $($_.Exception.Message)"
+                    } finally {
+                        # Contar el objeto solo despues de terminar su procesamiento.
+                        $count++
+                        $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
+                        $form.Refresh()
+                        [System.Windows.Forms.Application]::DoEvents()
+                    }
                     continue
                 }
 
                 $item.Text      = "PROCESANDO..."
                 $item.ForeColor = [System.Drawing.Color]::Cyan
                 $item.EnsureVisible()
-                $lblStatus.Text = "[$count/$total] $familyName..."
+                $lblStatus.Text = "[$($count + 1)/$total] $familyName..."
                 $form.Refresh()
 
                 Write-Log -LogLevel INFO -Message "AppxInjector: Desplegando [$familyName] -> $($appData.MainPackage)"
@@ -1241,11 +1255,18 @@ function Show-AppxInjector-GUI {
                             Write-Log -LogLevel ERROR -Message "AppxInjector: Log DISM conservado para diagnostico: $dismLogPath"
                         }
                     }
+                    # Contar el objeto solo despues de terminar su procesamiento.
+                    $count++
+                    $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
+                    $form.Refresh()
+                    [System.Windows.Forms.Application]::DoEvents()
                 }
             }
 
-            # 6. Limpiar marcas Deprovisioned para paquetes reinstalados/reparados
+            # 6. Limpiar marcas Deprovisioned para paquetes reinstalados
             if ($successFamilies.Count -gt 0) {
+                $lblStatus.Text = "Finalizando limpieza de marcas Deprovisioned..."
+                $form.Refresh()
                 $cleanedDeprov = Remove-AppxDeprovisionedMarks -FamilyNames $successFamilies
                 if ($cleanedDeprov -gt 0) {
                     Write-Log -LogLevel INFO -Message "AppxInjector: $cleanedDeprov marca(s) Deprovisioned limpiada(s)."

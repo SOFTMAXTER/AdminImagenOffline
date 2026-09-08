@@ -316,8 +316,8 @@ function Show-Services-Offline-GUI {
         $btnRestore.Enabled = $false
         $btnApply.Enabled = $false
 
-        $progressBar.Maximum = $allChecked.Count
         $progressBar.Value = 0
+        $progressBar.Maximum = $allChecked.Count
         $progressBar.Visible = $true
 
         $successCount = 0
@@ -326,8 +326,6 @@ function Show-Services-Offline-GUI {
 
         try {
             foreach ($item in $allChecked) {
-                $count++
-                $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
                 [System.Windows.Forms.Application]::DoEvents()
 
                 $svcObj = $item.Tag 
@@ -399,6 +397,11 @@ function Show-Services-Offline-GUI {
                     }
                 } finally {
                     Restore-KeyOwner -KeyPath $regPath
+                    # Contar el objeto solo despues de terminar su procesamiento.
+                    $count++
+                    $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
+                    $form.Refresh()
+                    [System.Windows.Forms.Application]::DoEvents()
                 }
             }
 
