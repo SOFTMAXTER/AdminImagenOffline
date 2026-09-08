@@ -1,3 +1,16 @@
+1.5.5
+====================================================
+- Reorganizacion completa de menus: Contenido, Sistema y Comportamiento y OOBE y Marca ahora son menus propios (antes mezclados en Personalizacion); WinRE se traslado a Herramientas de Arranque y Montaje/Guardado se unificaron en un solo menu.
+- Soporte para paquetes DeltaPack Dual-Engine en el Inyector de Addons (Nuevo): instala paquetes con manifest_*.json respetando el orden declarado WIM -> Acciones -> Eliminaciones -> REG -> Acciones, como una sola unidad transaccional.
+- Motor de Bloatware reforzado: desmontaje de colmenas garantizado con try/finally, limpieza fisica de residuos corregida para emparejar por nombre y version exactos, confirmacion reforzada para apps del sistema y barra de progreso.
+- Gestor de Drivers mejorado: barra de progreso, casilla /ForceUnsigned, boton para cancelar tras el driver en curso y advertencia reforzada al desinstalar clases de hardware criticas.
+- Correccion de un bug sistemico que rompia los avisos de "imagen no montada" en varios modulos (Servicios, Tweaks, Addons).
+- Guardias de "operacion en curso" agregados en Servicios, Tweaks y Addons para evitar el cierre de la ventana a mitad de un proceso.
+- Correccion de la barra de progreso en Servicios, Drivers, Tweaks y Addons (avanzaba antes de terminar cada elemento, no despues).
+- Correccion de un error de DISM al inyectar o eliminar drivers cuando la imagen montada es un VHD/VHDX (ruta terminada en barra invertida).
+====================================================
+
+
 1.5.4
 ====================================================
 - Integracion de Actualizaciones Offline (Nuevo): motor de servicing para install.wim, winre.wim y boot.wim (SSU, LCU, ESU, Enablement, SetupDU) con respaldo Preflight y reportes JSON/HTML.
