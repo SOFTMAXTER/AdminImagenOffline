@@ -999,10 +999,18 @@ function Mount-Save-Menu {
             "1" {
                 Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Mount-Image' (Montar una nueva imagen en el directorio de trabajo)."
                 Mount-Image
+                if ($Script:IMAGE_MOUNTED -gt 0) {
+                    Write-Log -LogLevel INFO -Message "MenuMountSave: Montaje exitoso detectado. Redirigiendo directamente al Main-Menu."
+                    return $true
+                }
             }
             "2" {
                 Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Reload-Image' (Forzar recarga del estado de la imagen montada)."
                 Reload-Image
+                if ($Script:IMAGE_MOUNTED -gt 0) {
+                    Write-Log -LogLevel INFO -Message "MenuMountSave: Recarga exitosa detectada. Redirigiendo directamente al Main-Menu."
+                    return $true
+                }
             }
             "3" {
                 Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Save-Changes' (Modo: Commit - Sobrescribir indice actual en la imagen base)."
@@ -1138,7 +1146,8 @@ function Image-Management-Menu {
         switch ($opcionIM.ToUpper()) {
             "1" {
                 Write-Log -LogLevel INFO -Message "MenuImageMgmt: Accediendo a 'Mount-Save-Menu' (Ciclo de vida de montaje/guardado)."
-                Mount-Save-Menu
+                $volverAlMain = Mount-Save-Menu
+                if ($volverAlMain) { return }
             }
             "2" {
                 Write-Log -LogLevel INFO -Message "MenuImageMgmt: Accediendo a 'Show-WimMetadata-GUI' (Edicion de Metadatos XML)."
@@ -1440,7 +1449,7 @@ function Content-Menu {
         Write-Host "   [2] Inyector de Apps Modernas (Appx/MSIX)" -ForegroundColor Green
         Write-Host "       (Aprovisiona aplicaciones UWP y sus dependencias offline)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [3] Inyector de Addons (.wim, .tpk, .bpk, .reg)" -ForegroundColor Magenta
+        Write-Host "   [3] Inyector de Addons (.tpk, .bpk, .reg)" -ForegroundColor Magenta
         Write-Host "       (Preinstalar programas y utilidades extra como 7-Zip o Visual C++)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
