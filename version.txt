@@ -10,7 +10,6 @@
 - Correccion de un error de DISM al inyectar o eliminar drivers cuando la imagen montada es un VHD/VHDX (ruta terminada en barra invertida).
 ====================================================
 
-
 1.5.4
 ====================================================
 - Integracion de Actualizaciones Offline (Nuevo): motor de servicing para install.wim, winre.wim y boot.wim (SSU, LCU, ESU, Enablement, SetupDU) con respaldo Preflight y reportes JSON/HTML.
