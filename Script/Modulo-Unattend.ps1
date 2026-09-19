@@ -2,6 +2,7 @@
 #  Modulo-Unattend
 #
 #  CONTENIDO   : Show-Unattend-GUI
+#  DEPENDENCIAS COMPARTIDAS: Set-AIOTabControlStyle (Modulo-UI.ps1)
 #  DEPENDENCIAS DEL NUCLEO (heredadas via dot-source):
 #    - Write-Log              : registro de eventos
 #    - $Script:IMAGE_MOUNTED  : estado de montaje (0 = sin imagen)
@@ -86,6 +87,7 @@ function Show-Unattend-GUI {
     $tabControl          = New-Object System.Windows.Forms.TabControl
     $tabControl.Location = "10, 10"
     $tabControl.Size     = "940, 580"
+    Set-AIOTabControlStyle -TabControl $tabControl
     $form.Controls.Add($tabControl)
 
     # ==================================================================

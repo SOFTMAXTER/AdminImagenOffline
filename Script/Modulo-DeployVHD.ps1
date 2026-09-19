@@ -386,14 +386,20 @@ public sealed class AIODeployNativeReader : IDisposable {
     $lblDeployProgress.ForeColor = [System.Drawing.Color]::Silver
     $form.Controls.Add($lblDeployProgress)
 
-    $progressDeploy          = New-Object System.Windows.Forms.ProgressBar
+    # La barra general representa etapas discretas. Un Panel evita la animacion
+    # del ProgressBar nativo, que puede seguir avanzando durante la etapa siguiente.
+    $progressDeploy          = New-Object System.Windows.Forms.Panel
     $progressDeploy.Location = "20, 502"
     $progressDeploy.Size     = "660, 18"
-    $progressDeploy.Style    = "Continuous"
-    $progressDeploy.Minimum  = 0
-    $progressDeploy.Maximum  = 6
-    $progressDeploy.Value    = 0
+    $progressDeploy.BorderStyle = "FixedSingle"
+    $progressDeploy.BackColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
     $form.Controls.Add($progressDeploy)
+
+    $progressDeployFill = New-Object System.Windows.Forms.Panel
+    $progressDeployFill.Location = "0, 0"
+    $progressDeployFill.Size = New-Object System.Drawing.Size(0, $progressDeploy.ClientSize.Height)
+    $progressDeployFill.BackColor = [System.Drawing.Color]::LightGreen
+    $progressDeploy.Controls.Add($progressDeployFill)
 
     $lblImageProgress           = New-Object System.Windows.Forms.Label
     $lblImageProgress.Text      = "Aplicacion de imagen: en espera."
@@ -412,12 +418,23 @@ public sealed class AIODeployNativeReader : IDisposable {
     $form.Controls.Add($progressImage)
 
     $deployProgress = @{ Completed = 0; Total = 6 }
-    $CompleteDeployStage = {
-        # Cada etapa vale una unidad y se contabiliza al terminar sus operaciones.
-        $deployProgress.Completed++
-        $progressDeploy.Value = [math]::Min($deployProgress.Completed, $progressDeploy.Maximum)
+    $RefreshDeployProgress = {
         $percent = [int][math]::Floor(100.0 * $deployProgress.Completed / $deployProgress.Total)
+        $progressDeployFill.Width = [int][math]::Floor(
+            $progressDeploy.ClientSize.Width * $deployProgress.Completed / $deployProgress.Total)
         $lblDeployProgress.Text = "Progreso general: $($deployProgress.Completed) de $($deployProgress.Total) etapas completadas ($percent%)."
+        $progressDeploy.Refresh()
+        $lblDeployProgress.Refresh()
+    }
+    $CompleteDeployStage = {
+        param([int]$Stage)
+        # Solo se llama despues de terminar la etapa. El numero explicito impide
+        # contabilizar dos veces una etapa o saltar una que no se haya completado.
+        if ($Stage -ne ($deployProgress.Completed + 1) -or $Stage -gt $deployProgress.Total) {
+            throw "Cierre de etapa fuera de orden: $Stage. Completadas: $($deployProgress.Completed)."
+        }
+        $deployProgress.Completed = $Stage
+        & $RefreshDeployProgress
         $form.Refresh()
         [System.Windows.Forms.Application]::DoEvents()
     }
@@ -629,10 +646,8 @@ public sealed class AIODeployNativeReader : IDisposable {
 
         $deployProgress.Completed = 0
         $deployProgress.Total = if ($isVhdMode) { 6 } else { 5 }
-        $progressDeploy.Value = 0
-        $progressDeploy.Maximum = $deployProgress.Total
+        & $RefreshDeployProgress
         $progressImage.Value = 0
-        $lblDeployProgress.Text = "Progreso general: 0 de $($deployProgress.Total) etapas completadas (0%)."
         $lblImageProgress.Text = "Aplicacion de imagen: en espera."
         $lblImageProgress.ForeColor = [System.Drawing.Color]::Silver
         $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
@@ -688,7 +703,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 Clear-Disk -Number $diskNum -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop
             }
 
-            & $CompleteDeployStage
+            & $CompleteDeployStage -Stage 1
 
             # ── Fase 2: Inicializacion y particionado ─────────────────
             $lblStatus.Text = "Inicializando disco y preparando particiones..."
@@ -787,7 +802,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 }
             }
 
-            & $CompleteDeployStage
+            & $CompleteDeployStage -Stage 2
 
             # ── Fase 3: Aplicacion de la imagen principal ─────────────────
             $lblStatus.Text = "Desplegando imagen (Esto tardara varios minutos)..."
@@ -806,7 +821,7 @@ public sealed class AIODeployNativeReader : IDisposable {
             $progressImage.Value = $progressImage.Maximum
             $lblImageProgress.Text = "Aplicacion de imagen: 100%, completada."
             $lblImageProgress.ForeColor = [System.Drawing.Color]::LightGreen
-            & $CompleteDeployStage
+            & $CompleteDeployStage -Stage 3
 
             # ── Fase 4: Escritura del sector de arranque ───────────────
             $lblStatus.Text = "Escribiendo sectores de arranque..."
@@ -820,7 +835,7 @@ public sealed class AIODeployNativeReader : IDisposable {
             if ($bcdExitCode -ne 0) {
                 throw "Fallo la creacion de archivos de arranque (BCDBOOT)."
             }
-            & $CompleteDeployStage
+            & $CompleteDeployStage -Stage 4
 
             # ── Fase 5: Ocultar y proteger particiones de sistema ─────────
             if ($sizeRecMB -gt 0 -and $driveLetterRecovery) {
@@ -866,14 +881,14 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $driveLetterBoot = $null
             }
 
-            & $CompleteDeployStage
+            & $CompleteDeployStage -Stage 5
 
             # ── Fase 6: Desmontar VHD si aplica ───────────────────────
             if ($isVhdMode) {
                 $lblStatus.Text = "Desmontando disco virtual..."
                 $form.Refresh()
                 Dismount-VHD -Path $vhdPath -ErrorAction Stop
-                & $CompleteDeployStage
+                & $CompleteDeployStage -Stage 6
             }
 
             $lblStatus.Text      = "Completado."
@@ -963,6 +978,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $toolTip.SetToolTip($numRecSize,      "Size de la particion de Recuperacion (WinRE). Se recomienda 1024 MB.")
     $toolTip.SetToolTip($btnDeploy,       "ADVERTENCIA: Iniciara el proceso de creacion/formateo y aplicacion de imagen.")
     $toolTip.SetToolTip($progressDeploy,  "Cuenta las etapas terminadas. El porcentaje no representa el tiempo restante.")
+    $toolTip.SetToolTip($progressDeployFill, "Avanza inmediatamente al terminar cada etapa; permanece fijo durante la etapa en curso.")
     $toolTip.SetToolTip($progressImage,   "Muestra el avance informado al aplicar la imagen. Solo llega a 100% cuando la aplicacion termina correctamente.")
 
     $form.Add_FormClosing({

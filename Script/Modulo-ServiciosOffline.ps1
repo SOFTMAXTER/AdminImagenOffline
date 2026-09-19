@@ -2,6 +2,7 @@
 #  Modulo-ServiciosOffline
 #
 #  CONTENIDO   : Show-Services-Offline-GUI
+#  DEPENDENCIAS COMPARTIDAS: Set-AIOTabControlStyle (Modulo-UI.ps1)
 #  DEPENDENCIAS DEL NUCLEO (heredadas via dot-source):
 #    - Write-Log              : registro de eventos
 #    - $Script:IMAGE_MOUNTED  : estado de montaje (0 = sin imagen)
@@ -99,6 +100,7 @@ function Show-Services-Offline-GUI {
     $tabControl.Location = New-Object System.Drawing.Point(20, 40)
     $tabControl.Size = New-Object System.Drawing.Size(1045, 480)
     $tabControl.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+    Set-AIOTabControlStyle -TabControl $tabControl
     $form.Controls.Add($tabControl)
 
     # --- CAMPO DE VISUALIZACIÓN DE DESCRIPCIÓN ---
@@ -272,7 +274,7 @@ function Show-Services-Offline-GUI {
                     $item.Checked = $false 
                 } else {
                     $item.ForeColor = [System.Drawing.Color]::White
-                    $item.Checked = $true 
+                    $item.Checked = $false 
                 }
 
                 $targetLV.Items.Add($item) | Out-Null

@@ -2,6 +2,7 @@
 #  Modulo-Tweaks
 #
 #  CONTENIDO   : Show-Tweaks-Offline-GUI, Show-RegQueue-GUI, Show-RegPreview-GUI
+#  DEPENDENCIAS COMPARTIDAS: Set-AIOTabControlStyle (Modulo-UI.ps1)
 #  DEPENDENCIAS DEL NUCLEO (heredadas via dot-source):
 #    - Write-Log              : registro de eventos
 #    - $Script:IMAGE_MOUNTED  : estado de montaje (0 = sin imagen)
@@ -681,6 +682,7 @@ function Show-Tweaks-Offline-GUI {
     $tabControl.Location = New-Object System.Drawing.Point(20, 60)
     $tabControl.Size = New-Object System.Drawing.Size(1140, 520)
     $tabControl.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+    Set-AIOTabControlStyle -TabControl $tabControl
     $form.Controls.Add($tabControl)
 
     $pnlActions = New-Object System.Windows.Forms.Panel

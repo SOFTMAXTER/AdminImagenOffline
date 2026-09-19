@@ -60,6 +60,9 @@ function Show-AppxInjector-GUI {
     $script:appCache = @{}
     $script:appxDeprovisionedFamilies = @{}
     $script:cancelAppxAfterCurrent = $false
+    $script:appxBatchBlocked = $false
+    $script:appxBlockReason = ''
+    $script:isAppxPreparing = $false
 
     # FIX MEDIO 5: Cargar el ensamblado de compresion una sola vez en memoria
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
@@ -97,6 +100,7 @@ function Show-AppxInjector-GUI {
     $lvAppQueue.Size          = "1000, 460"
     $lvAppQueue.View          = "Details"
     $lvAppQueue.FullRowSelect = $true
+    $lvAppQueue.ShowItemToolTips = $true
     $lvAppQueue.GridLines     = $true
     $lvAppQueue.BackColor     = [System.Drawing.Color]::FromArgb(45, 45, 48)
     $lvAppQueue.ForeColor     = [System.Drawing.Color]::White
@@ -172,14 +176,12 @@ function Show-AppxInjector-GUI {
     $btnApply.Enabled    = $false
     $form.Controls.Add($btnApply)
 
-    $btnCancelAfterCurrent            = New-Object System.Windows.Forms.Button
-    $btnCancelAfterCurrent.Text       = "Cancelar despues del actual"
-    $btnCancelAfterCurrent.Location   = "660, 540"
-    $btnCancelAfterCurrent.Size       = "360, 35"
-    $btnCancelAfterCurrent.BackColor  = [System.Drawing.Color]::DarkOrange
-    $btnCancelAfterCurrent.FlatStyle  = "Flat"
-    $btnCancelAfterCurrent.Enabled    = $false
-    $form.Controls.Add($btnCancelAfterCurrent)
+    $chkUpdateAppx = New-Object System.Windows.Forms.CheckBox
+    $chkUpdateAppx.Text = 'Actualizar apps ya aprovisionadas con paquetes locales mas recientes'
+    $chkUpdateAppx.Location = '20, 584'
+    $chkUpdateAppx.Size = '625, 22'
+    $chkUpdateAppx.Checked = $false
+    $form.Controls.Add($chkUpdateAppx)
 
     $progressBar          = New-Object System.Windows.Forms.ProgressBar
     $progressBar.Location = "20, 655"
@@ -201,6 +203,8 @@ function Show-AppxInjector-GUI {
         $verStr = "0.0.0.0"
         $arch   = "neutral"
         $isFw   = $false
+        $packageFamilyName = ''
+        $identityError = 'No se pudo determinar la familia completa desde el manifiesto.' 
 
         $outerZip = $null
         try {
@@ -219,6 +223,14 @@ function Show-AppxInjector-GUI {
                 
                 $reader.Dispose()
                 $mStream.Dispose()
+
+                try {
+                    $packageFamilyName = Get-AppxManifestFamilyName $xmlStr
+                    $identityError = ''
+                } catch {
+                    $identityError = $_.Exception.Message
+                    Write-Log -LogLevel WARN -Message "AppxInjector: Identidad de '$nameNoExt': $identityError"
+                }
 
                 # Extracción rápida vía Regex Compilada del nodo <Identity>
                 $identityMatch = [regex]::Match($xmlStr, '(?i)<Identity\b([^>]+)/?>')
@@ -260,6 +272,8 @@ function Show-AppxInjector-GUI {
 
         return [PSCustomObject]@{
             Family     = $family
+            PackageFamilyName = $packageFamilyName
+            IdentityError = $identityError
             VersionStr = $verStr
             Version    = $versionObj
             Arch       = $arch
@@ -276,57 +290,184 @@ function Show-AppxInjector-GUI {
                 $pkgKey = $_.PSChildName
                 if ([string]::IsNullOrWhiteSpace($pkgKey)) { return }
 
-                $baseName = ($pkgKey -split '_')[0]
-                if (-not [string]::IsNullOrWhiteSpace($baseName)) {
-                    $map[$baseName] = $pkgKey
-                }
+                $map[$pkgKey] = $pkgKey
             }
         }
 
         return $map
     }
 
-    function Test-AppxOfflineHiveMounted {
-        $hivePaths = @(
-            "HKLM:\OfflineSystem",
-            "HKLM:\OfflineSoftware",
-            "HKLM:\OfflineComponents",
-            "HKLM:\OfflineDefaultUser",
-            "HKLM:\OfflineUser",
-            "HKLM:\OfflineUserClasses"
-        )
-
-        foreach ($path in $hivePaths) {
-            try {
-                if (Test-Path -Path $path -ErrorAction SilentlyContinue) { return $true }
-            } catch {}
-        }
-
-        return $false
+    function Initialize-AppxIdentityNative {
+        if ('AIOAppxIdentityNative' -as [type]) { return }
+        Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class AIOAppxIdentityNative {
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+    struct PackageId {
+        public uint reserved;
+        public uint processorArchitecture;
+        public ulong version;
+        [MarshalAs(UnmanagedType.LPWStr)] public string name;
+        [MarshalAs(UnmanagedType.LPWStr)] public string publisher;
+        [MarshalAs(UnmanagedType.LPWStr)] public string resourceId;
+        [MarshalAs(UnmanagedType.LPWStr)] public string publisherId;
+    }
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true)]
+    static extern int PackageFamilyNameFromId(ref PackageId id, ref uint length, StringBuilder family);
+    public static string GetFamily(string name, string publisher) {
+        PackageId id = new PackageId { name = name, publisher = publisher };
+        uint length = 0;
+        int result = PackageFamilyNameFromId(ref id, ref length, null);
+        if (result != 122) throw new Win32Exception(result);
+        StringBuilder family = new StringBuilder((int)length);
+        result = PackageFamilyNameFromId(ref id, ref length, family);
+        if (result != 0) throw new Win32Exception(result);
+        return family.ToString();
+    }
+}
+'@ -ErrorAction Stop
     }
 
-    function Invoke-AppxSafeUnmount ([string]$Reason = "") {
-        if (-not (Test-AppxOfflineHiveMounted)) {
-            if (-not [string]::IsNullOrWhiteSpace($Reason)) {
-                Write-Log -LogLevel INFO -Message "AppxInjector: No hay hives offline montadas para desmontar ($Reason)."
-            }
-            return
+    function Get-AppxFamilyName {
+        param([string]$Name, [string]$Publisher)
+        if ([string]::IsNullOrWhiteSpace($Name) -or [string]::IsNullOrWhiteSpace($Publisher)) {
+            throw 'La identidad requiere Name y Publisher.'
         }
+        Initialize-AppxIdentityNative
+        return [AIOAppxIdentityNative]::GetFamily($Name, $Publisher)
+    }
 
-        if (-not [string]::IsNullOrWhiteSpace($Reason)) {
-            Write-Log -LogLevel INFO -Message "AppxInjector: Desmontando hives offline ($Reason)."
-        }
-
+    function Get-AppxManifestFamilyName([string]$Text) {
+        # El nombre del archivo no es evidencia del hash de editor. Obtener la
+        # identidad del manifiesto y pedir a Windows el PackageFamilyName.
+        $settings = New-Object Xml.XmlReaderSettings
+        $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
+        $settings.XmlResolver = $null
+        $inputReader = New-Object IO.StringReader($Text)
+        $reader = $null
         try {
-            Unmount-Hives
-        } catch {
-            Write-Log -LogLevel WARN -Message "AppxInjector: Error menor desmontando hives offline ($Reason) - $($_.Exception.Message)"
+            $reader = [Xml.XmlReader]::Create($inputReader, $settings)
+            $xml = New-Object Xml.XmlDocument
+            $xml.XmlResolver = $null
+            $xml.Load($reader)
+            $id = $xml.SelectSingleNode("/*[local-name()='Package' or local-name()='Bundle']/*[local-name()='Identity']")
+            if (-not $id) { throw 'No se encontro Identity en el manifiesto.' }
+            return Get-AppxFamilyName $id.GetAttribute('Name') $id.GetAttribute('Publisher')
+        } finally {
+            if ($reader) { $reader.Dispose() }
+            $inputReader.Dispose()
         }
     }
+
+    function Update-AppxInstalledCache {
+        Invoke-AppxSafeUnmount 'lectura de apps aprovisionadas'
+        $cache = @{}
+        foreach ($app in Get-AppxProvisionedPackage -Path $Script:MOUNT_DIR -ErrorAction Stop) {
+            if ($app.PackageName -notmatch '^([^_]+)_(\d+\.\d+\.\d+\.\d+)_[^_]+_[^_]*_([0-9a-hjkmnp-tv-z]{13})$') {
+                throw "No se pudo identificar la familia aprovisionada: $($app.PackageName)."
+            }
+            $familyName = $matches[1] + '_' + $matches[3]
+            $version = [version]$matches[2]
+            if (-not $cache.ContainsKey($familyName) -or $version -gt $cache[$familyName]) { $cache[$familyName] = $version }
+        }
+        $script:appCache = $cache
+    }
+
+    function Get-AppxQueueAction($Data) {
+        if ($script:appxBatchBlocked) { return 'BLOQUEADO' }
+        $pfn = $Data.PackageFamilyName
+        if (-not $pfn) { return 'ERROR IDENTIDAD' }
+        if (-not $script:appCache.ContainsKey($pfn)) { return 'INSTALAR' }
+        $deprovisioned = $script:appxDeprovisionedFamilies.ContainsKey($pfn)
+        if ($Data.Version -gt $script:appCache[$pfn]) {
+            if ($chkUpdateAppx.Checked) { return 'ACTUALIZAR' }
+            if ($deprovisioned) { return 'REPARAR' }
+            return 'OMITIR (Actualizar desactivado)'
+        }
+        if ($deprovisioned) { return 'REPARAR' }
+        return 'OMITIR (Ya existe)'
+    }
+
+    function Get-AppxActionColor([string]$Action) {
+        switch -Regex ($Action) {
+            '^INSTALAR' { return [Drawing.Color]::Yellow }
+            '^ACTUALIZAR' { return [Drawing.Color]::Cyan }
+            '^REPARAR' { return [Drawing.Color]::Orange }
+            '^(ERROR|BLOQUEADO)' { return [Drawing.Color]::Salmon }
+            default { return [Drawing.Color]::Gray }
+        }
+    }
+
+    function Update-AppxQueueActions {
+        foreach ($item in $lvAppQueue.Items) {
+            if ($item.Text -notmatch '^(INSTALAR|ACTUALIZAR|REPARAR|REPARACION PENDIENTE|OMITIR)') { continue }
+            $item.Text = Get-AppxQueueAction $item.Tag
+            $item.ForeColor = Get-AppxActionColor $item.Text
+        }
+        $btnApply.Enabled = -not $script:appxBatchBlocked -and -not $script:isAppxPreparing -and -not $script:isAppxDeploying -and
+            @($lvAppQueue.Items | Where-Object { $_.Text -in @('INSTALAR','ACTUALIZAR','REPARAR','REPARACION PENDIENTE') }).Count -gt 0
+    }
+
+    function Block-AppxBatch([string]$Message) {
+        $script:appxBatchBlocked = $true
+        $script:appxBlockReason = $Message
+        foreach ($item in $lvAppQueue.Items) {
+            if ($item.Text -match '^(OMITIR|INSTALADO|REPARADO|ERROR|BLOQUEADO)') { continue }
+            $item.Text = 'BLOQUEADO'; $item.ToolTipText = $Message
+            $item.ForeColor = [Drawing.Color]::Salmon
+        }
+        $btnApply.Enabled = $false
+        $chkUpdateAppx.Enabled = $false
+        $lblStatus.Text = 'Lote detenido. Pendientes bloqueados; consulte el detalle del error.'
+        $lblStatus.ForeColor = [Drawing.Color]::Salmon
+        Write-Log -LogLevel ERROR -Message "AppxInjector: $Message"
+    }
+
+    function Get-AppxMountedHivePaths {
+        foreach ($name in @('OfflineSystem','OfflineSoftware','OfflineComponents','OfflineDefaultUser','OfflineUser','OfflineUserClasses')) {
+            $path = 'HKLM:\' + $name
+            if (Test-Path -LiteralPath $path -ErrorAction Stop) { $path }
+        }
+    }
+
+    function Test-AppxOfflineHiveMounted { return @(Get-AppxMountedHivePaths).Count -gt 0 }
+
+    function Invoke-AppxSafeUnmount([string]$Reason = '') {
+        $before = @(); $remaining = @(); $failure = $null
+        try {
+            $before = @(Get-AppxMountedHivePaths)
+            if (-not $before.Count) { return }
+            Write-Log -LogLevel INFO -Message "AppxInjector: Desmontando colmenas ($Reason): $($before -join ', ')."
+            # Tambien detenerse si la funcion emite errores no terminantes o False.
+            $ErrorActionPreference = 'Stop'
+            $result = @(Unmount-Hives)
+            if (@($result | Where-Object { $_ -is [bool] -and -not $_ }).Count) { throw 'Unmount-Hives devolvio False.' }
+        } catch { $failure = $_.Exception.Message }
+        try { $remaining = @(Get-AppxMountedHivePaths) }
+        catch { $failure = "No se pudo verificar el estado de las colmenas: $($_.Exception.Message). $failure" }
+        if ($failure -or $remaining.Count) {
+            $names = if ($remaining.Count) { $remaining -join ', ' }
+                     elseif ($before.Count) { 'Comprobadas al iniciar: ' + ($before -join ', ') }
+                     else { 'Estado no verificable' }
+            $message = "Desmontaje fallido ($Reason). Colmenas pendientes/afectadas: $names. $failure"
+            $script:appxBatchBlocked = $true; $script:appxBlockReason = $message
+            Write-Log -LogLevel ERROR -Message "AppxInjector: $message"
+            throw (New-Object InvalidOperationException($message))
+        }
+    }
+
 
     function Remove-AppxDeprovisionedMarks ([string[]]$FamilyNames, [switch]$StopOnFailure) {
         $families = @($FamilyNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
         if ($families.Count -eq 0) { return 0 }
+        foreach ($family in $families) {
+            if ($family -notmatch '^[^_]+_[0-9a-hjkmnp-tv-z]{13}$') {
+                throw "Se requiere la familia completa (nombre + hash de editor): $family."
+            }
+        }
 
         $mountedHere = $false
         if (-not (Mount-Hives)) {
@@ -344,11 +485,12 @@ function Show-AppxInjector-GUI {
 
             foreach ($family in $families) {
                 $matches = @(Get-ChildItem -Path $deprovPath -ErrorAction $readErrorAction |
-                    Where-Object { $_.PSChildName -like "$family*" })
+                    Where-Object { $_.PSChildName -ieq $family })
 
                 foreach ($key in $matches) {
                     try {
-                        Remove-Item -Path $key.PSPath -Recurse -Force -ErrorAction Stop
+                        Remove-Item -LiteralPath $key.PSPath -Recurse -Force -ErrorAction Stop
+                        $script:appxDeprovisionedFamilies.Remove($key.PSChildName)
                         $removed++
                         Write-Log -LogLevel INFO -Message "AppxInjector: Marca Deprovisioned eliminada: $($key.PSChildName)"
                     } catch {
@@ -582,28 +724,73 @@ function Show-AppxInjector-GUI {
         }
     }
 
+    function Resolve-AppxLicensePath {
+        param([object[]]$Files, $Meta)
+
+        $familyName = [string]$Meta.PackageFamilyName
+        if ([string]::IsNullOrWhiteSpace($familyName)) { return $null }
+        # En un bundle neutral, la preferencia corresponde a la imagen. Un
+        # paquete individual (incluidas librerias x86 en x64) conserva su arq.
+        $preferredArch = [string]$Meta.Arch
+        if ([string]::IsNullOrWhiteSpace($preferredArch) -or $preferredArch -ieq 'neutral') {
+            $preferredArch = [string]$script:imgArch
+        }
+        if ($preferredArch -ieq 'amd64') { $preferredArch = 'x64' }
+
+        $candidates = @()
+        foreach ($file in @($Files | Where-Object { $_.Extension -ieq '.xml' })) {
+            $reader = $null
+            try {
+                $settings = New-Object System.Xml.XmlReaderSettings
+                $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+                $settings.XmlResolver = $null
+                $reader = [System.Xml.XmlReader]::Create($file.FullName, $settings)
+                $xml = New-Object System.Xml.XmlDocument
+                $xml.XmlResolver = $null
+                $xml.Load($reader)
+                # No confundir AppxManifest.xml u otros XML con una licencia.
+                if ($xml.DocumentElement.LocalName -cne 'License') { continue }
+                $identities = @($xml.SelectNodes("//*[local-name()='PFM' or local-name()='PackageFamilyName']") |
+                    ForEach-Object { $_.InnerText.Trim() } | Where-Object { $_ })
+                if ($identities.Count -eq 0) {
+                    Write-Log -LogLevel WARN -Message "AppxInjector: Licencia omitida '$($file.Name)': no declara PFM ni PackageFamilyName; el nombre del archivo no acredita la familia."
+                    continue
+                }
+                # PFM suele estar en minusculas. Todos los campos de identidad
+                # presentes deben coincidir con la familia completa del paquete.
+                if (@($identities | Where-Object { $_ -ine $familyName }).Count -gt 0) { continue }
+
+                $licenseArch = ''
+                $archMatch = [regex]::Match($file.BaseName, '(?i)(?:^|[._-])(?<arch>arm64|arm|x64|amd64|x86|neutral)(?:[._-]licen[cs]e)?$')
+                if ($archMatch.Success) { $licenseArch = $archMatch.Groups['arch'].Value.ToLowerInvariant() }
+                if ($licenseArch -eq 'amd64') { $licenseArch = 'x64' }
+                $rank = if ($licenseArch -and $licenseArch -ieq $preferredArch) { 0 }
+                        elseif (-not $licenseArch -or $licenseArch -eq 'neutral') { 1 }
+                        else { 2 }
+                $candidates += [pscustomobject]@{ Path = $file.FullName; Name = $file.Name; Arch = $licenseArch; Rank = $rank }
+            } catch {
+                Write-Log -LogLevel WARN -Message "AppxInjector: XML omitido al buscar licencia '$($file.Name)': $($_.Exception.Message)"
+            } finally {
+                if ($null -ne $reader) { $reader.Dispose() }
+            }
+        }
+
+        if ($candidates.Count -eq 0) { return $null }
+        $selected = $candidates | Sort-Object Rank, Name, Path | Select-Object -First 1
+        if ($selected.Rank -eq 2) {
+            # La arquitectura en el nombre es una preferencia, no un campo de
+            # licencia verificado. La correspondencia se establece por PFM.
+            Write-Log -LogLevel WARN -Message "AppxInjector: '$familyName' no tiene XML con sufijo '$preferredArch' ni generico; se usa '$($selected.Name)' por coincidencia exacta de familia. El sufijo '$($selected.Arch)' no acredita una restriccion de licencia."
+        }
+        Write-Log -LogLevel INFO -Message "AppxInjector: Licencia asociada a '$familyName': '$($selected.Name)' (preferencia: $preferredArch)."
+        return $selected.Path
+    }
+
+
     # Agrega un paquete analizado al ListView con accion heuristica (INSTALAR/ACTUALIZAR/REPARAR/OMITIR)
     function Add-UwpToQueue ($MainPkg, $Meta, [array]$Deps, $LicensePath) {
-        $action = "INSTALAR"
-        $color  = [System.Drawing.Color]::Yellow
-        $isDeprovisioned = $false
-
-        try { $isDeprovisioned = $script:appxDeprovisionedFamilies.ContainsKey($Meta.Family) } catch {}
-
-        try {
-            $fileVerObj = $Meta.Version
-            if ($null -eq $fileVerObj) { $fileVerObj = [version]$Meta.VersionStr }
-
-            if ($script:appCache.ContainsKey($Meta.Family)) {
-                if ($fileVerObj -gt $script:appCache[$Meta.Family]) {
-                    $action = "ACTUALIZAR"; $color = [System.Drawing.Color]::Cyan
-                } elseif ($isDeprovisioned) {
-                    $action = "REPARAR"; $color = [System.Drawing.Color]::Orange
-                } else {
-                    $action = "OMITIR (Ya existe)"; $color = [System.Drawing.Color]::Gray
-                }
-            }
-        } catch {}
+        $action = Get-AppxQueueAction $Meta
+        $color = Get-AppxActionColor $action
 
         $newVersion = $Meta.Version
         if ($null -eq $newVersion) { try { $newVersion = [version]$Meta.VersionStr } catch { $newVersion = [version]"0.0.0.0" } }
@@ -614,7 +801,7 @@ function Show-AppxInjector-GUI {
 
             if ($existing.MainPackage -ieq $MainPkg.FullName) { return }
 
-            $sameIdentity = ($existing.Family -ieq $Meta.Family -and
+            $sameIdentity = ($Meta.PackageFamilyName -and $existing.PackageFamilyName -ieq $Meta.PackageFamilyName -and
                              $existing.Arch   -ieq $Meta.Arch   -and
                              $existing.Type   -ieq $Meta.Type)
 
@@ -634,6 +821,8 @@ function Show-AppxInjector-GUI {
             Dependencies = @($Deps | Select-Object -Unique)
             LicensePath  = $LicensePath
             Family       = $Meta.Family
+            PackageFamilyName = $Meta.PackageFamilyName
+            IdentityError = $Meta.IdentityError
             Version      = $newVersion
             VersionStr   = $Meta.VersionStr
             Arch         = $Meta.Arch
@@ -649,6 +838,7 @@ function Show-AppxInjector-GUI {
         $newItem.SubItems.Add($appData.Dependencies.Count.ToString()) | Out-Null
         $newItem.SubItems.Add($MainPkg.FullName)                      | Out-Null
         $newItem.Tag = $appData
+        if ($action -eq 'ERROR IDENTIDAD') { $newItem.ToolTipText = $Meta.IdentityError }
 
         $lvAppQueue.Items.Add($newItem) | Out-Null
     }
@@ -685,7 +875,10 @@ function Show-AppxInjector-GUI {
                     @{ Expression = { $_.Length }; Descending = $true } | Select-Object -First 1)
             }
 
-            $grouped = $fileList | Group-Object { (Get-CachedMeta $_).Family }
+            $grouped = $fileList | Group-Object {
+                $pfn = (Get-CachedMeta $_).PackageFamilyName
+                if ($pfn) { $pfn } else { $_.FullName }
+            }
 
             foreach ($group in $grouped) {
                 $familyFiles = $group.Group
@@ -710,10 +903,8 @@ function Show-AppxInjector-GUI {
                     foreach ($archGroup in $archGroups) {
                         $bestFw    = Select-BestUwpFile @($archGroup.Group)
                         $fwMeta    = Get-CachedMeta $bestFw
-                        $fwLicPath = $null
-                        $fwLicFile = Get-ChildItem -Path $bestFw.DirectoryName -Filter "*license*.xml" -File -ErrorAction SilentlyContinue |
-                                     Select-Object -First 1
-                        if ($fwLicFile) { $fwLicPath = $fwLicFile.FullName }
+                        $fwFiles = @(Get-ChildItem -LiteralPath $bestFw.DirectoryName -File -ErrorAction SilentlyContinue)
+                        $fwLicPath = Resolve-AppxLicensePath -Files $fwFiles -Meta $fwMeta
                         Add-UwpToQueue -MainPkg $bestFw -Meta $fwMeta -Deps @() -LicensePath $fwLicPath
                     }
                 } else {
@@ -867,23 +1058,7 @@ function Show-AppxInjector-GUI {
                             ForEach-Object { $_.Path })
                     }
 
-                    $licPath = $null
-                    $licFile = $dirFiles |
-                        Where-Object { $_.Name -match "(?i)license" -and $_.Extension -eq ".xml" } |
-                        Select-Object -First 1
-
-                    if (-not $licFile) {
-                        $msmgLicenses = @($dirFiles |
-                            Where-Object { $_.Name.StartsWith($realMeta.Family) -and $_.Extension -eq ".xml" })
-                        if ($msmgLicenses.Count -gt 0) {
-                            $licFile = switch ($script:imgArch) {
-                                "x64"   { $msmgLicenses | Where-Object { $_.Name -notmatch "\.arm\." } | Select-Object -First 1 }
-                                "x86"   { $msmgLicenses | Where-Object { $_.Name -notmatch "\.x64\.|\.arm\." } | Select-Object -First 1 }
-                                default { $msmgLicenses | Select-Object -First 1 }
-                            }
-                        }
-                    }
-                    if ($licFile) { $licPath = $licFile.FullName }
+                    $licPath = Resolve-AppxLicensePath -Files $dirFiles -Meta $realMeta
 
                     Add-UwpToQueue -MainPkg $mainPkg -Meta $realMeta -Deps $validatedDeps -LicensePath $licPath
                 }
@@ -902,7 +1077,7 @@ function Show-AppxInjector-GUI {
             $lvAppQueue.EndUpdate()
             $lblStatus.Text      = "Analisis completado. En cola: $($lvAppQueue.Items.Count) elemento(s)."
             $lblStatus.ForeColor = [System.Drawing.Color]::White
-            if ($lvAppQueue.Items.Count -gt 0) { $btnApply.Enabled = $true }
+            Update-AppxQueueActions
         }
     }
 
@@ -912,78 +1087,88 @@ function Show-AppxInjector-GUI {
 
     # Carga inicial: leer cache Appx, montar hives, detectar OS/arch
     $form.Add_Shown({
-        $form.Cursor    = [System.Windows.Forms.Cursors]::WaitCursor
-        $lblStatus.Text = "Leyendo cache Appx via DISM (Puede tardar 15-30 seg. La ventana no respondera)..."
-        $form.Refresh()
-        [System.Windows.Forms.Application]::DoEvents()
-
-        # 1. Leer Appx PRIMERO (sin colmenas montadas para evitar colision de archivos)
+        $script:isAppxPreparing = $true
+        foreach ($control in @($btnApply,$btnAddApp,$btnAddFolder,$btnRemoveApp,$btnClear,$chkUpdateAppx)) { $control.Enabled = $false }
         try {
-            $installed = Get-AppxProvisionedPackage -Path $Script:MOUNT_DIR -ErrorAction Stop
-            foreach ($app in $installed) {
-                # FIX ALTO 1: Usar PackageName truncado para emparejar con el Family Name real
-                $pkgNameWithoutVersion = ($app.PackageName -split '_')[0]
-                try { $script:appCache[$pkgNameWithoutVersion] = [version]$app.Version } catch {}
-            }
-            $cacheMsg   = "$($script:appCache.Count) apps en cache"
-            $cacheColor = [System.Drawing.Color]::LightGreen
-        } catch {
-            $cacheMsg   = "Cache no disponible"
-            $cacheColor = [System.Drawing.Color]::Salmon
-            Write-Log -LogLevel WARN -Message "AppxInjector: Fallo al leer cache - $($_.Exception.Message)"
-        }
+            $form.Cursor    = [System.Windows.Forms.Cursors]::WaitCursor
+            $lblStatus.Text = "Leyendo cache Appx via DISM (Puede tardar 15-30 seg. La ventana no respondera)..."
+            $form.Refresh()
+            [System.Windows.Forms.Application]::DoEvents()
 
-        # 2. Montar colmenas para el resto de operaciones
-        $lblStatus.Text = "Montando colmenas del registro..."
-        $form.Refresh()
-        [System.Windows.Forms.Application]::DoEvents()
-
-        if (-not (Mount-Hives)) {
-            $lblStatus.Text      = "Error fatal: No se pudieron montar las colmenas."
-            $lblStatus.ForeColor = [System.Drawing.Color]::Red
-            $form.Cursor         = [System.Windows.Forms.Cursors]::Default
-            return
-        }
-
-        # 3. Detectar arquitectura de la imagen
-        if      (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysArm32"))    { $script:imgArch = "arm64" }
-        elseif (-not (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysWOW64"))) { $script:imgArch = "x86" }
-        else    { $script:imgArch = "x64" }
-
-        # 4. Leer build del OS desde el registro offline
-        $regCurVer = "HKLM:\OfflineSoftware\Microsoft\Windows NT\CurrentVersion"
-        if (Test-Path $regCurVer) {
+            # 1. Leer Appx PRIMERO (sin colmenas montadas para evitar colision de archivos)
             try {
-                $vd = Get-ItemProperty -Path $regCurVer -ErrorAction SilentlyContinue
-                if ($null -ne $vd.CurrentBuildNumber) { $script:imgBuild = [int]$vd.CurrentBuildNumber }
-            } catch {}
-        }
-
-        try {
-            $script:appxDeprovisionedFamilies = Get-AppxDeprovisionedMap
-            if ($script:appxDeprovisionedFamilies.Count -gt 0) {
-                Write-Log -LogLevel INFO -Message "AppxInjector: $($script:appxDeprovisionedFamilies.Count) marca(s) Deprovisioned detectada(s)."
+                Update-AppxInstalledCache
+                $cacheMsg   = "$($script:appCache.Count) apps en cache"
+                $cacheColor = [System.Drawing.Color]::LightGreen
+            } catch {
+                if ($script:appxBatchBlocked) { throw }
+                $cacheMsg   = "Cache no disponible"
+                $cacheColor = [System.Drawing.Color]::Salmon
+                Write-Log -LogLevel WARN -Message "AppxInjector: Fallo al leer cache - $($_.Exception.Message)"
             }
+
+            # 2. Montar colmenas para el resto de operaciones
+            $lblStatus.Text = "Montando colmenas del registro..."
+            $form.Refresh()
+            [System.Windows.Forms.Application]::DoEvents()
+
+            if (-not (Mount-Hives)) {
+                $lblStatus.Text      = "Error fatal: No se pudieron montar las colmenas."
+                $lblStatus.ForeColor = [System.Drawing.Color]::Red
+                $form.Cursor         = [System.Windows.Forms.Cursors]::Default
+                return
+            }
+
+            # 3. Detectar arquitectura de la imagen
+            if      (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysArm32"))    { $script:imgArch = "arm64" }
+            elseif (-not (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysWOW64"))) { $script:imgArch = "x86" }
+            else    { $script:imgArch = "x64" }
+
+            # 4. Leer build del OS desde el registro offline
+            $regCurVer = "HKLM:\OfflineSoftware\Microsoft\Windows NT\CurrentVersion"
+            if (Test-Path $regCurVer) {
+                try {
+                    $vd = Get-ItemProperty -Path $regCurVer -ErrorAction SilentlyContinue
+                    if ($null -ne $vd.CurrentBuildNumber) { $script:imgBuild = [int]$vd.CurrentBuildNumber }
+                } catch {}
+            }
+
+            try {
+                $script:appxDeprovisionedFamilies = Get-AppxDeprovisionedMap
+                if ($script:appxDeprovisionedFamilies.Count -gt 0) {
+                    Write-Log -LogLevel INFO -Message "AppxInjector: $($script:appxDeprovisionedFamilies.Count) marca(s) Deprovisioned detectada(s)."
+                }
+            } catch {
+                $script:appxDeprovisionedFamilies = @{}
+                Write-Log -LogLevel WARN -Message "AppxInjector: No se pudo leer Deprovisioned - $($_.Exception.Message)"
+            }
+
+            # Importante: no dejar colmenas montadas mientras la GUI queda abierta.
+            # Esto evita que el cierre tarde varios segundos o que DISM encuentre handles abiertos.
+            Invoke-AppxSafeUnmount -Reason "lectura inicial de build/deprovisioned"
+
+            $osLabel = if     ($script:imgBuild -ge 26100) { "W11 24H2+" }
+                       elseif ($script:imgBuild -ge 22621) { "W11 22H2/23H2" }
+                       elseif ($script:imgBuild -ge 22000) { "W11 21H2" }
+                       elseif ($script:imgBuild -ge 19041) { "W10 22H2" }
+                       else                                { "Build $($script:imgBuild)" }
+
+            # 5. Actualizar UI
+            $lblOsInfo.Text      = "Imagen: $osLabel | Arquitectura: $($script:imgArch) | Build: $($script:imgBuild)"
+            $lblStatus.Text      = "Motor Listo | OS: $osLabel | Arch: $($script:imgArch) | $cacheMsg"
+            $lblStatus.ForeColor = $cacheColor
+            $form.Cursor         = [System.Windows.Forms.Cursors]::Default
         } catch {
-            $script:appxDeprovisionedFamilies = @{}
-            Write-Log -LogLevel WARN -Message "AppxInjector: No se pudo leer Deprovisioned - $($_.Exception.Message)"
+            Block-AppxBatch $_.Exception.Message
+            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,'Inicializacion detenida','OK','Error') | Out-Null
+        } finally {
+            try { Invoke-AppxSafeUnmount 'fin de inicializacion' }
+            catch { Block-AppxBatch $_.Exception.Message }
+            $script:isAppxPreparing = $false
+            foreach ($control in @($btnAddApp,$btnAddFolder,$btnRemoveApp,$btnClear,$chkUpdateAppx)) { $control.Enabled = -not $script:appxBatchBlocked }
+            $form.Cursor = [Windows.Forms.Cursors]::Default
+            Update-AppxQueueActions
         }
-
-        # Importante: no dejar colmenas montadas mientras la GUI queda abierta.
-        # Esto evita que el cierre tarde varios segundos o que DISM encuentre handles abiertos.
-        Invoke-AppxSafeUnmount -Reason "lectura inicial de build/deprovisioned"
-
-        $osLabel = if     ($script:imgBuild -ge 26100) { "W11 24H2+" }
-                   elseif ($script:imgBuild -ge 22621) { "W11 22H2/23H2" }
-                   elseif ($script:imgBuild -ge 22000) { "W11 21H2" }
-                   elseif ($script:imgBuild -ge 19041) { "W10 22H2" }
-                   else                                { "Build $($script:imgBuild)" }
-
-        # 5. Actualizar UI
-        $lblOsInfo.Text      = "Imagen: $osLabel | Arquitectura: $($script:imgArch) | Build: $($script:imgBuild)"
-        $lblStatus.Text      = "Motor Listo | OS: $osLabel | Arch: $($script:imgArch) | $cacheMsg"
-        $lblStatus.ForeColor = $cacheColor
-        $form.Cursor         = [System.Windows.Forms.Cursors]::Default
     })
 
     # Agregar archivos sueltos
@@ -1046,9 +1231,27 @@ function Show-AppxInjector-GUI {
         Write-Log -LogLevel WARN -Message "AppxInjector: Cancelacion segura solicitada por el usuario."
     })
 
+    $chkUpdateAppx.Add_CheckedChanged({ Update-AppxQueueActions })
+
     # Motor de despliegue inteligente
     $btnApply.Add_Click({
-        $pendingItems = @($lvAppQueue.Items | Where-Object { $_.Text -notmatch "OMITIR|INSTALADO|ERROR|REPARADO" })
+        if ($script:appxBatchBlocked -or $script:isAppxPreparing -or $script:isAppxDeploying) { return }
+        $script:isAppxPreparing = $true
+        foreach ($control in @($btnApply,$btnAddApp,$btnAddFolder,$btnRemoveApp,$btnClear,$chkUpdateAppx)) { $control.Enabled = $false }
+        try {
+            # Revalidar la decision justo antes del despliegue.
+            Update-AppxInstalledCache
+            Update-AppxQueueActions
+        } catch {
+            Block-AppxBatch $_.Exception.Message
+            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,'Lote detenido','OK','Error') | Out-Null
+            return
+        } finally {
+            $script:isAppxPreparing = $false
+            foreach ($control in @($btnAddApp,$btnAddFolder,$btnRemoveApp,$btnClear,$chkUpdateAppx)) { $control.Enabled = -not $script:appxBatchBlocked }
+            Update-AppxQueueActions
+        }
+        $pendingItems = @($lvAppQueue.Items | Where-Object { $_.Text -in @('INSTALAR','ACTUALIZAR','REPARAR','REPARACION PENDIENTE') })
 
         if ($pendingItems.Count -eq 0) {
             [System.Windows.Forms.MessageBox]::Show(
@@ -1069,6 +1272,7 @@ function Show-AppxInjector-GUI {
         $btnRemoveApp.Enabled     = $false 
         $btnClear.Enabled             = $false
         $btnCancelAfterCurrent.Enabled = $true
+        $chkUpdateAppx.Enabled = $false
         $lblStatus.ForeColor          = [System.Drawing.Color]::Yellow
 
         $total   = $pendingItems.Count
@@ -1132,6 +1336,8 @@ function Show-AppxInjector-GUI {
                     break
                 }
 
+                # Fuera del catch por paquete: un fallo detiene todo el lote.
+                Invoke-AppxSafeUnmount 'antes del siguiente paquete'
                 $appData    = $item.Tag
                 $familyName = $item.SubItems[2].Text
 
@@ -1143,19 +1349,20 @@ function Show-AppxInjector-GUI {
                     $form.Refresh()
                     try {
                         # Completar la reparacion de este objeto antes de avanzar al siguiente.
-                        $cleanedRepair = Remove-AppxDeprovisionedMarks -FamilyNames @($familyName) -StopOnFailure
+                        $cleanedRepair = Remove-AppxDeprovisionedMarks -FamilyNames @($appData.PackageFamilyName) -StopOnFailure
                         $item.Text      = "REPARADO"
                         $item.ForeColor = [System.Drawing.Color]::LightGreen
                         $success++
                         Write-Log -LogLevel INFO -Message "AppxInjector: Reparacion completada [$familyName]; marcas limpiadas: $cleanedRepair"
                     } catch {
+                        if ($script:appxBatchBlocked) { throw }
                         $item.Text      = "ERROR REPARACION"
                         $item.ForeColor = [System.Drawing.Color]::Red
                         $errors++
                         Write-Log -LogLevel ERROR -Message "AppxInjector: Fallo reparando [$familyName] - $($_.Exception.Message)"
                     } finally {
                         # Contar el objeto solo despues de terminar su procesamiento.
-                        $count++
+                        if (-not $script:appxBatchBlocked) { $count++ }
                         $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
                         $form.Refresh()
                         [System.Windows.Forms.Application]::DoEvents()
@@ -1206,6 +1413,7 @@ function Show-AppxInjector-GUI {
                     $argLine += " /LogPath:`"$dismLogPath`" /LogLevel:3"
                     $dismSucceeded = $false
 
+                    Invoke-AppxSafeUnmount 'inmediatamente antes de DISM'
                     $script:currentDismProcess = Start-Process "dism.exe" `
                         -ArgumentList $argLine -WindowStyle Hidden -PassThru
 
@@ -1222,7 +1430,7 @@ function Show-AppxInjector-GUI {
                         $item.ForeColor = [System.Drawing.Color]::LightGreen
                         $success++
                         $dismSucceeded = $true
-                        $successFamilies += $familyName
+                        $successFamilies += $appData.PackageFamilyName
                         Write-Log -LogLevel INFO -Message "AppxInjector: OK [$familyName] (ExitCode: $exitCode)"
                     } else {
                         $hexCode = [Convert]::ToString([int32]$exitCode, 16).ToUpper().PadLeft(8, '0')
@@ -1240,6 +1448,7 @@ function Show-AppxInjector-GUI {
                     }
 
                 } catch {
+                    if ($script:appxBatchBlocked) { throw }
                     $item.Text      = "ERROR CRITICO"
                     $item.ForeColor = [System.Drawing.Color]::Red
                     $errors++
@@ -1256,7 +1465,7 @@ function Show-AppxInjector-GUI {
                         }
                     }
                     # Contar el objeto solo despues de terminar su procesamiento.
-                    $count++
+                    if (-not $script:appxBatchBlocked) { $count++ }
                     $progressBar.Value = [Math]::Min($count, $progressBar.Maximum)
                     $form.Refresh()
                     [System.Windows.Forms.Application]::DoEvents()
@@ -1273,15 +1482,12 @@ function Show-AppxInjector-GUI {
                 }
             }
 
-            # 7. Actualizar cache post-despliegue
-            try {
-                $script:appCache.Clear()
-                $installed = Get-AppxProvisionedPackage -Path $Script:MOUNT_DIR -ErrorAction SilentlyContinue
-                foreach ($app in $installed) {
-                    $pkgNameWithoutVersion = ($app.PackageName -split '_')[0]
-                    try { $script:appCache[$pkgNameWithoutVersion] = [version]$app.Version } catch {}
-                }
-            } catch {}
+            # 7. Actualizar cache post-despliegue por familia completa.
+            try { Update-AppxInstalledCache }
+            catch {
+                if ($script:appxBatchBlocked) { throw }
+                Write-Log -LogLevel WARN -Message "AppxInjector: No se pudo refrescar la cache: $($_.Exception.Message)"
+            }
 
             $cancelText = if ($cancelled) { " | Cancelado por usuario" } else { "" }
             $lblStatus.Text      = "Completado. Exitos: $success | Errores: $errors | Omitidos: $skipped$cancelText"
@@ -1297,16 +1503,20 @@ function Show-AppxInjector-GUI {
             }
             [System.Windows.Forms.MessageBox]::Show($form, $msg, "Reporte de Despliegue", 'OK', 'Information')
 
+        } catch {
+            Block-AppxBatch $_.Exception.Message
+            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,'Lote detenido','OK','Error') | Out-Null
         } finally {
             $script:isAppxDeploying        = $false
             $script:currentDismProcess     = $null
             $script:cancelAppxAfterCurrent = $false
             $progressBar.Visible           = $false
-            $btnApply.Enabled              = $true
-            $btnAddApp.Enabled             = $true
-            $btnAddFolder.Enabled          = $true
-            $btnRemoveApp.Enabled          = $true
-            $btnClear.Enabled              = $true
+            $btnApply.Enabled              = -not $script:appxBatchBlocked
+            $chkUpdateAppx.Enabled         = -not $script:appxBatchBlocked
+            $btnAddApp.Enabled             = -not $script:appxBatchBlocked
+            $btnAddFolder.Enabled          = -not $script:appxBatchBlocked
+            $btnRemoveApp.Enabled          = -not $script:appxBatchBlocked
+            $btnClear.Enabled              = -not $script:appxBatchBlocked
             $btnCancelAfterCurrent.Enabled = $false
         }
     })
@@ -1315,14 +1525,15 @@ function Show-AppxInjector-GUI {
     # Cierre de la Interfaz: Solo interacciones visuales ligeras
     # ------------------------------------------------------------------
     $form.Add_FormClosing({
-        if ($script:isAppxDeploying) {
+        param($sender, $eventArgs)
+        if ($script:isAppxDeploying -or $script:isAppxPreparing) {
             [System.Windows.Forms.MessageBox]::Show(
                 $form,
                 "La inyeccion de aplicaciones esta en curso.`nEspera a que termine o usa 'Cancelar despues del actual'.",
                 "Operacion Critica en Curso",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Warning)
-            $_.Cancel = $true
+            $eventArgs.Cancel = $true
             return
         }
 
@@ -1335,14 +1546,19 @@ function Show-AppxInjector-GUI {
         )
 
         if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) {
-            $_.Cancel = $true
+            $eventArgs.Cancel = $true
             return
         }
+        $script:isAppxPreparing = $true
+        try { Invoke-AppxSafeUnmount 'cierre de AppxInjector' }
+        catch {
+            $eventArgs.Cancel = $true
+            Block-AppxBatch $_.Exception.Message
+            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,'Colmenas bloqueadas','OK','Error') | Out-Null
+        } finally { $script:isAppxPreparing = $false }
     })
 
     $form.Add_FormClosed({
-        Invoke-AppxSafeUnmount -Reason "cierre final AppxInjector"
-
         if ($null -ne $lvAppQueue -and -not $lvAppQueue.IsDisposed) {
             $lvAppQueue.Dispose()
         }

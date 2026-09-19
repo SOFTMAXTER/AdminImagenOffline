@@ -46,6 +46,253 @@
 # =============================================
 #  FUNCIONES DE ACCION (Montaje/Desmontaje)
 # =============================================
+# Consultas DISM: conservar por separado el texto y el codigo de salida.
+# /English hace que el analisis no dependa del idioma del Windows anfitrion.
+function Invoke-AIOMountDismQuery {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $global:LASTEXITCODE = $null
+    $lines = @(& dism.exe @Arguments /English 2>&1 | ForEach-Object { $_.ToString() })
+    $exitCode = $global:LASTEXITCODE
+    if ($null -eq $exitCode) { throw 'No se pudo ejecutar dism.exe.' }
+    [pscustomobject]@{ ExitCode = [int]$exitCode; Lines = $lines }
+}
+
+function ConvertTo-AIOMountPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    $value = $Path.Trim()
+    if ($value.StartsWith('\\?\UNC\', [StringComparison]::OrdinalIgnoreCase)) {
+        $value = '\\' + $value.Substring(8)
+    } elseif ($value.StartsWith('\\?\')) {
+        $value = $value.Substring(4)
+    }
+    return [IO.Path]::GetFullPath($value).Replace('/', '\').TrimEnd('\')
+}
+
+function ConvertFrom-AIOMountedImageInfo {
+    param([AllowEmptyCollection()][string[]]$Lines)
+    $entry = $null
+    foreach ($line in $Lines) {
+        if ($line -match '^\s*Mount Dir\s*:\s*(.+?)\s*$') {
+            if ($null -ne $entry) { [pscustomobject]$entry }
+            $entry = [ordered]@{ MountDir = $matches[1]; ImageFile = ''; ImageIndex = 0; ReadWrite = ''; Status = '' }
+        } elseif ($null -ne $entry) {
+            if ($line -match '^\s*Image File\s*:\s*(.+?)\s*$') { $entry.ImageFile = $matches[1] }
+            elseif ($line -match '^\s*Image Index\s*:\s*(\d+)\s*$') { $entry.ImageIndex = [int]$matches[1] }
+            elseif ($line -match '^\s*Mounted Read/Write\s*:\s*(.+?)\s*$') { $entry.ReadWrite = $matches[1] }
+            elseif ($line -match '^\s*Status\s*:\s*(.+?)\s*$') { $entry.Status = $matches[1] }
+        }
+    }
+    if ($null -ne $entry) { [pscustomobject]$entry }
+}
+
+function Get-AIOMountedImages {
+    $query = Invoke-AIOMountDismQuery -Arguments @('/Get-MountedImageInfo')
+    if ($query.ExitCode -ne 0) {
+        throw "No se pudo consultar los montajes de DISM (codigo $($query.ExitCode)).`n$($query.Lines -join [Environment]::NewLine)"
+    }
+    ConvertFrom-AIOMountedImageInfo -Lines $query.Lines
+}
+
+function Get-AIOMountForPath {
+    param([AllowEmptyCollection()][object[]]$Mounts, [string]$Path)
+    $target = ConvertTo-AIOMountPath -Path $Path
+    if (-not $target) { return }
+    $found = @($Mounts | Where-Object { (ConvertTo-AIOMountPath -Path $_.MountDir) -eq $target })
+    if ($found.Count -gt 1) { throw "DISM devolvio varios registros para '$Path'. Revisa el estado antes de continuar." }
+    if ($found.Count -eq 1) { return $found[0] }
+}
+
+function Get-AIOWimIndexes {
+    param([Parameter(Mandatory = $true)][string]$ImagePath)
+    if (-not (Test-Path -LiteralPath $ImagePath -PathType Leaf)) { throw "No existe el archivo WIM: $ImagePath" }
+    $query = Invoke-AIOMountDismQuery -Arguments @('/Get-WimInfo', "/WimFile:$ImagePath")
+    # La lista es salida de pantalla, nunca el valor de retorno del menu.
+    $query.Lines | Out-Host
+    if ($query.ExitCode -ne 0) { throw "DISM no pudo leer el WIM (codigo $($query.ExitCode)). Revisa el detalle mostrado arriba y dism.log." }
+    $indexes = @($query.Lines | ForEach-Object {
+        if ($_ -match '^\s*Index\s*:\s*(\d+)\s*$') { [int]$matches[1] }
+    } | Sort-Object -Unique)
+    if ($indexes.Count -eq 0) { throw 'DISM no devolvio indices del WIM. No se solicitara un indice ni se intentara montar.' }
+    return $indexes
+}
+
+function Assert-AIOMountDirectoryAvailable {
+    param([Parameter(Mandatory = $true)][string]$MountPath)
+    $fullPath = [IO.Path]::GetFullPath($MountPath)
+    if ((ConvertTo-AIOMountPath $fullPath) -eq (ConvertTo-AIOMountPath ([IO.Path]::GetPathRoot($fullPath)))) {
+        throw 'La raiz de una unidad no puede usarse como carpeta de montaje.'
+    }
+    # Si falla la consulta, no se asume que la carpeta esta libre.
+    $mounts = @(Get-AIOMountedImages)
+    $registered = Get-AIOMountForPath -Mounts $mounts -Path $fullPath
+    if ($null -ne $registered) { throw "La carpeta ya esta registrada en DISM (estado: $($registered.Status)). Recupera o desmonta esa sesion antes de montar otra imagen." }
+
+    if (Test-Path -LiteralPath $fullPath) {
+        $directory = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
+        if (-not $directory.PSIsContainer -or ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'El punto de montaje debe ser una carpeta real, no un archivo ni un enlace.'
+        }
+        if ($null -ne (Get-ChildItem -LiteralPath $fullPath -Force -ErrorAction Stop | Select-Object -First 1)) {
+            throw "El directorio de montaje no esta vacio: $fullPath. Selecciona una carpeta vacia en Configuracion de Rutas. No se eliminaron archivos."
+        }
+    } else {
+        New-Item -Path $fullPath -ItemType Directory -ErrorAction Stop | Out-Null
+    }
+}
+
+function ConvertFrom-AIOSkippedMountLog {
+    param([AllowEmptyString()][string]$Text)
+    $entry = $null
+    foreach ($line in ($Text -split '\r?\n')) {
+        if ($line -match 'Skipping invalid mounted image at:') {
+            $entry = [ordered]@{ MountDir = ''; ImageFile = ''; ImageIndex = 0; ReadWrite = 'Unknown'; Status = 'Invalid'; Origin = 'Log DISM' }
+        } elseif ($null -ne $entry) {
+            if ($line -match '^\s*MountDir:\s*\[(.*)\]\s*$') { $entry.MountDir = $matches[1] }
+            elseif ($line -match '^\s*WimPath:\s*\[(.*)\]\s*$') { $entry.ImageFile = $matches[1] }
+            elseif ($line -match '^\s*Index:\s*\[(\d+)\]\s*$') { $entry.ImageIndex = [int]$matches[1] }
+            elseif ($line -match '^\s*Mount Flags:') {
+                if ($entry.MountDir -and $entry.ImageFile -and $entry.ImageIndex -gt 0) { [pscustomobject]$entry }
+                $entry = $null
+            } elseif ($line -match '^\d{4}-\d{2}-\d{2}\s') { $entry = $null }
+        }
+    }
+}
+
+function Get-AIOMountSnapshot {
+    param([Parameter(Mandatory = $true)][string]$LogPath)
+    $query = Invoke-AIOMountDismQuery -Arguments @('/Get-MountedImageInfo', "/LogPath:$LogPath")
+    if ($query.ExitCode -ne 0) { throw "Fallo el inventario DISM (codigo $($query.ExitCode)): $($query.Lines -join ' ')" }
+    $entries = @(ConvertFrom-AIOMountedImageInfo -Lines $query.Lines)
+    $logRead = $false; $logComplete = $false
+    if (Test-Path -LiteralPath $LogPath -PathType Leaf) {
+        $logText = Get-Content -LiteralPath $LogPath -Raw -ErrorAction Stop
+        $logRead = $true
+        $skippedEntries = @(ConvertFrom-AIOSkippedMountLog -Text $logText)
+        $markers = [regex]::Matches([string]$logText, 'Skipping invalid mounted image at:', [Text.RegularExpressions.RegexOptions]::IgnoreCase).Count
+        $logComplete = -not [string]::IsNullOrWhiteSpace($logText) -and $markers -eq $skippedEntries.Count
+        foreach ($skipped in $skippedEntries) {
+            if ($null -eq (Get-AIOMountForPath -Mounts $entries -Path $skipped.MountDir)) { $entries += $skipped }
+        }
+    }
+    [pscustomobject]@{ Mounts = $entries; LogRead = $logRead; LogComplete = $logComplete; LogPath = $LogPath; Output = $query.Lines }
+}
+
+function Compare-AIOMountSnapshots {
+    param([AllowEmptyCollection()][object[]]$Before, [AllowEmptyCollection()][object[]]$After)
+    $gone = @(); $changed = @()
+    foreach ($entry in $Before) {
+        $current = Get-AIOMountForPath -Mounts $After -Path $entry.MountDir
+        $sameImage = $null -ne $current -and $current.ImageIndex -eq $entry.ImageIndex -and
+                     (ConvertTo-AIOMountPath $current.ImageFile) -eq (ConvertTo-AIOMountPath $entry.ImageFile)
+        if (-not $sameImage) { $gone += $entry }
+        if ($entry.Status -in @('OK', 'Needs Remount') -and
+            (-not $sameImage -or $current.Status -ne $entry.Status -or $current.ReadWrite -ne $entry.ReadWrite)) {
+            $changed += $entry
+        }
+    }
+    [pscustomobject]@{
+        NoLongerListed = $gone
+        ProtectedChanged = $changed
+        Pending = @($After | Where-Object { $_.Status -ne 'OK' })
+    }
+}
+
+function Repair-InvalidMounts {
+    # Elegir [8] autoriza la limpieza global de DISM. No se descartan sesiones.
+    $report = [ordered]@{
+        StartedUtc = [DateTime]::UtcNow.ToString('o'); FinishedUtc = $null
+        Status = 'NoEjecutada'; CleanupExitCode = $null; Error = $null
+        Before = @(); After = @(); Comparison = $null; BeforeLogRead = $false; AfterLogRead = $false; BeforeLogComplete = $false; AfterLogComplete = $false
+    }
+    $reportDir = $null
+    try {
+        $root = if ($script:logDir) { $script:logDir } else { Join-Path (Split-Path -Parent $PSScriptRoot) 'Logs' }
+        $reportDir = Join-Path $root ('Montajes_' + (Get-Date -Format 'yyyyMMdd_HHmmss') + '_' + [guid]::NewGuid().ToString('N'))
+        New-Item -Path $reportDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        Write-Host "`n[1/3] Consultando montajes y avisos de DISM..." -ForegroundColor Yellow
+        $before = Get-AIOMountSnapshot -LogPath (Join-Path $reportDir 'Antes.log')
+        $report.Before = @($before.Mounts); $report.BeforeLogRead = $before.LogRead; $report.BeforeLogComplete = $before.LogComplete
+        $before.Mounts | Format-Table MountDir, ImageFile, ImageIndex, Status -AutoSize | Out-Host
+        if (-not $before.LogComplete) { Write-Warning 'El log no se pudo comprobar por completo; puede haber montajes omitidos del inventario.' }
+
+        Write-Host '[2/3] Limpiando recursos corruptos no recuperables del equipo...' -ForegroundColor Yellow
+        Write-Host 'DISM conserva montajes validos y recuperables. No se ejecuta Discard.' -ForegroundColor Gray
+        Write-Log -LogLevel ACTION -Message "MountRepair: Cleanup-Mountpoints. Diagnostico: $reportDir"
+        $global:LASTEXITCODE = $null
+        $PSNativeCommandUseErrorActionPreference = $false
+        $cleanupOutput = New-Object 'System.Collections.Generic.List[string]'
+        & dism.exe /Cleanup-Mountpoints /English "/LogPath:$(Join-Path $reportDir 'Limpieza.log')" 2>&1 | ForEach-Object {
+            $line = $_.ToString(); [void]$cleanupOutput.Add($line); Write-Host $line
+        }
+        $report.CleanupExitCode = $global:LASTEXITCODE
+        $cleanupOutput | Set-Content -LiteralPath (Join-Path $reportDir 'Salida_Limpieza.txt') -Encoding UTF8 -ErrorAction Stop
+        if ($null -eq $report.CleanupExitCode) { throw 'No se pudo ejecutar dism.exe. No se dispone de un codigo de salida.' }
+        if ($report.CleanupExitCode -ne 0) { throw "La limpieza fallo (codigo $($report.CleanupExitCode)). Se conserva el estado de la sesion." }
+
+        Write-Host '[3/3] Verificando el resultado...' -ForegroundColor Yellow
+        $report.Status = 'VerificacionPendiente'
+        $after = Get-AIOMountSnapshot -LogPath (Join-Path $reportDir 'Despues.log')
+        $report.After = @($after.Mounts); $report.AfterLogRead = $after.LogRead; $report.AfterLogComplete = $after.LogComplete
+        $comparison = Compare-AIOMountSnapshots -Before $before.Mounts -After $after.Mounts
+        $report.Comparison = $comparison
+        $current = Get-AIOMountForPath -Mounts $after.Mounts -Path $Script:MOUNT_DIR
+        $oldCurrent = Get-AIOMountForPath -Mounts $before.Mounts -Path $Script:MOUNT_DIR
+        $selectedChanged = @($comparison.ProtectedChanged | Where-Object {
+            (ConvertTo-AIOMountPath $_.MountDir) -eq (ConvertTo-AIOMountPath $Script:MOUNT_DIR)
+        }).Count -gt 0
+        if ($Script:IMAGE_MOUNTED -eq 1 -and $selectedChanged) {
+            # Conservar archivo/indice para diagnostico, pero bloquear nuevas ediciones
+            # sobre una sesion que desaparecio o fue sustituida por otro proceso.
+            $Script:IMAGE_MOUNTED = 0; $Script:CachedControlSet = $null
+            $Script:AIODashboardCache = $null; $Script:ForceMenuRefresh = $false
+            Write-Warning 'La sesion seleccionada cambio durante la limpieza. Se deshabilito su edicion; se conservan la ruta y el indice para revisarlos.'
+        } elseif ($Script:IMAGE_MOUNTED -eq 1 -and $null -eq $current -and $after.LogComplete -and
+            ($null -eq $oldCurrent -or $oldCurrent.Status -eq 'Invalid')) {
+            $Script:IMAGE_MOUNTED = 0; $Script:WIM_FILE_PATH = $null; $Script:MOUNTED_INDEX = $null
+            $Script:CachedControlSet = $null
+            $Script:AIODashboardCache = $null; $Script:ForceMenuRefresh = $false
+        }
+        $report.Status = 'Completada'
+        if ($comparison.Pending.Count -gt 0 -or $comparison.ProtectedChanged.Count -gt 0 -or -not $before.LogComplete -or -not $after.LogComplete) {
+            $report.Status = 'RequiereRevision'
+            Write-Warning 'DISM termino, pero quedan registros pendientes, cambios en montajes protegidos o una verificacion parcial. Revisa el informe.'
+        } else {
+            Write-Host '[OK] Limpieza completada; inventario y log comprobados.' -ForegroundColor Green
+        }
+        Write-Host ("Registros anteriores que ya no aparecen: {0}. Pendientes: {1}." -f $comparison.NoLongerListed.Count, $comparison.Pending.Count)
+        if ($comparison.ProtectedChanged.Count -gt 0) {
+            Write-Warning 'Un montaje valido o recuperable cambio durante la operacion. Puede haber actividad de otro proceso; su ausencia no se presenta como una limpieza correcta.'
+        }
+        $after.Mounts | Format-Table MountDir, ImageFile, ImageIndex, ReadWrite, Status -AutoSize | Out-Host
+        foreach ($pending in $comparison.Pending) {
+            if ($pending.Status -eq 'Needs Remount') {
+                Write-Host ("Recuperable: {0}. Requiere Remount-Image sobre esa ruta." -f $pending.MountDir) -ForegroundColor Yellow
+            } else {
+                Write-Host ("Pendiente: {0} ({1}). Consulta Despues.log." -f $pending.MountDir, $pending.Status) -ForegroundColor Yellow
+            }
+        }
+    } catch {
+        $report.Error = $_.Exception.Message
+        if ($report.Status -ne 'VerificacionPendiente') { $report.Status = 'Fallida' }
+        Write-Warning $report.Error
+        Write-Log -LogLevel ERROR -Message "MountRepair: $($report.Status): $($report.Error)"
+    } finally {
+        $report.FinishedUtc = [DateTime]::UtcNow.ToString('o')
+        if ($reportDir) {
+            try {
+                $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $reportDir 'Informe.json') -Encoding UTF8 -ErrorAction Stop
+                Write-Host "Diagnostico guardado en: $reportDir" -ForegroundColor Gray
+                Write-Log -LogLevel INFO -Message "MountRepair: Resultado $($report.Status). Informe: $reportDir"
+            } catch { Write-Warning "No se pudo guardar el informe: $($_.Exception.Message)" }
+        }
+    }
+}
+
+
 function Select-WindowsMediaSource {
 	param(
         [string]$ExtractDir = ""
@@ -174,7 +421,7 @@ function Mount-Image {
     Clear-Host
     Write-Log -LogLevel INFO -Message "MountManager: Iniciando solicitud de montaje de imagen."
 
-    if ($Script:IMAGE_MOUNTED -eq 1) {
+    if ($Script:IMAGE_MOUNTED -gt 0) {
         Write-Log -LogLevel WARN -Message "MountManager: Operacion cancelada. Ya existe una imagen montada en el entorno."
         Write-Warning "La imagen ya se encuentra montada."
         Pause; return
@@ -344,6 +591,7 @@ function Mount-Image {
             $Script:IMAGE_MOUNTED = 2         # Estado 2 = VHD
             $Script:MOUNTED_INDEX = $selectedPart.PartitionNumber
             $Script:CachedControlSet = $null
+            $Script:ForceMenuRefresh = $true
             
             Write-Host "[OK] VHD Montado en: $Script:MOUNT_DIR" -ForegroundColor Green
             Write-Log -LogLevel INFO -Message "MountManager: VHD Montado y vinculado exitosamente. Entorno local redireccionado a $Script:MOUNT_DIR"
@@ -360,24 +608,35 @@ function Mount-Image {
     # =======================================================
     #  MODO WIM (DISM)
     # =======================================================
+    if ($extension -ne '.WIM') {
+        Write-Warning 'Selecciona un archivo .wim, .vhd o .vhdx. Convierte un .esd a WIM antes de montarlo.'
+        Pause; return
+    }
     Write-Host "`n[+] Leyendo estructura del WIM..." -ForegroundColor Yellow
-    Write-Log -LogLevel INFO -Message "MountManager: Consultando a DISM la estructura de indices del archivo WIM."
-    dism /get-wiminfo /wimfile:"$Script:WIM_FILE_PATH" /English
+    Write-Log -LogLevel INFO -Message "MountManager: Consultando indices de '$Script:WIM_FILE_PATH'."
+    try {
+        $availableIndexes = @(Get-AIOWimIndexes -ImagePath $Script:WIM_FILE_PATH)
+    } catch {
+        Write-Warning $_.Exception.Message
+        Write-Log -LogLevel ERROR -Message "MountManager: No se puede seleccionar un indice: $($_.Exception.Message)"
+        Pause; return
+    }
 
-    $INDEX = Read-Host "`nNumero de indice a montar"
-    Write-Log -LogLevel INFO -Message "MountManager: Indice seleccionado por el usuario -> [$INDEX]"
-    
-    # Limpieza proactiva de carpeta corrupta
-    if ((Get-ChildItem $Script:MOUNT_DIR -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0) {
-        Write-Log -LogLevel WARN -Message "MountManager: Se detectaron archivos residuales en la carpeta de montaje ($Script:MOUNT_DIR)."
-        Write-Warning "El directorio de montaje no esta vacio ($Script:MOUNT_DIR)."
-        if ((Read-Host "Limpiar carpeta? (S/N)") -match 'S') {
-            Write-Log -LogLevel INFO -Message "MountManager: Ejecutando limpieza forzada (DISM /cleanup-wim y eliminacion recursiva) en la carpeta de montaje."
-            dism /cleanup-wim
-            Remove-Item "$Script:MOUNT_DIR\*" -Recurse -Force -ErrorAction SilentlyContinue
-        } else {
-            Write-Log -LogLevel INFO -Message "MountManager: El usuario declino limpiar la carpeta. Continuando asumiendo riesgo de montaje sobre directorio no vacio."
-        }
+    while ($true) {
+        $selection = (Read-Host "`nNumero de indice a montar (V = Volver)").Trim()
+        if ($selection -eq 'V') { return }
+        $INDEX = 0
+        if ([int]::TryParse($selection, [ref]$INDEX) -and $INDEX -gt 0 -and $INDEX -in $availableIndexes) { break }
+        Write-Warning "Indice no valido. Elige uno de los indices mostrados: $($availableIndexes -join ', ')."
+    }
+    Write-Log -LogLevel INFO -Message "MountManager: Indice validado -> [$INDEX]"
+
+    try {
+        Assert-AIOMountDirectoryAvailable -MountPath $Script:MOUNT_DIR
+    } catch {
+        Write-Warning $_.Exception.Message
+        Write-Log -LogLevel WARN -Message "MountManager: Montaje cancelado: $($_.Exception.Message)"
+        Pause; return
     }
 
     Write-Host "[+] Montando (Indice: $INDEX)..." -ForegroundColor Yellow
@@ -389,11 +648,14 @@ function Mount-Image {
         $Script:IMAGE_MOUNTED = 1
         $Script:MOUNTED_INDEX = $INDEX
         $Script:CachedControlSet = $null
+        $Script:ForceMenuRefresh = $true
         Write-Host "[OK] Imagen montada." -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "MountManager: Montaje WIM completado exitosamente. Entorno listo para personalizacion."
     } else {
         Write-Host "[ERROR] Fallo montaje (Code: $LASTEXITCODE)."
-        if (([uint32]$LASTEXITCODE).ToString("X8") -match "C1420116|C1420117") {
+        # DISM puede devolver HRESULT con signo; el cast directo a uint32 lanza otra excepcion.
+        $exitCodeHex = ([int64]$LASTEXITCODE -band 0xFFFFFFFFL).ToString("X8")
+        if ($exitCodeHex -match "C1420116|C1420117") {
             Write-Warning "Posible bloqueo de archivos. Reinicia o ejecuta Limpieza."
             Write-Log -LogLevel ERROR -Message "MountManager: Fallo montaje WIM. Codigo DISM ($LASTEXITCODE) indica directorio no vacio o error de acceso (C1420116/C1420117)."
         } else {
@@ -456,6 +718,8 @@ function Unmount-Image {
             
             $Script:IMAGE_MOUNTED = 0
             $Script:WIM_FILE_PATH = $null
+            $Script:AIODashboardCache = $null
+            $Script:ForceMenuRefresh = $false
             Load-Config
 			$Script:CachedControlSet = $null
 			$Script:OfflineUserClassesPresent = $null
@@ -517,6 +781,8 @@ function Unmount-Image {
         $Script:MOUNTED_INDEX = $null
 		$Script:CachedControlSet = $null
         $Script:OfflineUserClassesPresent = $null
+        $Script:AIODashboardCache = $null
+        $Script:ForceMenuRefresh = $false
 
 		Write-Host "[OK] Imagen desmontada correctamente." -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "UnmountManager: Operacion WIM completada exitosamente. Entorno local limpio."
@@ -578,6 +844,10 @@ function Reload-Image {
         return
     }
 
+    # La sesion anterior ya termino, aunque el nuevo montaje use la misma ruta.
+    $Script:AIODashboardCache = $null
+    $Script:ForceMenuRefresh = $false
+
     Write-Host "[+] Remontando imagen..." -ForegroundColor Yellow
     Write-Log -LogLevel INFO -Message "ImageReloader: Imagen desmontada. Ejecutando DISM /Mount-Wim para restaurar el estado original."
     dism /mount-wim /wimfile:"$Script:WIM_FILE_PATH" /index:$Script:MOUNTED_INDEX /mountdir:"$Script:MOUNT_DIR"
@@ -587,6 +857,7 @@ function Reload-Image {
         Write-Log -LogLevel INFO -Message "ImageReloader: Recarga completada exitosamente. El entorno esta listo para seguir trabajando."
         $Script:IMAGE_MOUNTED = 1
 		$Script:CachedControlSet = $null
+        $Script:ForceMenuRefresh = $true
     } else {
         Write-Host "[ERROR] Error al remontar la imagen."
         Write-Log -LogLevel ERROR -Message "ImageReloader: Fallo critico al remontar la imagen. El entorno ha quedado desmontado. LASTEXITCODE: $LASTEXITCODE"

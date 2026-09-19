@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.4
+    1.5.6
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.5"
+$script:Version = "1.5.6"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -589,36 +589,16 @@ function Ensure-WorkingDirectories {
 }
 
 function Initialize-ScratchSpace {
-    Write-Log -LogLevel INFO -Message "MANTENIMIENTO: Inicializando espacio Scratch..."
-    
-    if (Test-Path $Script:Scratch_DIR) {
-        # Intentamos limpiar contenido anterior
-        try {
-            $junkFiles = Get-ChildItem -Path $Script:Scratch_DIR -Recurse -Force -ErrorAction SilentlyContinue
-            if ($junkFiles) {
-                Write-Host "Limpiando archivos temporales antiguos en Scratch..." -ForegroundColor DarkGray
-                
-                # Usamos Remove-Item con Force y Recurse. 
-                # SilentlyContinue es vital porque algunos archivos pueden estar bloqueados por el sistema (inofensivo).
-                $junkFiles | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-                
-                Write-Log -LogLevel ACTION -Message "Scratch_DIR limpiado preventivamente."
-            }
+    # Crear el espacio si falta. Nunca recorrer ni borrar su contenido al iniciar:
+    # puede albergar montajes pendientes que DISM omite por ser invalidos.
+    try {
+        if (-not (Test-Path -LiteralPath $Script:Scratch_DIR -PathType Container)) {
+            New-Item -Path $Script:Scratch_DIR -ItemType Directory -ErrorAction Stop | Out-Null
         }
-        catch {
-            Write-Log -LogLevel WARN -Message "No se pudo realizar limpieza profunda del Scratch. (Puede estar en uso)"
-        }
-    }
-    else {
-        # Si no existe, la creamos (Logica original mejorada)
-        try {
-            New-Item -Path $Script:Scratch_DIR -ItemType Directory -Force | Out-Null
-            Write-Log -LogLevel INFO -Message "Scratch_DIR creado: $Script:Scratch_DIR"
-        }
-        catch {
-            Write-Host "No se pudo crear el directorio Scratch. Verifica permisos."
-            Write-Log -LogLevel ERROR -Message "Fallo al crear Scratch_DIR: $_"
-        }
+        Write-Log -LogLevel INFO -Message "Scratch_DIR disponible. Se conserva el contenido existente: '$Script:Scratch_DIR'."
+    } catch {
+        Write-Warning "No se pudo preparar Scratch_DIR: $($_.Exception.Message)"
+        Write-Log -LogLevel ERROR -Message "Fallo al preparar Scratch_DIR: $($_.Exception.Message)"
     }
 }
 
@@ -715,6 +695,7 @@ $Script:IMAGE_MOUNTED = 0
 $Script:MOUNTED_INDEX = $null
 $Script:CachedControlSet = $null
 $Script:OfflineUserClassesPresent = $null
+$Script:AIODashboardCache = $null
 $Script:ForceMenuRefresh = $false
 $Script:GlobalPrivilegesEnabled = $false
 
@@ -983,6 +964,9 @@ function Mount-Save-Menu {
             Write-Host "       (Descarga la imagen. Cambios no guardados se pierden!)" -ForegroundColor Gray
             Write-Host ""
         }
+        Write-Host "   [L] Limpiar montajes invalidos de DISM" -ForegroundColor Yellow
+        Write-Host "       (Recursos corruptos no recuperables)" -ForegroundColor Gray
+        Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
         Write-Host "   [V] Volver al menu anterior" -ForegroundColor Red
@@ -1001,7 +985,7 @@ function Mount-Save-Menu {
                 Mount-Image
                 if ($Script:IMAGE_MOUNTED -gt 0) {
                     Write-Log -LogLevel INFO -Message "MenuMountSave: Montaje exitoso detectado. Redirigiendo directamente al Main-Menu."
-                    return $true
+                    return
                 }
             }
             "2" {
@@ -1009,7 +993,7 @@ function Mount-Save-Menu {
                 Reload-Image
                 if ($Script:IMAGE_MOUNTED -gt 0) {
                     Write-Log -LogLevel INFO -Message "MenuMountSave: Recarga exitosa detectada. Redirigiendo directamente al Main-Menu."
-                    return $true
+                    return
                 }
             }
             "3" {
@@ -1031,6 +1015,10 @@ function Mount-Save-Menu {
             "7" {
                 Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Unmount-Image' (Descartar todos los cambios y desmontar la imagen actual)."
                 Unmount-Image
+            }
+            "L" {
+                Repair-InvalidMounts
+                Pause
             }
             "V" {
                 return
@@ -1146,8 +1134,9 @@ function Image-Management-Menu {
         switch ($opcionIM.ToUpper()) {
             "1" {
                 Write-Log -LogLevel INFO -Message "MenuImageMgmt: Accediendo a 'Mount-Save-Menu' (Ciclo de vida de montaje/guardado)."
-                $volverAlMain = Mount-Save-Menu
-                if ($volverAlMain) { return }
+                # Invocacion directa: la salida de DISM debe llegar a la consola.
+                Mount-Save-Menu
+                if ($Script:IMAGE_MOUNTED -gt 0) { return }
             }
             "2" {
                 Write-Log -LogLevel INFO -Message "MenuImageMgmt: Accediendo a 'Show-WimMetadata-GUI' (Edicion de Metadatos XML)."
@@ -1369,7 +1358,8 @@ function Cambio-Edicion-Menu {
     Write-Log -LogLevel ACTION -Message "CAMBIO_EDICION: Cambiando edicion de '$DISPLAY_EDITION' a '$selectedEdition'."
 
     dism /Image:$Script:MOUNT_DIR /Set-Edition:$selectedEdition
-    if ($LASTEXITCODE -eq 0) {
+    if ($LASTEXITCODE -in @(0, 3010)) {
+        $Script:ForceMenuRefresh = $true
         Write-Host "[OK] Proceso de cambio de edicion finalizado." -ForegroundColor Green
     } else {
         Write-Host "[ERROR] Fallo el cambio de edicion (Codigo: $LASTEXITCODE)."
@@ -1667,6 +1657,7 @@ function Limpieza-Menu {
             Write-Log -LogLevel INFO -Message "LIMPIEZA: DISM /RestoreHealth exitoso."
         }
 
+        if ($exitCode -in @(0, 3010)) { $Script:ForceMenuRefresh = $true }
         if (-not $IsSequence) { Pause }
     }
 	
@@ -1728,6 +1719,7 @@ function Limpieza-Menu {
 
                 SFC /scannow /offbootdir="$sfcBoot" /offwindir="$sfcWin"
                 if ($LASTEXITCODE -ne 0) { Write-Warning "SFC encontro errores o no pudo completar."}
+                else { $Script:ForceMenuRefresh = $true }
                 Pause
             }
             "5" {
@@ -1807,6 +1799,8 @@ function Limpieza-Menu {
                 $sfcWin = Join-Path -Path $Script:MOUNT_DIR -ChildPath "Windows"
                 SFC /scannow /offbootdir="$sfcBoot" /offwindir="$sfcWin"
 
+                if ($LASTEXITCODE -eq 0) { $Script:ForceMenuRefresh = $true }
+
                 # --- PASO 5 ---
                 Write-Host "`n[5/5] Analizando/Limpiando componentes..." -ForegroundColor Yellow
                 $cleanupRecommended = "No"
@@ -1871,14 +1865,30 @@ function Import-OfflineReg {
         return $null
     }
 
-    function Write-RegHexValue {
-        param([Microsoft.Win32.RegistryKey]$Key, [string]$Name, [string]$TypeCode, [string]$HexData)
+    function ConvertFrom-RegHexData {
+        param([string]$HexData, [string]$TypeCode)
         $hexClean = $HexData.Trim() -replace '\s', ''
+        if ($hexClean -notmatch '^(?:[0-9a-fA-F]{1,2}(?:,[0-9a-fA-F]{1,2})*,?)?$') {
+            throw 'Datos hexadecimales invalidos: se esperaban bytes separados por comas.'
+        }
         $byteList = [System.Collections.Generic.List[byte]]::new()
         if ($hexClean -ne '') {
             foreach ($seg in ($hexClean -split ',')) { if ($seg -ne '') { $byteList.Add([Convert]::ToByte($seg, 16)) } }
         }
         $bytes = $byteList.ToArray()
+        if ($TypeCode -in @('1', '2', '7') -and ($bytes.Length % 2) -ne 0) {
+            throw 'Cadena UTF-16 incompleta: la cantidad de bytes debe ser par.'
+        }
+        if (($TypeCode -eq '4' -and $bytes.Length -ne 4) -or
+            ($TypeCode -eq 'b' -and $bytes.Length -ne 8)) {
+            throw "Longitud invalida para hex($TypeCode): $($bytes.Length) bytes."
+        }
+        return ,$bytes
+    }
+
+    function Write-RegHexValue {
+        param([Microsoft.Win32.RegistryKey]$Key, [string]$Name, [string]$TypeCode, [string]$HexData)
+        $bytes = ConvertFrom-RegHexData -HexData $HexData -TypeCode $TypeCode
 
         $targetKind = switch ($TypeCode) {
             '2' { [Microsoft.Win32.RegistryValueKind]::ExpandString }
@@ -1919,6 +1929,7 @@ function Import-OfflineReg {
     $SHIELDED = '(?i)^(?:HKEY_LOCAL_MACHINE|HKLM)\\(?:COMPONENTS|TK_COMPONENTS|SECURITY|TK_SECURITY|SAM|TK_SAM)'
     $rxHeader = [regex]::new('^\[-?(?:HKEY_LOCAL_MACHINE|HKEY_CURRENT_USER|HKEY_CLASSES_ROOT|HKEY_USERS|HKLM|HKCU|HKCR|HKU)\\', 'Compiled,IgnoreCase')
     $rxValue  = [regex]::new('^(@|"(?:[^"\\]|\\.)*")\s*=', 'Compiled')
+    $rxHexFragment = [regex]::new('^(?:[0-9a-f]{1,2}\s*(?:,\s*[0-9a-f]{1,2}\s*)*,?\s*)?$', 'Compiled,IgnoreCase')
 
     $controlSet = Get-OfflineControlSet
     $hive       = [Microsoft.Win32.Registry]::LocalMachine
@@ -1932,6 +1943,7 @@ function Import-OfflineReg {
     $keysWritten       = 0
     $valuesWritten     = 0
     $errors            = 0
+    $parseErrors       = 0
 
     $reader    = $null
     $memStream = $null
@@ -1964,17 +1976,27 @@ function Import-OfflineReg {
                 $trimmed = $trimmed.TrimStart([char]0xFEFF)
                 if ($trimmed -match '(?i)^Windows\s+Registry\s+Editor') { continue }
             }
-            if ([string]::IsNullOrEmpty($trimmed)) { continue }
+            if ([string]::IsNullOrEmpty($trimmed) -or $trimmed.StartsWith(';')) { continue }
 
             if ($null -ne $hexPending) {
-                $hexPending.Data += $trimmed.TrimEnd('\')
-                if ($trimmed.EndsWith('\')) { continue }
+                $hasContinuation = $trimmed.EndsWith('\')
+                $fragment = if ($hasContinuation) { $trimmed.Substring(0, $trimmed.Length - 1).TrimEnd() } else { $trimmed }
+                if (-not $rxHexFragment.IsMatch($fragment) -or
+                    [string]::IsNullOrEmpty($fragment) -or
+                    ($hasContinuation -and -not $fragment.EndsWith(','))) {
+                    # Una nueva asignacion o cabecera no forma parte del valor anterior.
+                    # Reprocesar esta misma linea permite informar cada valor truncado.
+                    Write-Log -LogLevel WARN -Message "Import-OfflineReg: Linea $($hexPending.LineNumber), valor '$($hexPending.Name)' en '$currentKeyPath': continuacion hexadecimal incompleta o invalida antes de la linea $lineCount."
+                    $parseErrors++
+                    $hexPending = $null
+                } else {
+                    $hexPending.Data += $fragment
+                    if ($hasContinuation) { continue }
 
-                if (-not $skipSection -and $null -ne $currentKeyPath) {
-                    $groupedOps[$currentKeyPath].Add([PSCustomObject]@{ Action = 'SetHex'; Name = $hexPending.Name; TypeCode = $hexPending.TypeCode; Data = $hexPending.Data })
+                    $groupedOps[$currentKeyPath].Add([PSCustomObject]@{ Action = 'SetHex'; Name = $hexPending.Name; TypeCode = $hexPending.TypeCode; Data = $hexPending.Data; LineNumber = $hexPending.LineNumber })
+                    $hexPending = $null
+                    continue
                 }
-                $hexPending = $null
-                continue
             }
 
             if ($lineCount % 1000 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
@@ -2024,13 +2046,44 @@ function Import-OfflineReg {
                 $groupedOps[$currentKeyPath].Add([PSCustomObject]@{ Action = 'SetString'; Name = $valueName; Data = $str })
             } elseif ($rhs -match '^hex(?:\(([0-9a-fA-F]*)\))?:(.*)$') {
                 $typeCode = $matches[1]
-                $hexFrag  = $matches[2].TrimEnd('\')
-                if ($rhs.TrimEnd().EndsWith('\')) {
-                    $hexPending = [PSCustomObject]@{ Name = $valueName; TypeCode = $typeCode; Data = $hexFrag }
+                $hexFrag  = $matches[2].TrimEnd()
+                if ($hexFrag.EndsWith('\')) {
+                    $hexFrag = $hexFrag.Substring(0, $hexFrag.Length - 1).TrimEnd()
+                    # hex:\ puede dejar todos los bytes para la linea siguiente.
+                    # La coma solo es obligatoria si ya hay bytes en este fragmento.
+                    if (-not $rxHexFragment.IsMatch($hexFrag) -or
+                        ($hexFrag.Length -gt 0 -and -not $hexFrag.EndsWith(','))) {
+                        Write-Log -LogLevel WARN -Message "Import-OfflineReg: Linea $lineCount, valor '$valueName' en '$currentKeyPath': fragmento hexadecimal invalido; los bytes antes de una continuacion deben terminar en coma."
+                        $parseErrors++
+                    } else {
+                        $hexPending = [PSCustomObject]@{ Name = $valueName; TypeCode = $typeCode; Data = $hexFrag; LineNumber = $lineCount }
+                    }
                 } else {
-                    $groupedOps[$currentKeyPath].Add([PSCustomObject]@{ Action = 'SetHex'; Name = $valueName; TypeCode = $typeCode; Data = $hexFrag })
+                    $groupedOps[$currentKeyPath].Add([PSCustomObject]@{ Action = 'SetHex'; Name = $valueName; TypeCode = $typeCode; Data = $hexFrag; LineNumber = $lineCount })
                 }
             }
+        }
+
+        if ($null -ne $hexPending) {
+            Write-Log -LogLevel WARN -Message "Import-OfflineReg: Linea $($hexPending.LineNumber), valor '$($hexPending.Name)' en '$currentKeyPath': continuacion hexadecimal incompleta al final del archivo."
+            $parseErrors++
+        }
+
+        # Validar todos los bytes antes de desbloquear claves o modificar el registro.
+        # Un archivo malformado se rechaza completo; no queda importado parcialmente.
+        foreach ($kp in $groupedOps.Keys) {
+            foreach ($op in $groupedOps[$kp]) {
+                if ($op.Action -ne 'SetHex') { continue }
+                try {
+                    ConvertFrom-RegHexData -HexData $op.Data -TypeCode $op.TypeCode | Out-Null
+                } catch {
+                    Write-Log -LogLevel WARN -Message "Import-OfflineReg: Linea $($op.LineNumber), valor '$($op.Name)' en '$kp': $($_.Exception.Message)"
+                    $parseErrors++
+                }
+            }
+        }
+        if ($parseErrors -gt 0) {
+            throw "Import-OfflineReg: $parseErrors errores de formato. Archivo rechazado antes de escribir claves o valores. Revisa las lineas indicadas en el log."
         }
     } catch {
         Write-Log -LogLevel ERROR -Message "Import-OfflineReg (Fase 1): Fallo parseo en '$logSource' - $($_.Exception.Message)"
@@ -2095,6 +2148,13 @@ function Import-OfflineReg {
                                 }
                             }
                         }
+                    }
+                    # Solo las escrituras en los metadatos del SO invalidan el
+                    # panel; los ajustes de otras claves conservan su cache.
+                    $dashboardKey = 'OfflineSoftware\Microsoft\Windows NT\CurrentVersion'
+                    if (($kp -eq $dashboardKey -and $op.Action -ne 'CreateKey') -or
+                        ($op.Action -eq 'DeleteKey' -and $dashboardKey.StartsWith($kp + '\', [StringComparison]::OrdinalIgnoreCase))) {
+                        $Script:ForceMenuRefresh = $true
                     }
                 } catch {
                     Write-Log -LogLevel WARN -Message "Import-OfflineReg: Fallo '$($op.Action)' -> '$($op.Name)' en '$kp' - $($_.Exception.Message)"
@@ -2974,73 +3034,61 @@ function Get-OfflineControlSet {
 
 # Funcion auxiliar de Check y Reparacion Montaje
 function Check-And-Repair-Mounts {
-    Write-Host "Verificando consistencia del entorno WIM..." -ForegroundColor DarkGray
-    
-    # 1. Obtener informacion de DISM
-    $dismInfo = dism /Get-MountedImageInfo 2>$null
-    
-    # 2. Detectar si nuestra carpeta de montaje esta en estado "Needs Remount" o "Invalid"
-    # Esto ocurre si apagaste el PC sin desmontar.
-    $needsRemount = $dismInfo | Select-String -Pattern "Status : Needs Remount|Estado : Necesita volverse a montar|Status : Invalid|Estado : No v.lido"
-    
-    # 3. Detectar si la carpeta existe pero DISM no dice nada (Mount Fantasma)
-    $ghostMount = $false
-    if (Test-Path $Script:MOUNT_DIR) {
-        try { $null = Get-ChildItem -Path $Script:MOUNT_DIR -ErrorAction Stop } catch { $ghostMount = $true }
+    Write-Host 'Verificando consistencia del entorno WIM...' -ForegroundColor DarkGray
+    if ($Script:IMAGE_MOUNTED -eq 2) { return }
+    try {
+        $mounts = @(Get-AIOMountedImages)
+        $current = Get-AIOMountForPath -Mounts $mounts -Path $Script:MOUNT_DIR
+    } catch {
+        Write-Warning $_.Exception.Message
+        Write-Log -LogLevel WARN -Message "MountRepair: No se pudo consultar DISM: $($_.Exception.Message)"
+        return
     }
 
-    if ($needsRemount -or $ghostMount) {
-        [System.Console]::Beep(500, 300)
-        Add-Type -AssemblyName System.Windows.Forms
-        
-        # MENSAJE ESTILO DISM++ (Reparar sesion existente)
-        $msgResult = [System.Windows.Forms.MessageBox]::Show(
-            "La imagen montada en '$($Script:MOUNT_DIR)' parece estar danada (posible cierre inesperado).`n`nQuieres intentar RECUPERAR la sesion (Remount-Image)?`n`n[Si] = Intentar reconectar y salvar cambios.`n[No] = Eliminar punto de montaje (Cleanup-Wim).", 
-            "Recuperacion de Imagen", 
-            [System.Windows.Forms.MessageBoxButtons]::YesNoCancel, 
-            [System.Windows.Forms.MessageBoxIcon]::Warning
-        )
+    # Un montaje de otra herramienta no representa el estado de MOUNT_DIR.
+    if ($null -eq $current) { return }
+    if ($current.Status -eq 'OK') { return }
+    if ($current.Status -notin @('Needs Remount', 'Invalid')) {
+        Write-Warning "Estado de montaje no reconocido en '$Script:MOUNT_DIR': $($current.Status)"
+        return
+    }
 
-        if ($msgResult -eq 'Yes') {
-            Clear-Host
-            Write-Host ">>> INTENTANDO RECUPERAR SESION (Remount-Image)..." -ForegroundColor Yellow
-            
-            # Intento de Remount
-            dism /Remount-Image /MountDir:"$Script:MOUNT_DIR"
-            
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[EXITO] Imagen recuperada." -ForegroundColor Green
-                $Script:IMAGE_MOUNTED = 1
-                
-                # Intentamos re-leer que imagen es para actualizar las variables del script
-                try {
-                    $info = dism /Get-MountedImageInfo
-                    $wimLine = $info | Select-String -Pattern "Image File|Archivo de imagen" | Select -First 1
-                    if ($wimLine) { 
-                        $rawLine = $wimLine.Line
-                        $colonIdx = $rawLine.IndexOf(':')
-                        if ($colonIdx -ge 0) {
-                            $Script:WIM_FILE_PATH = $rawLine.Substring($colonIdx + 1).Trim()
-                            if ($Script:WIM_FILE_PATH.StartsWith("\\?\")) { $Script:WIM_FILE_PATH = $Script:WIM_FILE_PATH.Substring(4) }
-                        }
-                    }
-                    $idxLine = $info | Select-String -Pattern "Image Index|ndice de imagen" | Select -First 1
-                    if ($idxLine) { $Script:MOUNTED_INDEX = ($idxLine.Line -split ':', 2)[1].Trim() }
-                } catch {}
+    $msgResult = [System.Windows.Forms.MessageBox]::Show(
+        "DISM informa '$($current.Status)' en '$Script:MOUNT_DIR'.`n`n[Si] = Reconectar esta sesion para recuperar sus cambios (Remount-Image).`n[No] = Limpiar recursos corruptos no recuperables del equipo (Cleanup-Mountpoints). DISM conserva montajes validos y recuperables.`n[Cancelar] = Dejar el estado actual.",
+        'Recuperacion de Imagen', 'YesNoCancel', 'Warning'
+    )
+    if ($msgResult -eq 'No') {
+        Repair-InvalidMounts
+        return
+    }
+    if ($msgResult -ne 'Yes') { return }
 
-                [System.Windows.Forms.MessageBox]::Show("Imagen recuperada correctamente.", "Exito", 'OK', 'Information')
-            } else {
-                Write-Host "Fallo la recuperacion (Codigo: $LASTEXITCODE)."
-                [System.Windows.Forms.MessageBox]::Show("No se pudo recuperar la sesion. Se recomienda limpiar.", "Error", 'OK', 'Error')
-            }
+    Write-Host '>>> INTENTANDO RECUPERAR SESION (Remount-Image)...' -ForegroundColor Yellow
+    & dism.exe /Remount-Image "/MountDir:$Script:MOUNT_DIR" /English | Out-Host
+    $remountCode = $LASTEXITCODE
+    if ($remountCode -ne 0) {
+        Write-Warning "No se pudo recuperar la sesion (codigo $remountCode). Los cambios no se han descartado."
+        Write-Log -LogLevel ERROR -Message "MountRepair: Remount-Image fallo en '$Script:MOUNT_DIR': $remountCode"
+        return
+    }
+    try {
+        $updated = Get-AIOMountForPath -Mounts @(Get-AIOMountedImages) -Path $Script:MOUNT_DIR
+        if ($null -eq $updated -or $updated.Status -ne 'OK' -or -not (Test-Path -LiteralPath $updated.MountDir -PathType Container)) {
+            throw 'DISM finalizo, pero el punto solicitado todavia no figura como OK y accesible.'
         }
-        elseif ($msgResult -eq 'No') {
-            Write-Host ">>> LIMPIANDO PUNTO DE MONTAJE (Cleanup-Wim)..." -ForegroundColor Red
-            Unmount-Hives
-            dism /Cleanup-Wim
-            $Script:IMAGE_MOUNTED = 0
-            [System.Windows.Forms.MessageBox]::Show("Limpieza completada. Debes montar la imagen de nuevo.", "Limpieza", 'OK', 'Information')
+        if ($updated.ReadWrite -ne 'Yes' -or [string]::IsNullOrWhiteSpace($updated.ImageFile) -or $updated.ImageIndex -lt 1) {
+            throw 'La sesion no se puede usar para edicion: es de solo lectura o sus metadatos estan incompletos.'
         }
+        $Script:IMAGE_MOUNTED = 1
+        $Script:WIM_FILE_PATH = $updated.ImageFile
+        $Script:MOUNTED_INDEX = $updated.ImageIndex
+        $Script:CachedControlSet = $null
+        $Script:ForceMenuRefresh = $true
+        Write-Host '[OK] Imagen recuperada y verificada.' -ForegroundColor Green
+        Write-Log -LogLevel INFO -Message "MountRepair: Sesion recuperada en '$Script:MOUNT_DIR'."
+    } catch {
+        Write-Warning $_.Exception.Message
+        Write-Log -LogLevel WARN -Message "MountRepair: No se pudo validar la sesion recuperada: $($_.Exception.Message)"
     }
 }
 
@@ -3099,7 +3147,7 @@ function Boot-Tools-Menu {
 
 # :main_menu (Funcion principal que muestra el menu inicial)
 function Main-Menu {
-    $Host.UI.RawUI.WindowTitle = "AdminImagenOffline v$($script:Version) by SOFTMAXTER | Panel de Control"
+    $Host.UI.RawUI.WindowTitle = "AdminImagenOffline v$($script:Version) by SOFTMAXTER"
 
     # --- Constantes de presentacion (calculadas una sola vez, fuera del bucle) ---
     $width        = 80
@@ -3109,79 +3157,12 @@ function Main-Menu {
     $verStr       = "v$($script:Version)"
     $auth         = "by SOFTMAXTER"
 
-    # --- Estado de la cache (evita consultas repetitivas a DISM) ---
-    $cachedImageName = "---"
-    $cachedImageVer  = "---"
-    $cachedImageArch = "---"
-    $lastMountState  = -1
-
     while ($true) {
         Clear-Host
-        
-        # --- 1. LÓGICA DE ACTUALIZACIÓN (Solo si cambia el estado) ---
-        if ($Script:IMAGE_MOUNTED -ne $lastMountState -or $Script:ForceMenuRefresh) {
-            $lastMountState = $Script:IMAGE_MOUNTED
-            
-            $Script:ForceMenuRefresh = $false
-            
-            if ($Script:IMAGE_MOUNTED -eq 1 -or $Script:IMAGE_MOUNTED -eq 2) {
-                Write-Host "Leyendo metadatos del sistema operativo..." -ForegroundColor DarkGray
-                
-                # ESTRATEGIA 1: LECTURA FÍSICA DIRECTA (Velocidad de la luz, unifica WIM y VHD)
-                $sysDir = "$Script:MOUNT_DIR\Windows"
-                $kernelFile = "$sysDir\System32\ntoskrnl.exe"
-                
-                # A) Detección de Arquitectura por estructura de carpetas (Instantáneo)
-                if     (Test-Path "$sysDir\SysArm32") { $cachedImageArch = "ARM64" }
-                elseif (Test-Path "$sysDir\SysWOW64") { $cachedImageArch = "x64" }
-                elseif (Test-Path "$sysDir\System32") { $cachedImageArch = "x86" }
-                else                                  { $cachedImageArch = "Desconocida" }
-
-                # B) Extracción de Versión via Kernel (Bypass total al registro y a DISM)
-                if (Test-Path $kernelFile) {
-                    $verInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($kernelFile)
-                    $cachedImageVer = "{0}.{1}.{2}.{3}" -f $verInfo.FileMajorPart, $verInfo.FileMinorPart, $verInfo.FileBuildPart, $verInfo.FilePrivatePart
-                } else {
-                    $cachedImageVer = "Desconocida"
-                }
-
-                # C) Nombre de la Edición (Resolución Inteligente)
-                $cachedImageName = if ($Script:IMAGE_MOUNTED -eq 1) { "Imagen WIM" } else { "VHD Nativo" }
-                
-                # Chequeo dinámico: Si las colmenas Offline YA están montadas (Cero coste I/O)
-                if (Test-Path "Registry::HKLM\OfflineSoftware") {
-                    $regData = Get-ItemProperty -Path "Registry::HKLM\OfflineSoftware\Microsoft\Windows NT\CurrentVersion" -ErrorAction SilentlyContinue
-                    if ($regData) {
-                        if ($regData.ProductName)                            { $cachedImageName = $regData.ProductName }
-                        if ($regData.CurrentBuildNumber -and $regData.UBR) { $cachedImageVer  = "10.0.$($regData.CurrentBuildNumber).$($regData.UBR)" }
-                    }
-                }
-                else {
-                    # Fallback unificado WIM + VHD: ambas tienen identica estructura en MOUNT_DIR.
-                    # Elimina Get-WindowsImage del caso WIM (era el cuello de botella de 1-3 s).
-                    $softwareHive = "$sysDir\System32\config\SOFTWARE"
-                    if (Test-Path $softwareHive) {
-                        $tempHive = "HKLM\TempDash_$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
-                        reg load $tempHive $softwareHive 2>$null | Out-Null
-                        if ($LASTEXITCODE -eq 0) {
-                            try {
-                                $regData = Get-ItemProperty -Path "Registry::$tempHive\Microsoft\Windows NT\CurrentVersion" -ErrorAction SilentlyContinue
-                                if ($regData.ProductName)                            { $cachedImageName = $regData.ProductName }
-                                if ($regData.CurrentBuildNumber -and $regData.UBR) { $cachedImageVer  = "10.0.$($regData.CurrentBuildNumber).$($regData.UBR)" }
-                            } finally {
-                                [GC]::Collect()
-                                reg unload $tempHive 2>$null | Out-Null
-                            }
-                        }
-                    }
-                }
-                Write-Log -LogLevel INFO -Message "Dashboard: Metadatos cacheados -> $cachedImageName | $cachedImageVer | $cachedImageArch"
-            }
-            else {
-                # Nada montado
-                $cachedImageName = "---"; $cachedImageVer = "---"; $cachedImageArch = "---"
-            }
-        }
+        $metadata = Get-AIOCachedDashboardMetadata -MountState $Script:IMAGE_MOUNTED -MountPath $Script:MOUNT_DIR `
+            -ImagePath $Script:WIM_FILE_PATH -Index $Script:MOUNTED_INDEX -ForceRefresh:$Script:ForceMenuRefresh
+        # Consumir la solicitud una sola vez; la navegacion conserva la cache.
+        $Script:ForceMenuRefresh = $false
 
         # --- 2. INTERFAZ GRÁFICA (Dashboard) ---
         # [FIX] Todos los separadores usan ahora $separator / $separatorMid (antes dos de ellos eran literales hardcodeados)
@@ -3212,9 +3193,7 @@ function Main-Menu {
 
         # Mostrar detalles solo si esta montado
         if ($Script:IMAGE_MOUNTED -gt 0) {
-            Write-Host "  + Detalles SO : " -NoNewline; Write-Host "$cachedImageName ($cachedImageArch)" -ForegroundColor Cyan
-            Write-Host "  + Build       : " -NoNewline; Write-Host $cachedImageVer -ForegroundColor Cyan
-            Write-Host "  + Directorio  : " -NoNewline; Write-Host $Script:MOUNT_DIR -ForegroundColor Gray
+            Write-AIODashboardMetadata -Metadata $metadata -MountPath $Script:MOUNT_DIR -Width $width
         }
         Write-Host $separator -ForegroundColor Cyan
         Write-Host ""
@@ -3339,49 +3318,26 @@ function Show-Mount-Warning {
 #  Verificacion de Montaje Existente
 # =================================================================
 $Script:IMAGE_MOUNTED = 0; $Script:WIM_FILE_PATH = $null; $Script:MOUNTED_INDEX = $null
-$TEMP_DISM_OUT = Join-Path $env:TEMP "dism_check_$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).tmp"
 
 Write-Host "Verificando imagenes montadas..." -ForegroundColor Gray
 
 # --- PASO 1: DETECCION WIM/ESD (DISM) ---
 try {
-    # Capturamos salida a archivo para evitar problemas de codificacion
-    dism /get-mountedimageinfo 2>$null | Out-File -FilePath $TEMP_DISM_OUT -Encoding utf8
-    $mountInfo = Get-Content -Path $TEMP_DISM_OUT -Encoding utf8 -ErrorAction SilentlyContinue
-    
-    # Busca "Mount Dir :" O "Directorio de montaje :"
-    $mountDirLine = $mountInfo | Select-String -Pattern "(Mount Dir|Directorio de montaje)\s*:" | Select-Object -First 1
-    
-    if ($mountDirLine) {
-        $foundPath = ($mountDirLine.Line -split ':', 2)[1].Trim()
-        
-        # Validacion extra: DISM a veces reporta carpetas que ya no existen
-        if (Test-Path $foundPath) {
-            $Script:IMAGE_MOUNTED = 1
-            $Script:MOUNT_DIR = $foundPath
-            
-            # Buscar Ruta del Archivo de Imagen
-            $wimPathLine = $mountInfo | Select-String -Pattern "(Image File|Archivo de imagen)\s*:" | Select-Object -First 1
-            if ($wimPathLine) {
-                $rawLine = $wimPathLine.Line
-                $colonIdx = $rawLine.IndexOf(':')
-                if ($colonIdx -ge 0) {
-                    $Script:WIM_FILE_PATH = $rawLine.Substring($colonIdx + 1).Trim()
-                    if ($Script:WIM_FILE_PATH.StartsWith("\\?\")) { $Script:WIM_FILE_PATH = $Script:WIM_FILE_PATH.Substring(4) }
-                }
-            }
-
-            # Buscar Indice
-            $indexLine = $mountInfo | Select-String -Pattern "(Image Index|ndice de imagen)\s*:" | Select-Object -First 1
-            if ($indexLine) { $Script:MOUNTED_INDEX = ($indexLine.Line -split ':', 2)[1].Trim() }
-            
-            Write-Log -LogLevel INFO -Message "WIM Detectado: $Script:WIM_FILE_PATH en $Script:MOUNT_DIR"
-        }
+    $mounts = @(Get-AIOMountedImages)
+    # Asociar ruta, archivo, indice y estado del MISMO bloque de DISM.
+    # Solo retomar la carpeta configurada; no apropiarse de montajes de Info WIM.
+    $current = Get-AIOMountForPath -Mounts $mounts -Path $Script:MOUNT_DIR
+    if ($null -ne $current -and $current.Status -eq 'OK' -and $current.ReadWrite -eq 'Yes' -and
+        $current.ImageIndex -gt 0 -and -not [string]::IsNullOrWhiteSpace($current.ImageFile) -and
+        (Test-Path -LiteralPath $current.MountDir -PathType Container)) {
+        $Script:IMAGE_MOUNTED = 1
+        $Script:WIM_FILE_PATH = $current.ImageFile
+        $Script:MOUNTED_INDEX = $current.ImageIndex
+        Write-Log -LogLevel INFO -Message "WIM detectado y validado: $Script:WIM_FILE_PATH en $Script:MOUNT_DIR"
     }
 } catch {
+    Write-Warning "No se pudo comprobar el inventario de DISM: $($_.Exception.Message)"
     Write-Log -LogLevel WARN -Message "Error verificando DISM: $($_.Exception.Message)"
-} finally {
-    if (Test-Path $TEMP_DISM_OUT) { Remove-Item -Path $TEMP_DISM_OUT -Force -ErrorAction SilentlyContinue }
 }
 
 # --- PASO 2: DETECCION VHD/VHDX (Powershell Storage) ---

@@ -218,6 +218,7 @@ function Save-Changes {
 
     # Bloque comun para Commit/Append exitoso
     if ($LASTEXITCODE -eq 0) {
+        $Script:ForceMenuRefresh = $true
         Write-Host "[OK] Cambios guardados." -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "SaveManager: Cambios ($Mode) guardados exitosamente en la imagen original."
     } else {

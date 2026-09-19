@@ -3098,6 +3098,9 @@ function Merge-AIOUpdateSetupDUIntoDirectory {
         }
         $destination = Join-Path $DestinationRoot $relative
         Initialize-AIOUpdateDirectory -Path (Split-Path -Parent $destination)
+        if (Test-Path -LiteralPath $destination -PathType Leaf) {
+            attrib -R -S -H $destination 2>$null
+        }
         Copy-Item -LiteralPath $file.FullName -Destination $destination -Force -ErrorAction Stop
         $count++
     }
