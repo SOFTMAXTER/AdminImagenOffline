@@ -225,17 +225,6 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Bloquear Widgets y Noticias (Directiva GPO)"
-        Category       = "Windows 11 UI"
-        Description    = "Desactiva el panel de Widgets (Tiempo/Noticias) para ahorrar RAM en todo el sistema."
-        Method         = "Registry"
-        RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Dsh"
-        RegistryKey    = "AllowNewsAndInterests"
-        EnabledValue   = 0
-        DefaultValue   = 1
-        RegistryType   = "DWord"
-    },
-    [PSCustomObject]@{
         Name           = "Deshabilitar Search Highlights (Dibujos)"
         Category       = "Windows 11 UI"
         Description    = "Quita los iconos animados del cuadro de busqueda a nivel de maquina."
