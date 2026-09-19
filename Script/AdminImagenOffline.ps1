@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.6"
+$script:Version = "1.5.5"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -142,10 +142,26 @@ function Invoke-FullRepoUpdater {
     if ($changelog.Count -gt 0) {
         Write-Host "  -------------------------------------------------------" -ForegroundColor Cyan
         Write-Host "     NOVEDADES Y CAMBIOS: " -ForegroundColor Magenta
+        
+        # 1. Obtener el ancho dinámico de la ventana para adaptar el texto 
+        $consoleWidth = if ($Host.UI.RawUI.WindowSize.Width -gt 20) { $Host.UI.RawUI.WindowSize.Width - 4 } else { 80 }
+
         foreach ($line in $changelog) {
-            Write-Host "      $line" -ForegroundColor White
+            # 2. Utilizar tu función nativa Format-WrappedText para envolver por palabras completas
+            $wrappedLines = Format-WrappedText -Text $line -Indent 6 -MaxWidth $consoleWidth
+            
+            for ($i = 0; $i -lt $wrappedLines.Count; $i++) {
+                # 3. Sangría francesa: Si la línea envuelta es la continuación de una viñeta (-),
+                # le añadimos 2 espacios extra para que quede perfectamente alineada bajo el texto.
+                if ($i -gt 0 -and $line.StartsWith("-")) {
+                    Write-Host "  $($wrappedLines[$i])" -ForegroundColor White
+                } else {
+                    Write-Host $wrappedLines[$i] -ForegroundColor White
+                }
+            }
         }
     }
+
     Write-Host "  =======================================================" -ForegroundColor Cyan
 
     $updateChoice = (Read-Host "`n  [?] Deseas descargar e instalar la actualizacion ahora? (S/N)").ToUpper()
