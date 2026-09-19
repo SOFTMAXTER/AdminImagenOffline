@@ -1,3 +1,14 @@
+1.5.6
+====================================================
+- Panel "Estado Actual" optimizado: nuevo motor de cache (Modulo-Dashboard.ps1) que evita relecturas innecesarias del registro offline al navegar entre submenus; la identidad de la imagen montada (ruta, punto de montaje e indice) decide cuando refrescar los metadatos en vez de fechas de archivo.
+- Estilo de pestanas unificado: nuevo modulo compartido (Modulo-UI.ps1) con un control de pestanas personalizado (fondo oscuro y acento de color en la pestana activa), aplicado a los gestores de Servicios Offline, Unattend y Tweaks.
+- Diagnostico de Actualizaciones reforzado: ante errores conserva Error.txt, estado de imagenes DISM montadas, logs de sesion, transcripcion DISM, manifiesto Preflight y reportes JSON/HTML; si no puede crear el ZIP, conserva la carpeta de diagnostico.
+- Copia de SetupDU mas robusta: antes de reemplazar archivos existentes en boot.wim elimina atributos R/S/H. Los errores de permisos NTFS siguen registrandose y quedan disponibles en el diagnostico automatico.
+- Motor Appx/MSIX reforzado: lee la identidad real desde AppxManifest/AppxBundleManifest, consulta las apps aprovisionadas y clasifica la cola como INSTALAR, ACTUALIZAR, REPARAR u OMITIR segun familia y version.
+- Appx ahora detecta y repara marcas Deprovisioned, resuelve dependencias declaradas en manifiestos por familia/version/arquitectura y asocia licencias XML verificando la familia del paquete.
+- Despliegue Appx mas seguro: procesa librerias antes que apps, permite cancelar despues del paquete actual, protege el montaje/desmontaje de colmenas offline y conserva logs DISM de operaciones fallidas para diagnostico.
+====================================================
+
 1.5.5
 ====================================================
 - Reorganizacion completa de menus: Contenido, Sistema y Comportamiento y OOBE y Marca ahora son menus propios (antes mezclados en Personalizacion); WinRE se traslado a Herramientas de Arranque y Montaje/Guardado se unificaron en un solo menu.

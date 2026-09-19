@@ -1,5 +1,5 @@
 
-# AdminImagenOffline V1.5.5 by SOFTMAXTER
+# AdminImagenOffline V1.5.6 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -9,15 +9,15 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.5 (Changelog)
+## 🆕 Novedades en la Versión 1.5.6 (Changelog)
 
-* **Reorganización Completa del Menú Principal**: La antigua sección "Personalización" se dividió en tres módulos independientes —Contenido, Sistema y Comportamiento, y OOBE y Marca— para una navegación más clara; la gestión de WinRE se trasladó a Herramientas de Arranque y los flujos de Montaje/Guardado se unificaron en un solo submenú.
-* **Soporte para Paquetes DeltaPack Dual-Engine (Nuevo)**: El Inyector de Addons ahora reconoce paquetes generados por **DeltaPack Dual-Engine** (`manifest_*.json`) y ejecuta su orden de despliegue declarado (WIM → Acciones → Eliminaciones → Registro → Acciones finales) como una sola unidad transaccional.
-* **Motor de Bloatware Reforzado**: Se blindó el ciclo de montaje/desmontaje de colmenas con `try/finally`, se corrigió la limpieza física de residuos en `WindowsApps` para que coincida por nombre y versión exactos, y se añadió una barra de progreso y confirmación reforzada para aplicaciones vitales del sistema.
-* **Gestor de Drivers Ampliado**: Nueva barra de progreso, casilla para forzar la instalación de drivers sin firmar (`/ForceUnsigned`), botón para cancelar el proceso tras el driver en curso y advertencias reforzadas al desinstalar clases de hardware críticas.
-* **Estabilidad de las Interfaces Gráficas**: Corregido un bug sistémico que rompía los avisos de "imagen no montada" en varios módulos (Servicios, Tweaks, Addons), y se añadieron guardias de "operación en curso" para evitar el cierre accidental de una ventana mientras un proceso sigue en ejecución.
-* **Barras de Progreso Corregidas**: Ajustado el avance de las barras de progreso en Servicios, Drivers, Tweaks y Addons para que reflejen el elemento realmente procesado, en vez del siguiente en cola.
-* **Corrección de Rutas DISM en VHD**: Solucionado un error que impedía inyectar o eliminar drivers cuando la imagen montada era un disco virtual (VHD/VHDX), causado por la barra invertida final en la ruta de montaje.
+* **Panel "Estado Actual" Optimizado**: Nuevo motor de cache (`Modulo-Dashboard.ps1`) que evita relecturas innecesarias del registro offline de la imagen montada al navegar entre submenús; la identidad de la imagen (ruta, punto de montaje e índice) decide cuándo refrescar los metadatos en vez de fechas de archivo, evitando falsos positivos cuando otros módulos montan/desmontan colmenas.
+* **Estilo de Pestañas Unificado**: Nuevo módulo compartido `Modulo-UI.ps1` con un control de pestañas personalizado (fondo oscuro, tipografía en negrita y acento de color en la pestaña activa) aplicado a los gestores de Servicios Offline, Unattend y Tweaks para una experiencia visual más consistente.
+* **Diagnóstico de Actualizaciones Reforzado**: Cuando falla una integración, el módulo de Actualizaciones conserva un paquete de diagnóstico con `Error.txt`, información de imágenes DISM montadas, registros de sesión, transcripción de DISM, manifiesto Preflight y reportes JSON/HTML. Si la compresión ZIP falla, se conserva la carpeta de diagnóstico como respaldo.
+* **Copia de SetupDU Más Robusta**: Antes de reemplazar archivos existentes dentro de `boot.wim`, el flujo de Setup Dynamic Update retira atributos de solo lectura, sistema y oculto (`R/S/H`) para reducir bloqueos causados por atributos del archivo. Los problemas de permisos NTFS continúan registrándose como error y quedan disponibles en el diagnóstico automático.
+* **Motor Appx/MSIX Reforzado**: El inyector ahora lee la identidad real de los paquetes desde `AppxManifest.xml` / `AppxBundleManifest.xml`, consulta mediante DISM las apps ya aprovisionadas y clasifica cada elemento de la cola como **INSTALAR**, **ACTUALIZAR**, **REPARAR** u **OMITIR** según familia y versión. Puede actualizar paquetes locales más recientes cuando se habilita la opción correspondiente.
+* **Reparación Appx y Control de Dependencias**: Se detectan y limpian marcas `Deprovisioned` para permitir la recuperación de aplicaciones eliminadas; las dependencias se obtienen de los manifiestos reales del paquete o bundle y se seleccionan por familia, versión y arquitectura compatible. La búsqueda de licencias XML exige coincidencia comprobada con la familia del paquete.
+* **Despliegue Appx Más Seguro**: Las bibliotecas se procesan antes que las aplicaciones, se permite cancelar de forma segura después del paquete en curso, se controlan las colmenas offline antes de ejecutar DISM y los logs DISM de operaciones fallidas se conservan para diagnóstico.
 
 ## Características Principales
 
@@ -78,6 +78,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
         ├── Modulo-Save.ps1
         ├── Modulo-ServiciosOffline.ps1
         ├── Modulo-Tweaks.ps1
+        ├── Modulo-UI.ps1
         ├── Modulo-Unattend.ps1
         └── Catalogos/
             ├── Ajustes.ps1
@@ -147,7 +148,7 @@ Gestión completa de los controladores *offline*.
 Gestión de todo lo que se ejecuta o se preinstala dentro de la imagen:
 
 * **Eliminar Bloatware (Apps):** Interfaz categorizada para purgar aplicaciones preinstaladas indeseadas, salvaguardando los componentes vitales del sistema operativo.
-* **Inyector de Apps Modernas (Appx/MSIX):** Integra paquetes universales UWP y sus dependencias de forma offline, organizándolos por arquitectura.
+* **Inyector y Actualizador de Apps Modernas (Appx/MSIX):** Motor heurístico de aprovisionamiento offline que analiza la identidad y versión reales de paquetes y bundles, detecta lo ya instalado en la imagen y marca cada entrada como **INSTALAR**, **ACTUALIZAR**, **REPARAR** u **OMITIR**. Lee dependencias declaradas en los manifiestos, selecciona versiones y arquitecturas compatibles, valida licencias por familia, procesa frameworks antes que las apps y puede limpiar marcas `Deprovisioned` para reparar paquetes previamente eliminados. Incluye actualización opcional de apps existentes, cancelación segura después del paquete actual y conservación de logs DISM cuando una operación falla.
 * **Inyector de Addons (.wim, .tpk, .bpk, .reg):**
   * **Uso:** Integra paquetes de utilidades sueltos (7-Zip, Visual C++, etc.).
   * **Lógica Inteligente:** Si incluyes sufijos en el nombre del archivo (ej. `_x64`, `_x86`), el motor activa el **Escudo de Arquitectura** y omitirá los paquetes que no coincidan con la arquitectura de la imagen montada. Si usas `_main`, les dará prioridad de inyección en la cola. Extrae los empaquetados usando firma binaria para evitar fallos.
