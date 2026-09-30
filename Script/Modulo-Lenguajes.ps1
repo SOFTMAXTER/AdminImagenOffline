@@ -7,7 +7,7 @@
 
       - Detecta install.wim o convierte install.esd a WIM antes del servicio.
       - Permite seleccionar uno, varios o todos los indices de install.wim.
-      - Detecta automaticamente paquetes de idioma CAB/ESD y sus metadatos.
+      - Detecta automaticamente paquetes de idioma/FOD CAB/ESD y sus metadatos (LXP APPX queda fuera de este flujo CBS).
       - Detecta componentes Language Features on Demand por identidad CBS.
       - Detecta automaticamente el ADK y el complemento de Windows PE.
       - Combina los paquetes WinPE instalados con el repositorio seleccionado.
@@ -20,16 +20,18 @@
       - Actualiza winre.wim sin reutilizar una copia incompatible entre ediciones.
       - Actualiza opcionalmente todos los indices de boot.wim.
       - Sincroniza archivos localizados de Setup y genera lang.ini.
-      - La Estrategia para WinPE: lp.cab, WinPE-SRT y paquetes Setup localizados segun los componentes neutrales presentes.
+      - Estrategia WinPE: lp.cab y satelites localizados solo cuando el paquete neutral esta realmente instalado en el indice.
       - Copia lang.ini y recursos MUI de Setup dentro del indice de instalacion de boot.wim.
       - Verifica /Get-Intl, paquetes CBS, lang.ini y recursos MUI antes y despues de guardar boot.wim.
       - Impide declarar exito si el selector inicial de Windows Setup no queda realmente multilingue.
       - Si no hay WinPE Add-on compatible, aplica el modo de compatibilidad: lang.ini y recursos MUI en el indice Setup, sin afirmar que WinPE completo fue traducido.
+      - El modo FullWinPE exige lp.cab para cada idioma; para ja/ko/zh tambien exige WinPE-FontSupport.
+      - Sin WinPE completo, los idiomas de Asia oriental reutilizan fuentes capturadas desde install.wim en ambos indices de boot.wim mediante el modo de compatibilidad integrado.
       - Identifica el indice Setup por metadatos, paquetes Setup-Client/Server/ASZ, setup.exe, winpeshl.ini y fallback seguro al indice 2.
       - La verificacion final revisa solamente los indices de boot.wim realmente modificados.
       - Permite conservar el idioma actual o establecer uno nuevo como predeterminado.
       - Exporta solo la edicion seleccionada cuando se elige un unico indice.
-      - Reconstruye WIM con compresion maxima y reemplazo atomico opcional.
+      - Reconstruye WIM con compresion maxima y reemplazo atomico real en el volumen de destino.
       - Crea un respaldo Preflight validado antes de la primera modificacion.
       - Muestra un resumen obligatorio del respaldo y progreso SHA-256 compacto.
       - Usa AdminImagenOffline_Backup junto al medio, igual que el modulo de actualizaciones.
@@ -113,6 +115,86 @@ $script:AIOLangOptimizationStats = [ordered]@{
     HashCacheMisses = 0
     MetadataCacheHits = 0
     RepositoryCacheHits = 0
+}
+
+
+# Politicas centralizadas para reducir mantenimiento disperso. Las fronteras de
+# compatibilidad se basan en metadatos reales; estas tablas solo normalizan
+# alias y excepciones de producto/edicion conocidas.
+$script:AIOLangPolicy = [ordered]@{
+    ArchitectureAliases = [ordered]@{
+        x86   = @('0', 'x86', 'i386', 'i686')
+        x64   = @('9', 'x64', 'amd64', 'x86_64')
+        arm64 = @('12', 'arm64', 'aarch64')
+        arm   = @('5', 'arm')
+    }
+    WinPEFolderMap = [ordered]@{
+        x64   = 'amd64'
+        x86   = 'x86'
+        arm64 = 'arm64'
+        arm   = 'arm'
+    }
+    RestrictedMultilingualEditionPattern = '(?i)(SingleLanguage|CountrySpecific)'
+    EastAsianLocales = @('ja-JP','ko-KR','zh-CN','zh-HK','zh-TW')
+    WinPEFontSupportPatterns = @('WinPE-FontSupport','FontSupport')
+    EastAsianFontFiles = [ordered]@{
+        'ja-jp' = @('meiryo.ttc','msgothic.ttc')
+        'ko-kr' = @('malgun.ttf','gulim.ttc')
+        'zh-cn' = @('msyh.ttc','mingliub.ttc','simsun.ttc','msyhl.ttc')
+        'zh-hk' = @('msjh.ttc','mingliub.ttc','simsun.ttc')
+        'zh-tw' = @('msjh.ttc','mingliub.ttc','simsun.ttc')
+    }
+    ProductPatterns = [ordered]@{
+        Server = '(?i)(server-languagepack|servercore|windows-server|winpe-setup-server)'
+        Client = '(?i)(client-languagepack|windows-client|winpe-setup-client)'
+        WinPE  = '(?i)(winpe[_/-]|winpe-)'
+    }
+    WinPEPriorityRules = @(
+        [pscustomobject]@{ Pattern = '(?:^|[-_])lp(?:[._-]|$)|common-foundation'; Priority = 10 },
+        [pscustomobject]@{ Pattern = 'rejuv|storagewmi|hta|winpe-srt'; Priority = 20 },
+        [pscustomobject]@{ Pattern = 'enhancedstorage|scripting|securestartup|wds-tools|winpe-wmi'; Priority = 30 },
+        [pscustomobject]@{ Pattern = 'winpe-setup'; Priority = 40 }
+    )
+    FodPriorityRules = @(
+        [pscustomobject]@{ Pattern = 'languagefeatures-basic'; Priority = 10 },
+        [pscustomobject]@{ Pattern = 'languagefeatures-fonts'; Priority = 20 },
+        [pscustomobject]@{ Pattern = 'languagefeatures-(texttospeech|handwriting|ocr|speech)|internationalfeatures'; Priority = 30 },
+        [pscustomobject]@{ Pattern = 'ethernet|wifi'; Priority = 40 },
+        [pscustomobject]@{ Pattern = 'mspaint|notepad|powershell-ise|internetexplorer'; Priority = 50 },
+        [pscustomobject]@{ Pattern = 'snippingtool|stepsrecorder|wordpad|printing'; Priority = 60 },
+        [pscustomobject]@{ Pattern = 'mediaplayer|wmic|terminalservices|virtualmachineplatform'; Priority = 70 },
+        [pscustomobject]@{ Pattern = 'projfs|telnet|tftp|vbscript|winocr|smbdirect|simpletcp|senseclient|enterpriseclientsync|directoryservices'; Priority = 80 },
+        [pscustomobject]@{ Pattern = 'servercorefonts'; Priority = 90 }
+    )
+    SetupCoreMui = @('setup.exe.mui','setupplatform.exe.mui','w32uires.dll.mui','winsetup.dll.mui','spwizres.dll.mui')
+    SetupLocalizedFiles = @(
+        'appraiser.dll.mui','arunres.dll.mui','cmisetup.dll.mui','compatctrl.dll.mui',
+        'compatprovider.dll.mui','deployprovider.dll.mui','dism.exe.mui','dismapi.dll.mui',
+        'dismcore.dll.mui','dismprov.dll.mui','folderprovider.dll.mui','imagingprovider.dll.mui',
+        'input.dll.mui','logprovider.dll.mui','mediasetupuimgr.dll.mui','nlsbres.dll.mui',
+        'osimageprovider.dll.mui','pnpibs.dll.mui','reagent.dll.mui','rollback.exe.mui',
+        'setup.exe.mui','setupcompat.dll.mui','setupcore.dll.mui','setupmgr.dll.mui',
+        'setupplatform.exe.mui','setupprep.exe.mui','smiengine.dll.mui','spwizres.dll.mui',
+        'upgloader.dll.mui','uxlibres.dll.mui','vhdprovider.dll.mui','w32uires.dll.mui',
+        'wdsclient.dll.mui','wdsimage.dll.mui','wimgapi.dll.mui','wimprovider.dll.mui',
+        'windlp.dll.mui','winsetup.dll.mui','reagent.adml'
+    )
+    SetupLocalizedRtf = @('vofflps.rtf','credits.rtf','oobe_help_opt_in_details.rtf')
+}
+
+function Test-AIOLangPolicyPatternSet {
+    [CmdletBinding()]
+    param(
+        [AllowNull()] [string]$Text,
+        [Parameter(Mandatory = $true)] [string[]]$Patterns
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $false }
+    foreach ($pattern in @($Patterns)) {
+        if ([string]::IsNullOrWhiteSpace([string]$pattern)) { continue }
+        if ($Text -match [string]$pattern) { return $true }
+    }
+    return $false
 }
 
 function Write-AIOLangLog {
@@ -346,17 +428,14 @@ function Convert-AIOLangArchitectureName {
     param([AllowNull()] [object]$Architecture)
 
     $value = ([string]$Architecture).Trim().ToLowerInvariant()
-    switch -Regex ($value) {
-        '^(0|x86|i386|i686)$'    { return 'x86' }
-        '^(9|x64|amd64|x86_64)$' { return 'x64' }
-        '^(12|arm64|aarch64)$'   { return 'arm64' }
-        '^(5|arm)$'               { return 'arm' }
-        default {
-            if ([string]::IsNullOrWhiteSpace($value)) { return 'Unknown' }
-            return $value
-        }
+    if ([string]::IsNullOrWhiteSpace($value)) { return 'Unknown' }
+
+    foreach ($entry in $script:AIOLangPolicy.ArchitectureAliases.GetEnumerator()) {
+        if ($value -in @($entry.Value)) { return [string]$entry.Key }
     }
+    return $value
 }
+
 
 function Convert-AIOLangExitCodeToUInt32 {
     [CmdletBinding()]
@@ -442,15 +521,17 @@ function ConvertTo-AIOLangNativeArgument {
 
 function Add-AIOLangDismTranscriptLine {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)] [string]$Line)
+    param([Parameter(Mandatory = $true)] [AllowEmptyString()] [AllowNull()] [string]$Line)
 
     if (-not $script:AIOLangDismTranscript) { return }
     try {
+        if ($null -eq $Line) { $Line = '' }
         ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Line) |
             Out-File -LiteralPath $script:AIOLangDismTranscript -Append -Encoding utf8
     }
     catch {}
 }
+
 
 function Invoke-AIOLangDism {
     [CmdletBinding()]
@@ -618,6 +699,9 @@ function Mount-AIOLangImage {
         [switch]$ReadOnly
     )
 
+    if ($MountPath -in $script:AIOLangMountedPaths) {
+        throw "El montaje '$MountPath' sigue pendiente; no se vaciara ni reutilizara."
+    }
     Initialize-AIOLangDirectory -Path $MountPath -Empty
 
     # Registrar antes de invocar DISM. Si DISM monta la imagen y una validacion
@@ -670,17 +754,33 @@ function Dismount-AIOLangImage {
     return $result
 }
 
-
 function Clear-AIOLangMountedImages {
     [CmdletBinding()]
     param()
 
     foreach ($mountPath in @($script:AIOLangMountedPaths | Select-Object -Unique)) {
-        if (Test-Path -LiteralPath $mountPath) {
-            [void](Dismount-AIOLangImage -MountPath $mountPath -Mode Discard -Context "Descartar montaje pendiente $mountPath" -NoThrow)
+        try {
+            $result = Dismount-AIOLangImage -MountPath $mountPath -Mode Discard -Context "Descartar montaje pendiente $mountPath" -NoThrow
+            if ($result.Success) { continue }
         }
+        catch { Write-AIOLangLog -Level WARN -Message "No se pudo desmontar '${mountPath}': $($_.Exception.Message)" }
+
+        # Si /Mount-Image fallo antes de crear el montaje, solo liberar la
+        # ruta cuando DISM confirme que ya no figura en su registro.
+        try {
+            $mounted = @(Get-WindowsImage -Mounted -ErrorAction Stop)
+            $pending = @($mounted | Where-Object {
+                ([string]$_.Path).TrimEnd('\', '/') -ieq $mountPath.TrimEnd('\', '/')
+            })
+            if ($pending.Count -eq 0) {
+                [void]$script:AIOLangMountedPaths.Remove($mountPath)
+                continue
+            }
+        }
+        catch { Write-AIOLangLog -Level WARN -Message "No se pudo comprobar el estado de '${mountPath}': $($_.Exception.Message)" }
+        Write-AIOLangLog -Level WARN -Message "Se conserva el montaje pendiente '$mountPath' y su carpeta de trabajo."
     }
-    $script:AIOLangMountedPaths.Clear()
+    return ($script:AIOLangMountedPaths.Count -eq 0)
 }
 
 function Expand-AIOLangCabNative {
@@ -729,36 +829,150 @@ function Expand-AIOLangCabNative {
     }
 }
 
-function Get-AIOLangEsdImageIndexes {
+
+function Get-AIOLangImageIndexes {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)] [string]$EsdPath)
+    param([Parameter(Mandatory = $true)] [string]$ImagePath)
 
     $indexes = New-Object System.Collections.Generic.List[int]
-    if (Get-Command Get-WindowsImage -ErrorAction SilentlyContinue) {
+    $query = Invoke-AIOLangDism -Arguments @('/Get-ImageInfo', "/ImageFile:$ImagePath") -Context "Inspeccionar imagen $([System.IO.Path]::GetFileName($ImagePath))" -Quiet -NoThrow
+    if ($query.Success) {
+        foreach ($line in @($query.Output)) {
+            if ([string]$line -match '(?i)^\s*Index\s*:\s*(\d+)\s*$') {
+                $index = [int]$matches[1]
+                if ($index -gt 0 -and $index -notin $indexes) { [void]$indexes.Add($index) }
+            }
+        }
+    }
+
+    if ($indexes.Count -eq 0 -and (Get-Command Get-WindowsImage -ErrorAction SilentlyContinue)) {
         try {
-            foreach ($image in @(Get-WindowsImage -ImagePath $EsdPath -ErrorAction Stop)) {
-                if ([int]$image.ImageIndex -gt 0 -and [int]$image.ImageIndex -notin $indexes) {
-                    [void]$indexes.Add([int]$image.ImageIndex)
-                }
+            foreach ($image in @(Get-WindowsImage -ImagePath $ImagePath -ErrorAction Stop)) {
+                $index = [int]$image.ImageIndex
+                if ($index -gt 0 -and $index -notin $indexes) { [void]$indexes.Add($index) }
             }
         }
         catch {}
     }
 
-    if ($indexes.Count -eq 0) {
-        $query = Invoke-AIOLangDism -Arguments @('/Get-ImageInfo', "/ImageFile:$EsdPath") -Context "Inspeccionar ESD $([System.IO.Path]::GetFileName($EsdPath))" -Quiet -NoThrow
-        if ($query.Success) {
-            foreach ($line in @($query.Output)) {
-                if ([string]$line -match '(?i)^\s*Index\s*:\s*(\d+)\s*$') {
-                    $index = [int]$matches[1]
-                    if ($index -gt 0 -and $index -notin $indexes) { [void]$indexes.Add($index) }
-                }
+    if ($indexes.Count -eq 0) { throw "No se pudieron enumerar indices en '$ImagePath' con el DISM activo." }
+    return [int[]]@($indexes.ToArray() | Sort-Object -Unique)
+}
+
+function Get-AIOLangImageDetailFromDism {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$ImagePath,
+        [Parameter(Mandatory = $true)] [int]$Index
+    )
+
+    $query = Invoke-AIOLangDism -Arguments @('/Get-ImageInfo', "/ImageFile:$ImagePath", "/Index:$Index") -Context "Consultar metadatos $([System.IO.Path]::GetFileName($ImagePath)) indice $Index" -Quiet -NoThrow
+    if (-not $query.Success) { return $null }
+
+    $fields = @{}
+    $languages = New-Object System.Collections.Generic.List[string]
+    $defaultLanguage = $null
+    $inLanguages = $false
+    foreach ($rawLine in @($query.Output)) {
+        $line = [string]$rawLine
+        if ($line -match '^\s*Languages\s*:\s*$') { $inLanguages = $true; continue }
+        if ($inLanguages) {
+            if ($line -match '^\s+([a-z]{2,3}(?:-[a-z]{4})?-[a-z]{2})(?:\s+\(Default\))?\s*$') {
+                $locale = Normalize-AIOLangLocale -Locale $matches[1]
+                if ($locale -and $locale -notin $languages) { [void]$languages.Add($locale) }
+                if ($line -match '(?i)\(Default\)') { $defaultLanguage = $locale }
+                continue
             }
+            if (-not [string]::IsNullOrWhiteSpace($line)) { $inLanguages = $false }
+        }
+        if ($line -match '^\s*([^:]+?)\s*:\s*(.*?)\s*$') {
+            $key = ($matches[1] -replace '\s+', '').ToLowerInvariant()
+            $fields[$key] = $matches[2]
         }
     }
 
-    return [int[]]@($indexes.ToArray() | Sort-Object -Unique)
+    $version = $null
+    try { if ($fields.ContainsKey('version')) { $version = [version]$fields['version'] } } catch {}
+    if (-not $version) { return $null }
+    $architecture = if ($fields.ContainsKey('architecture')) { Convert-AIOLangArchitectureName -Architecture $fields['architecture'] } else { 'Unknown' }
+    $editionId = $null
+    foreach ($key in @('edition','editionid')) { if ($fields.ContainsKey($key) -and $fields[$key]) { $editionId = [string]$fields[$key]; break } }
+    $installationType = $null
+    foreach ($key in @('installation','installationtype')) { if ($fields.ContainsKey($key) -and $fields[$key]) { $installationType = [string]$fields[$key]; break } }
+    if (-not $defaultLanguage -and $languages.Count -eq 1) { $defaultLanguage = $languages[0] }
+
+    return [pscustomobject]@{
+        ImageIndex       = $Index
+        ImageName        = $(if ($fields.ContainsKey('name')) { [string]$fields['name'] } else { '' })
+        ImageDescription = $(if ($fields.ContainsKey('description')) { [string]$fields['description'] } else { '' })
+        Architecture     = $architecture
+        Version          = $version
+        Build            = [int]$version.Build
+        DefaultLanguage  = $defaultLanguage
+        Languages        = [string[]]$languages.ToArray()
+        InstallationType = $installationType
+        EditionId        = $editionId
+    }
 }
+
+function Get-AIOLangImageRecords {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$ImagePath)
+
+    $records = New-Object System.Collections.Generic.List[object]
+    foreach ($index in @(Get-AIOLangImageIndexes -ImagePath $ImagePath)) {
+        $detail = Get-AIOLangImageDetailFromDism -ImagePath $ImagePath -Index $index
+        if (-not $detail -and (Get-Command Get-WindowsImage -ErrorAction SilentlyContinue)) {
+            try {
+                $legacy = Get-WindowsImage -ImagePath $ImagePath -Index $index -ErrorAction Stop
+                $langs = New-Object System.Collections.Generic.List[string]
+                foreach ($propertyName in @('Languages','Language')) {
+                    $property = $legacy.PSObject.Properties[$propertyName]
+                    if ($property -and $property.Value) {
+                        foreach ($language in @($property.Value)) {
+                            $normalized = Normalize-AIOLangLocale -Locale ([string]$language)
+                            if ($normalized -and $normalized -notin $langs) { [void]$langs.Add($normalized) }
+                        }
+                    }
+                }
+                $defaultLanguage = $null
+                foreach ($propertyName in @('DefaultLanguage','Default Language','Language')) {
+                    $property = $legacy.PSObject.Properties[$propertyName]
+                    if ($property -and $property.Value) { $defaultLanguage = Normalize-AIOLangLocale -Locale ([string]$property.Value); break }
+                }
+                $editionId = $null
+                foreach ($propertyName in @('EditionId','EditionID','Edition')) {
+                    $property = $legacy.PSObject.Properties[$propertyName]
+                    if ($property -and $property.Value) { $editionId = [string]$property.Value; break }
+                }
+                $detail = [pscustomobject]@{
+                    ImageIndex       = [int]$legacy.ImageIndex
+                    ImageName        = [string]$legacy.ImageName
+                    ImageDescription = [string]$legacy.ImageDescription
+                    Architecture     = Convert-AIOLangArchitectureName -Architecture $legacy.Architecture
+                    Version          = [version]$legacy.Version
+                    Build            = [int]([version]$legacy.Version).Build
+                    DefaultLanguage  = $defaultLanguage
+                    Languages        = [string[]]$langs.ToArray()
+                    InstallationType = [string]$legacy.InstallationType
+                    EditionId        = $editionId
+                }
+            }
+            catch {}
+        }
+        if (-not $detail) { throw "No se pudieron obtener metadatos verificables del indice $index en '$ImagePath'." }
+        [void]$records.Add($detail)
+    }
+    return [object[]]$records.ToArray()
+}
+
+function Get-AIOLangEsdImageIndexes {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$EsdPath)
+
+    return [int[]]@(Get-AIOLangImageIndexes -ImagePath $EsdPath)
+}
+
 
 function Expand-AIOLangEsdNative {
     [CmdletBinding()]
@@ -980,15 +1194,11 @@ function Get-AIOLangAdkInfo {
         # difiere y se limita despues a las carpetas realmente aplicables.
         $localizedPackageCount = -1
         if (Test-Path -LiteralPath $winPeRoot -PathType Container) {
-            foreach ($architecture in @(
-                [pscustomobject]@{ Folder = 'amd64'; Name = 'x64' },
-                [pscustomobject]@{ Folder = 'x86'; Name = 'x86' },
-                [pscustomobject]@{ Folder = 'arm64'; Name = 'arm64' },
-                [pscustomobject]@{ Folder = 'arm'; Name = 'arm' }
-            )) {
-                $ocRoot = Join-Path $winPeRoot "$($architecture.Folder)\WinPE_OCs"
+            foreach ($architectureName in @($script:AIOLangPolicy.WinPEFolderMap.Keys)) {
+                $folder = [string]$script:AIOLangPolicy.WinPEFolderMap[$architectureName]
+                $ocRoot = Join-Path $winPeRoot "$folder\WinPE_OCs"
                 if (Test-Path -LiteralPath $ocRoot -PathType Container) {
-                    [void]$architectures.Add($architecture.Name)
+                    [void]$architectures.Add([string]$architectureName)
                 }
             }
         }
@@ -1017,8 +1227,13 @@ function Get-AIOLangAdkInfo {
     $winPeRecord = if ($bestWinPE.Count -gt 0) { $bestWinPE[0] } else { $null }
     $primary = if ($dismRecord) { $dismRecord } elseif ($winPeRecord) { $winPeRecord } else { $null }
 
+    $adkInstalled = [bool](@($recordArray | Where-Object {
+        $_.DeploymentToolsRoot -or ([string]$_.Root -match '(?i)\\Windows Kits\\10\\Assessment and Deployment Kit$')
+    }).Count -gt 0)
+
     return [pscustomobject]@{
         Detected                = ($null -ne $primary)
+        AdkInstalled            = $adkInstalled
         Root                    = $(if ($primary) { $primary.Root } else { $null })
         DetectionSources        = [string[]]@($recordArray | Select-Object -ExpandProperty Source -Unique)
         DeploymentToolsRoot     = $(if ($dismRecord) { $dismRecord.DeploymentToolsRoot } else { $null })
@@ -1071,41 +1286,46 @@ function Initialize-AIOLangServicingEnvironment {
 
 function Show-AIOLangAdkStatus {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)] [object]$AdkInfo)
+    param(
+        [Parameter(Mandatory = $true)] [object]$AdkInfo,
+        [AllowEmptyCollection()] [string[]]$MediaArchitectures = @()
+    )
 
-    if ($AdkInfo.Detected) {
-        Write-Host ' ADK          : Detectado' -ForegroundColor Green
-        if ($AdkInfo.Root) { Write-Host " Ruta ADK     : $($AdkInfo.Root)" -ForegroundColor White }
-        if ($AdkInfo.WinPERoot) {
-            $architectures = if (@($AdkInfo.WinPEArchitectures).Count -gt 0) { @($AdkInfo.WinPEArchitectures) -join ', ' } else { 'N/D' }
-            $inventoryText = if ([int]$AdkInfo.WinPELocalizedPackages -ge 0) { "$($AdkInfo.WinPELocalizedPackages) paquete(s)" } else { 'inventario diferido' }
-            Write-Host " WinPE Add-on : Detectado | $architectures | $inventoryText" -ForegroundColor Green
-            Write-Host " Ruta WinPE   : $($AdkInfo.WinPERoot)" -ForegroundColor DarkGray
-        }
-        else {
-            Write-Host ' WinPE Add-on : No detectado. Instala el complemento de Windows PE para integrar boot.wim y winre.wim.' -ForegroundColor Yellow
-        }
+    $mediaArchitectureNames = @($MediaArchitectures | Where-Object { $_ -and $_ -ne 'Unknown' } | Select-Object -Unique)
+    $mediaArchitectureText = if ($mediaArchitectureNames.Count -gt 0) { $mediaArchitectureNames -join ', ' } else { 'N/D' }
+    Write-Host " Arquitecturas del medio : $mediaArchitectureText" -ForegroundColor White
+
+    $adkInstalled = if ($AdkInfo.PSObject.Properties['AdkInstalled']) { [bool]$AdkInfo.AdkInstalled } else { [bool]$AdkInfo.Detected }
+    if ($adkInstalled) {
+        Write-Host ' ADK                    : Instalado/detectado' -ForegroundColor Green
+        if ($AdkInfo.Root -and [string]$AdkInfo.Root -match '(?i)Windows Kits') { Write-Host " Ruta ADK               : $($AdkInfo.Root)" -ForegroundColor White }
     }
     else {
-        Write-Host ' ADK          : No detectado' -ForegroundColor Yellow
-        Write-Host ' WinPE Add-on : No detectado; solo se usaran paquetes WinPE presentes en el repositorio.' -ForegroundColor DarkYellow
+        Write-Host ' ADK                    : No instalado/detectado' -ForegroundColor Yellow
+    }
+
+    if ($AdkInfo.WinPERoot) {
+        $architectures = if (@($AdkInfo.WinPEArchitectures).Count -gt 0) { @($AdkInfo.WinPEArchitectures) -join ', ' } else { 'N/D' }
+        Write-Host ' Fuente WinPE           : Detectada' -ForegroundColor Green
+        Write-Host " Arquitecturas en fuente : $architectures (disponibles)" -ForegroundColor White
+        Write-Host " Ruta WinPE             : $($AdkInfo.WinPERoot)" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host ' Fuente WinPE           : No detectada; boot.wim puede usar SetupResourcesOnly y WinRE solo usa CAB compatibles del repositorio.' -ForegroundColor DarkYellow
     }
 
     $versionText = if ($AdkInfo.ActiveDismVersion) { [string]$AdkInfo.ActiveDismVersion } else { 'N/D' }
-    Write-Host " DISM activo  : $($AdkInfo.ActiveDismSource) | $versionText" -ForegroundColor White
-    Write-Host " Ruta DISM    : $($AdkInfo.ActiveDismPath)" -ForegroundColor DarkGray
+    Write-Host " DISM activo            : $($AdkInfo.ActiveDismSource) | $versionText" -ForegroundColor White
+    Write-Host " Ruta DISM              : $($AdkInfo.ActiveDismPath)" -ForegroundColor DarkGray
 }
 
 function Test-AIOLangBuildCompatibility {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)] [int]$TargetBuild,
-        [AllowNull()] [object]$PackageBuild,
-        [ValidateRange(1, 999)] [int]$MaximumBuildDelta = 500
+        [AllowNull()] [object]$PackageBuild
     )
 
-    # Los paquetes sin build legible conservan el comportamiento permisivo
-    # anterior; DISM sigue siendo la comprobacion final de aplicabilidad.
     [int]$normalizedPackageBuild = 0
     if ($null -eq $PackageBuild -or
         -not [int]::TryParse([string]$PackageBuild, [ref]$normalizedPackageBuild) -or
@@ -1116,15 +1336,23 @@ function Test-AIOLangBuildCompatibility {
     if ($normalizedPackageBuild -eq $TargetBuild) { return $true }
     if ($normalizedPackageBuild -gt $TargetBuild) { return $false }
 
-    # Las familias de mantenimiento comparten la misma rama de millar. La
-    # diferencia maxima evita aceptar generaciones distintas que coincidan
-    # solo por prefijo (por ejemplo, 22000 frente a 22621), sin enumerar builds.
-    $targetBranch = [int][math]::Floor($TargetBuild / 1000)
-    $packageBranch = [int][math]::Floor($normalizedPackageBuild / 1000)
-    if ($targetBranch -ne $packageBranch) { return $false }
+    # Familias historicamente compartidas sin mantener una lista de builds:
+    # - revisiones enablement dentro de la misma centena (19041->19045,
+    #   22621->22631);
+    # - bases de servicing terminadas en x100 que alimentan builds posteriores
+    #   del mismo millar (por ejemplo 26100 -> 26200/26300).
+    # Esto elimina el antiguo delta fijo de 500, que podia aceptar/rechazar
+    # generaciones por una distancia numerica arbitraria.
+    if ([math]::Floor($TargetBuild / 100) -eq [math]::Floor($normalizedPackageBuild / 100)) { return $true }
 
-    return (($TargetBuild - $normalizedPackageBuild) -le $MaximumBuildDelta)
+    $targetThousand = [int][math]::Floor($TargetBuild / 1000)
+    $packageThousand = [int][math]::Floor($normalizedPackageBuild / 1000)
+    $packageRemainder = $normalizedPackageBuild % 1000
+    if ($targetThousand -eq $packageThousand -and $packageRemainder -eq 100) { return $true }
+
+    return $false
 }
+
 
 function Get-AIOLangBuildFamily {
     [CmdletBinding()]
@@ -1313,7 +1541,7 @@ function Read-AIOLangAssemblyIdentity {
     $locale = if ($language -and $language -ne 'neutral' -and $language -ne '*') { Normalize-AIOLangLocale -Locale $language } else { Get-AIOLangLocaleFromText -Text $name }
     $architecture = if ($arch) { Convert-AIOLangArchitectureName -Architecture $arch } else { Get-AIOLangArchitectureFromText -Text $name }
     $packageName = if ($token -and $arch -and $version) {
-        '{0}~{1}~{2}~{3}~{4}' -f $name, $token, $arch, $(if ($language -and $language -ne '*') { $language } else { '' }), $version
+        '{0}~{1}~{2}~{3}~{4}' -f $name, $token, $arch, $(if ($language -and $language -notin @('*', 'neutral')) { $language } else { '' }), $version
     }
     else { $null }
 
@@ -1327,6 +1555,95 @@ function Read-AIOLangAssemblyIdentity {
     }
 }
 
+
+function Get-AIOLangPackageProductFamily {
+    [CmdletBinding()]
+    param(
+        [AllowNull()] [string]$IdentityName,
+        [Parameter(Mandatory = $true)] [string]$FilePath,
+        [AllowNull()] [string]$Category
+    )
+
+    if ($Category -eq 'WinPE') { return 'WinPE' }
+    $textValue = (([string]$IdentityName) + ' ' + $FilePath).ToLowerInvariant()
+    if ($textValue -match $script:AIOLangPolicy.ProductPatterns.Server) { return 'Server' }
+    if ($textValue -match $script:AIOLangPolicy.ProductPatterns.Client) { return 'Client' }
+    if ($textValue -match $script:AIOLangPolicy.ProductPatterns.WinPE) { return 'WinPE' }
+    return 'Neutral'
+}
+
+function Get-AIOLangImageProductFamily {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [object]$Image)
+
+    $installationType = if ($Image.PSObject.Properties['InstallationType']) { [string]$Image.InstallationType } else { '' }
+    $name = if ($Image.PSObject.Properties['ImageName']) { [string]$Image.ImageName } else { '' }
+    $description = if ($Image.PSObject.Properties['ImageDescription']) { [string]$Image.ImageDescription } else { '' }
+    $combined = "$installationType $name $description"
+    if ($combined -match '(?i)(Windows PE|Windows Setup|WinPE)') { return 'WinPE' }
+    if ($combined -match '(?i)(Server|Azure Stack HCI)') { return 'Server' }
+    if ($installationType -match '(?i)Client') { return 'Client' }
+    return 'Client'
+}
+
+function Test-AIOLangProductCompatibility {
+    [CmdletBinding()]
+    param(
+        [AllowNull()] [string]$ImageFamily,
+        [AllowNull()] [string]$PackageFamily,
+        [AllowNull()] [string]$Category
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PackageFamily) -or $PackageFamily -eq 'Neutral') { return $true }
+    if ([string]::IsNullOrWhiteSpace($ImageFamily) -or $ImageFamily -eq 'Unknown') { return $true }
+    if ($Category -eq 'WinPE') { return ($PackageFamily -in @('WinPE','Neutral')) }
+    if ($ImageFamily -eq 'WinPE') { return $true }
+    return ($ImageFamily -eq $PackageFamily)
+}
+
+function Test-AIOLangEditionSupportsAdditionalLanguages {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [object]$Image)
+
+    $editionId = if ($Image.PSObject.Properties['EditionId']) { [string]$Image.EditionId } else { '' }
+    $name = if ($Image.PSObject.Properties['ImageName']) { [string]$Image.ImageName } else { '' }
+    return -not (("$editionId $name") -match $script:AIOLangPolicy.RestrictedMultilingualEditionPattern)
+}
+
+function Assert-AIOLangEditionLanguageSupport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [object[]]$Images,
+        [Parameter(Mandatory = $true)] [int[]]$Indexes
+    )
+
+    $restricted = @($Images | Where-Object { [int]$_.ImageIndex -in $Indexes -and -not (Test-AIOLangEditionSupportsAdditionalLanguages -Image $_) })
+    if ($restricted.Count -gt 0) {
+        $details = @($restricted | ForEach-Object {
+            $edition = if ($_.PSObject.Properties['EditionId'] -and $_.EditionId) { $_.EditionId } else { $_.ImageName }
+            "indice $($_.ImageIndex): $edition"
+        }) -join '; '
+        throw "Las siguientes ediciones restringen la adicion de idiomas completos: $details. Selecciona una edicion multilingue compatible."
+    }
+}
+
+function Assert-AIOLangProductFamilyConsistency {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [object[]]$Images,
+        [Parameter(Mandatory = $true)] [int[]]$Indexes
+    )
+
+    $selected = @($Images | Where-Object { [int]$_.ImageIndex -in $Indexes })
+    $families = @($selected | ForEach-Object {
+        if ($_.PSObject.Properties['ProductFamily'] -and $_.ProductFamily) { [string]$_.ProductFamily }
+        else { Get-AIOLangImageProductFamily -Image $_ }
+    } | Where-Object { $_ -in @('Client','Server') } | Select-Object -Unique)
+    if ($families.Count -gt 1) {
+        throw "La seleccion mezcla imagenes Client y Server. Procesalas por separado para que los Language Packs y los recursos de Windows Setup mantengan una unica familia de producto."
+    }
+}
+
 function Get-AIOLangPackageCategory {
     [CmdletBinding()]
     param(
@@ -1334,8 +1651,12 @@ function Get-AIOLangPackageCategory {
         [Parameter(Mandatory = $true)] [string]$FilePath
     )
 
-    # La identidad CBS es la autoridad. El nombre y la carpeta solo se usan
-    # cuando el contenedor no expone una identidad utilizable.
+    $pathText = ($FilePath -replace '\\', '/').ToLowerInvariant()
+    if ($pathText -match '/winpe_ocs/') { return 'WinPE' }
+
+    # La identidad CBS es la autoridad para el resto de casos. El nombre y la
+    # carpeta solo se usan cuando el contenedor no expone una identidad
+    # utilizable.
     $identityText = ([string]$IdentityName).Trim().ToLowerInvariant()
     if (-not [string]::IsNullOrWhiteSpace($identityText)) {
         if ($identityText -match 'winpe[_/-]|winpe-') { return 'WinPE' }
@@ -1359,25 +1680,18 @@ function Get-AIOLangPackagePriority {
         [Parameter(Mandatory = $true)] [string]$FilePath
     )
 
-    $text = ($IdentityName + ' ' + [System.IO.Path]::GetFileName($FilePath)).ToLowerInvariant()
+    $textValue = ($IdentityName + ' ' + [System.IO.Path]::GetFileName($FilePath)).ToLowerInvariant()
     if ($Category -eq 'LanguagePack') { return 0 }
     if ($Category -eq 'WinPE') {
-        if ($text -match '(?:^|[-_])lp(?:[._-]|$)|common-foundation|winpe-srt') { return 10 }
-        if ($text -match 'fontsupport') { return 15 }
-        if ($text -match 'rejuv|storagewmi|hta') { return 20 }
-        if ($text -match 'enhancedstorage|scripting|securestartup|wds-tools|winpe-wmi') { return 30 }
-        if ($text -match 'winpe-setup') { return 40 }
+        if (Test-AIOLangPolicyPatternSet -Text $textValue -Patterns ([string[]]$script:AIOLangPolicy.WinPEFontSupportPatterns)) { return 15 }
+        foreach ($rule in @($script:AIOLangPolicy.WinPEPriorityRules)) {
+            if ($textValue -match [string]$rule.Pattern) { return [int]$rule.Priority }
+        }
         return 35
     }
-    if ($text -match 'languagefeatures-basic') { return 10 }
-    if ($text -match 'languagefeatures-fonts') { return 20 }
-    if ($text -match 'languagefeatures-(texttospeech|handwriting|ocr|speech)|internationalfeatures') { return 30 }
-    if ($text -match 'ethernet|wifi') { return 40 }
-    if ($text -match 'mspaint|notepad|powershell-ise|internetexplorer') { return 50 }
-    if ($text -match 'snippingtool|stepsrecorder|wordpad|printing') { return 60 }
-    if ($text -match 'mediaplayer|wmic|terminalservices|virtualmachineplatform') { return 70 }
-    if ($text -match 'projfs|telnet|tftp|vbscript|winocr|smbdirect|simpletcp|senseclient|enterpriseclientsync|directoryservices') { return 80 }
-    if ($text -match 'servercorefonts') { return 90 }
+    foreach ($rule in @($script:AIOLangPolicy.FodPriorityRules)) {
+        if ($textValue -match [string]$rule.Pattern) { return [int]$rule.Priority }
+    }
     return 75
 }
 
@@ -1410,7 +1724,8 @@ function Get-AIOLangPreferredPackageIdentity {
             elseif ($fileStem -match 'languagepack|language-pack|client-languagepack|server-languagepack' -and $identityName -match 'languagepack|language-pack|client-languagepack|server-languagepack') { $score = 20 }
             elseif ($fileStem -match 'winpe' -and $identityName -match 'winpe') { $score = 30 }
             elseif ($identityName -match 'languagefeatures|internationalfeatures') { $score = 60 }
-            elseif ($identityName -match 'languagepack|common-foundation') { $score = 70 }
+            elseif ($identityName -match 'languagepack') { $score = 65 }
+            elseif ($identityName -match 'common-foundation') { $score = 72 }
             elseif ($identityName -match 'winpe') { $score = 80 }
         }
         $score
@@ -1440,6 +1755,7 @@ function Get-AIOLangPackageMetadata {
     $version = Get-AIOLangVersionFromText -Text $nameText
     $identityName = $null
     $packageName = $null
+    $detectedProductFamily = 'Neutral'
     $reason = 'Clasificacion por nombre y ruta.'
     $supported = $true
 
@@ -1464,6 +1780,12 @@ function Get-AIOLangPackageMetadata {
             $identity = Read-AIOLangAssemblyIdentity -MumPath $mum.FullName
             if ($identity) { [void]$identities.Add($identity) }
         }
+
+        $identityNames = @($identities.ToArray() | Select-Object -ExpandProperty Name -Unique)
+        $allIdentityText = ($identityNames -join ' ')
+        if ($allIdentityText -match $script:AIOLangPolicy.ProductPatterns.Server) { $detectedProductFamily = 'Server' }
+        elseif ($allIdentityText -match $script:AIOLangPolicy.ProductPatterns.Client) { $detectedProductFamily = 'Client' }
+        elseif ($allIdentityText -match $script:AIOLangPolicy.ProductPatterns.WinPE) { $detectedProductFamily = 'WinPE' }
 
         $preferred = Get-AIOLangPreferredPackageIdentity -Identities ([object[]]$identities.ToArray()) -PackagePath $resolved
 
@@ -1516,6 +1838,7 @@ function Get-AIOLangPackageMetadata {
         Build        = $build
         IdentityName = $identityName
         PackageName  = $packageName
+        ProductFamily = $(if ($category -eq 'WinPE') { 'WinPE' } elseif ($detectedProductFamily -ne 'Neutral') { $detectedProductFamily } else { Get-AIOLangPackageProductFamily -IdentityName $identityName -FilePath $resolved -Category $category })
         Priority     = Get-AIOLangPackagePriority -Category $category -IdentityName $identityName -FilePath $resolved
         Supported    = $supported
         Reason       = $reason
@@ -1557,12 +1880,12 @@ function Get-AIOLangAdkWinPEPackageFiles {
     )
     if ($architectures.Count -eq 0) { $architectures = @('x64', 'x86', 'arm64', 'arm') }
 
-    $folderMap = @{ x64 = 'amd64'; x86 = 'x86'; arm64 = 'arm64'; arm = 'arm' }
+    $folderMap = $script:AIOLangPolicy.WinPEFolderMap
     $files = New-Object System.Collections.Generic.List[System.IO.FileInfo]
     $seen = @{}
 
     foreach ($architecture in $architectures) {
-        if (-not $folderMap.ContainsKey($architecture)) { continue }
+        if (-not $folderMap.Contains($architecture)) { continue }
         $ocRoot = Join-Path $resolved "$($folderMap[$architecture])\WinPE_OCs"
         if (-not (Test-Path -LiteralPath $ocRoot -PathType Container)) { continue }
 
@@ -1595,11 +1918,13 @@ function Get-AIOLangAdkWinPEPackageFiles {
                 }
             }
 
-            # Algunos Add-on colocan CAB localizados en la raiz de WinPE_OCs.
+            # Algunos complementos colocan CAB localizados en la raiz de WinPE_OCs.
             $escapedLocale = [regex]::Escape($locale)
             foreach ($path in [System.IO.Directory]::EnumerateFiles($ocRoot, '*.cab', [System.IO.SearchOption]::TopDirectoryOnly)) {
                 $name = [System.IO.Path]::GetFileName($path)
-                if ($name -notmatch "(?i)(?:_|-)$escapedLocale\.cab$|^WinPE-FontSupport-$escapedLocale\.cab$") { continue }
+                $isLocaleCab = [bool]($name -match "(?i)(?:_|-)$escapedLocale\.cab$")
+                $isFontSupport = (Test-AIOLangPolicyPatternSet -Text $name -Patterns ([string[]]$script:AIOLangPolicy.WinPEFontSupportPatterns))
+                if (-not $isLocaleCab -and -not ($isFontSupport -and $name -match "(?i)$escapedLocale")) { continue }
                 $key = $path.ToLowerInvariant()
                 if (-not $seen.ContainsKey($key)) {
                     $seen[$key] = $true
@@ -1639,7 +1964,8 @@ function Get-AIOLangLogicalPackageKey {
 
     $identity = if ($Package.IdentityName) { [string]$Package.IdentityName } else { [System.IO.Path]::GetFileNameWithoutExtension([string]$Package.Name) }
     $version = if ($Package.Version) { [string]$Package.Version } elseif ($Package.Build) { [string]$Package.Build } else { '0' }
-    return ('{0}|{1}|{2}|{3}|{4}' -f $Package.Category, $Package.Locale, $Package.Architecture, $identity, $version).ToLowerInvariant()
+    $productFamily = if ($Package.PSObject.Properties['ProductFamily'] -and $Package.ProductFamily) { [string]$Package.ProductFamily } else { 'Neutral' }
+    return ('{0}|{1}|{2}|{3}|{4}|{5}' -f $Package.Category, $Package.Locale, $Package.Architecture, $productFamily, $identity, $version).ToLowerInvariant()
 }
 
 function Merge-AIOLangLogicalInventory {
@@ -1954,48 +2280,36 @@ function Get-AIOLangImageMetadata {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)] [string]$ImagePath)
 
-    $summaries = @(Get-WindowsImage -ImagePath $ImagePath -ErrorAction Stop)
-    if ($summaries.Count -eq 0) { throw "No se encontraron indices en '$ImagePath'." }
-
+    $records = @(Get-AIOLangImageRecords -ImagePath $ImagePath)
+    if ($records.Count -eq 0) { throw "No se encontraron indices en '$ImagePath'." }
     $details = New-Object System.Collections.Generic.List[object]
-    foreach ($summary in $summaries) {
-        $index = [int]$summary.ImageIndex
-        $detail = Get-WindowsImage -ImagePath $ImagePath -Index $index -ErrorAction Stop
-        if (-not $detail.Version) { throw "DISM no devolvio la version del indice $index." }
-        $defaultLanguage = $null
-        foreach ($propertyName in @('DefaultLanguage', 'Default Language', 'Language')) {
-            $property = $detail.PSObject.Properties[$propertyName]
-            if ($property -and $property.Value) {
-                $defaultLanguage = Normalize-AIOLangLocale -Locale ([string]$property.Value)
-                break
-            }
-        }
+    foreach ($record in $records) {
         $languages = New-Object System.Collections.Generic.List[string]
-        foreach ($propertyName in @('Languages', 'Language')) {
-            $property = $detail.PSObject.Properties[$propertyName]
-            if ($property -and $property.Value) {
-                foreach ($language in @($property.Value)) {
-                    $normalized = Normalize-AIOLangLocale -Locale ([string]$language)
-                    if ($normalized -and $normalized -notin $languages) { [void]$languages.Add($normalized) }
-                }
-            }
+        foreach ($language in @($record.Languages)) {
+            $normalized = Normalize-AIOLangLocale -Locale ([string]$language)
+            if ($normalized -and $normalized -notin $languages) { [void]$languages.Add($normalized) }
         }
+        $defaultLanguage = Normalize-AIOLangLocale -Locale ([string]$record.DefaultLanguage)
         if ($defaultLanguage -and $defaultLanguage -notin $languages) { [void]$languages.Add($defaultLanguage) }
-
-        [void]$details.Add([pscustomobject]@{
-            ImageIndex       = $index
-            ImageName        = [string]$detail.ImageName
-            ImageDescription = [string]$detail.ImageDescription
-            Architecture     = Convert-AIOLangArchitectureName -Architecture $detail.Architecture
-            Version          = [version]$detail.Version
-            Build            = [int]([version]$detail.Version).Build
+        $obj = [pscustomobject]@{
+            ImageIndex       = [int]$record.ImageIndex
+            ImageName        = [string]$record.ImageName
+            ImageDescription = [string]$record.ImageDescription
+            Architecture     = Convert-AIOLangArchitectureName -Architecture $record.Architecture
+            Version          = [version]$record.Version
+            Build            = [int]$record.Build
             DefaultLanguage  = $defaultLanguage
             Languages        = [string[]]$languages.ToArray()
-            InstallationType = [string]$detail.InstallationType
-        })
+            InstallationType = [string]$record.InstallationType
+            EditionId        = [string]$record.EditionId
+            ProductFamily    = $null
+        }
+        $obj.ProductFamily = Get-AIOLangImageProductFamily -Image $obj
+        [void]$details.Add($obj)
     }
     return [object[]]$details.ToArray()
 }
+
 
 function Select-AIOLangInstallIndexes {
     [CmdletBinding()]
@@ -2060,11 +2374,22 @@ function Select-AIOLangLocales {
     )
 
     $targetArchitectures = @($TargetImages | ForEach-Object { Convert-AIOLangArchitectureName -Architecture $_.Architecture } | Where-Object { $_ } | Select-Object -Unique)
-    $locales = @($Inventory | Where-Object {
+    $candidateLocales = @($Inventory | Where-Object {
         $_.Category -eq 'LanguagePack' -and $_.Locale -and $_.Supported -and
         ($targetArchitectures.Count -eq 0 -or $_.Architecture -in $targetArchitectures)
     } | Select-Object -ExpandProperty Locale -Unique | Sort-Object)
-    if ($locales.Count -eq 0) { throw 'No hay idiomas principales utilizables en el repositorio.' }
+    if (@($TargetImages).Count -gt 0) {
+        $locales = @($candidateLocales | Where-Object {
+            $localeCandidate = [string]$_
+            $missingTarget = @($TargetImages | Where-Object {
+                $family = if ($_.PSObject.Properties['ProductFamily'] -and $_.ProductFamily) { [string]$_.ProductFamily } else { Get-AIOLangImageProductFamily -Image $_ }
+                -not (Get-AIOLangBestPackage -Packages $Inventory -Locale $localeCandidate -Architecture $_.Architecture -Build $_.Build -Category 'LanguagePack' -ProductFamily $family)
+            })
+            $missingTarget.Count -eq 0
+        })
+    }
+    else { $locales = $candidateLocales }
+    if ($locales.Count -eq 0) { throw 'No hay idiomas principales compatibles con todas las imagenes seleccionables del medio.' }
 
     Write-Host "`n Idiomas disponibles:" -ForegroundColor Yellow
     for ($i = 0; $i -lt $locales.Count; $i++) {
@@ -2117,26 +2442,35 @@ function Get-AIOLangBestPackage {
         [Parameter(Mandatory = $true)] [string]$Locale,
         [Parameter(Mandatory = $true)] [string]$Architecture,
         [Parameter(Mandatory = $true)] [int]$Build,
-        [Parameter(Mandatory = $true)] [string]$Category
+        [Parameter(Mandatory = $true)] [string]$Category,
+        [string]$ProductFamily = 'Unknown'
     )
 
     $normalizedPackages = @($Packages | Where-Object { $null -ne $_ })
     if ($normalizedPackages.Count -eq 0) { return $null }
 
     $candidates = @($normalizedPackages | Where-Object {
+        $packageFamily = if ($_.PSObject.Properties['ProductFamily']) { [string]$_.ProductFamily } else { 'Neutral' }
         $_.Category -eq $Category -and $_.Supported -and $_.Locale -eq $Locale -and
         $_.Architecture -eq $Architecture -and
-        (Test-AIOLangBuildCompatibility -TargetBuild $Build -PackageBuild $_.Build)
+        (Test-AIOLangBuildCompatibility -TargetBuild $Build -PackageBuild $_.Build) -and
+        (Test-AIOLangProductCompatibility -ImageFamily $ProductFamily -PackageFamily $packageFamily -Category $Category)
     })
     if ($candidates.Count -eq 0) { return $null }
 
     return @($candidates | Sort-Object @{ Expression = {
+        $packageFamily = if ($_.PSObject.Properties['ProductFamily']) { [string]$_.ProductFamily } else { 'Neutral' }
+        if ($ProductFamily -notin @('Unknown','WinPE') -and $packageFamily -eq $ProductFamily) { 0 }
+        elseif ($packageFamily -eq 'Neutral') { 1 }
+        else { 2 }
+    }}, @{ Expression = {
         if ($null -ne $_.Build -and [int]$_.Build -eq $Build) { 0 }
         elseif ($null -ne $_.Build -and [int]$_.Build -gt 0) { 1 }
         else { 2 }
     }}, @{ Expression = { if ($null -ne $_.Build) { [int]$_.Build } else { 0 } }; Descending = $true },
        @{ Expression = { if ($_.Version) { $_.Version } else { [version]'0.0.0.0' } }; Descending = $true }, Name | Select-Object -First 1)[0]
 }
+
 
 function Assert-AIOLangPackageCoverage {
     [CmdletBinding()]
@@ -2151,7 +2485,8 @@ function Assert-AIOLangPackageCoverage {
     $missing = New-Object System.Collections.Generic.List[string]
     foreach ($image in $selectedImages) {
         foreach ($locale in $Locales) {
-            $package = Get-AIOLangBestPackage -Packages $Inventory -Locale $locale -Architecture $image.Architecture -Build $image.Build -Category 'LanguagePack'
+            $imageFamily = if ($image.PSObject.Properties['ProductFamily'] -and $image.ProductFamily) { [string]$image.ProductFamily } else { Get-AIOLangImageProductFamily -Image $image }
+            $package = Get-AIOLangBestPackage -Packages $Inventory -Locale $locale -Architecture $image.Architecture -Build $image.Build -Category 'LanguagePack' -ProductFamily $imageFamily
             if (-not $package) {
                 [void]$missing.Add("$locale / $($image.Architecture) / build $($image.Build) (indice $($image.ImageIndex))")
             }
@@ -2221,16 +2556,19 @@ function Get-AIOLangPackagesForImage {
         [Parameter(Mandatory = $true)] [ValidateSet('LanguagePack', 'LanguageFOD', 'WinPE')] [string]$Category
     )
 
+    $imageFamily = if ($Image.PSObject.Properties['ProductFamily'] -and $Image.ProductFamily) { [string]$Image.ProductFamily } else { Get-AIOLangImageProductFamily -Image $Image }
     $result = @($Inventory | Where-Object {
+        $packageFamily = if ($_.PSObject.Properties['ProductFamily']) { [string]$_.ProductFamily } else { 'Neutral' }
         $_.Category -eq $Category -and $_.Supported -and $_.Locale -in $Locales -and
         $_.Architecture -eq $Image.Architecture -and
-        (Test-AIOLangBuildCompatibility -TargetBuild ([int]$Image.Build) -PackageBuild $_.Build)
+        (Test-AIOLangBuildCompatibility -TargetBuild ([int]$Image.Build) -PackageBuild $_.Build) -and
+        (Test-AIOLangProductCompatibility -ImageFamily $imageFamily -PackageFamily $packageFamily -Category $Category)
     })
 
     if ($Category -eq 'LanguagePack') {
         $best = New-Object System.Collections.Generic.List[object]
         foreach ($locale in $Locales) {
-            $item = Get-AIOLangBestPackage -Packages $result -Locale $locale -Architecture $Image.Architecture -Build $Image.Build -Category 'LanguagePack'
+            $item = Get-AIOLangBestPackage -Packages $result -Locale $locale -Architecture $Image.Architecture -Build $Image.Build -Category 'LanguagePack' -ProductFamily $imageFamily
             if ($item) { [void]$best.Add($item) }
         }
         return [object[]]$best.ToArray()
@@ -2239,6 +2577,11 @@ function Get-AIOLangPackagesForImage {
     $deduplicated = New-Object System.Collections.Generic.List[object]
     foreach ($group in @($result | Group-Object Locale, IdentityName)) {
         $item = @($group.Group | Sort-Object @{ Expression = {
+            $packageFamily = if ($_.PSObject.Properties['ProductFamily']) { [string]$_.ProductFamily } else { 'Neutral' }
+            if ($imageFamily -notin @('Unknown','WinPE') -and $packageFamily -eq $imageFamily) { 0 }
+            elseif ($packageFamily -eq 'Neutral' -or $Category -eq 'WinPE') { 1 }
+            else { 2 }
+        }}, @{ Expression = {
             if ($null -ne $_.Build -and [int]$_.Build -eq [int]$Image.Build) { 0 }
             elseif ($null -ne $_.Build -and [int]$_.Build -gt 0) { 1 }
             else { 2 }
@@ -2249,13 +2592,15 @@ function Get-AIOLangPackagesForImage {
     return [object[]]($deduplicated.ToArray() | Sort-Object Priority, Locale, Name)
 }
 
+
 function Get-AIOLangWinPECompatibilityReport {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)] [object[]]$Inventory,
         [Parameter(Mandatory = $true)] [object[]]$TargetImages,
         [Parameter(Mandatory = $true)] [string[]]$Locales,
-        [Parameter(Mandatory = $true)] [string]$Context
+        [Parameter(Mandatory = $true)] [string]$Context,
+        [switch]$ExcludeAdkSource
     )
 
     $rows = New-Object System.Collections.Generic.List[object]
@@ -2267,7 +2612,20 @@ function Get-AIOLangWinPECompatibilityReport {
         if ($seenTargets.ContainsKey($key)) { continue }
         $seenTargets[$key] = $true
 
-        $compatible = @(Get-AIOLangPackagesForImage -Inventory $Inventory -Image $image -Locales $Locales -Category 'WinPE')
+        $compatibleRaw = @(Get-AIOLangPackagesForImage -Inventory $Inventory -Image $image -Locales $Locales -Category 'WinPE')
+        $compatible = $compatibleRaw
+        if ($ExcludeAdkSource) {
+            $compatible = @($compatibleRaw | Where-Object {
+                $pkgSource = if ($_.PSObject.Properties['Source']) { $_.Source } else { 'Repositorio' }
+                $pkgSource -ne 'ADK WinPE'
+            })
+        }
+        # Microsoft indica usar el idioma del ISO de Languages and Optional
+        # Features (no el ADK) para localizar WinRE. Si el unico CAB WinPE
+        # compatible por build/arquitectura/idioma viene del ADK, se marca
+        # para que el diagnostico lo explique en vez de mostrar un simple
+        # desfase de build.
+        $adkOnlyMatch = [bool]($ExcludeAdkSource -and $compatible.Count -eq 0 -and $compatibleRaw.Count -gt 0)
         $sameTarget = @($Inventory | Where-Object {
             $_.Category -eq 'WinPE' -and $_.Supported -and $_.Locale -in $Locales -and $_.Architecture -eq $architecture
         })
@@ -2288,6 +2646,7 @@ function Get-AIOLangWinPECompatibilityReport {
             RequiredFamily    = $family
             Locales           = [string[]]$Locales
             CompatibleCount   = $compatible.Count
+            AdkOnlyMatch      = $adkOnlyMatch
             AvailableCount    = $sameTarget.Count
             AvailableBuilds   = [int[]]$availableBuilds
             AvailableFamilies = [int[]]$availableFamilies
@@ -2318,7 +2677,11 @@ function Show-AIOLangWinPECompatibilityDiagnostics {
             "build $($report.ImageBuild), familia $($report.RequiredFamily)"
         }
 
-        if ($report.AvailableCount -gt 0) {
+        if ($report.PSObject.Properties['AdkOnlyMatch'] -and $report.AdkOnlyMatch) {
+            Write-Host " [NO PERMITIDO] $($report.Context) $($report.Architecture): el unico CAB WinPE compatible ($requiredText) proviene del ADK." -ForegroundColor Yellow
+            Write-Host "                Microsoft indica no usar el ADK para localizar WinRE; usa el mismo arbol WinPE_OCs pero tomado del ISO de Languages and Optional Features." -ForegroundColor DarkYellow
+        }
+        elseif ($report.AvailableCount -gt 0) {
             $buildText = if (@($report.AvailableBuilds).Count -gt 0) { @($report.AvailableBuilds) -join ', ' } else { 'N/D' }
             $familyText = if (@($report.AvailableFamilies).Count -gt 0) { @($report.AvailableFamilies) -join ', ' } else { 'N/D' }
             $sourceText = if (@($report.AvailableSources).Count -gt 0) { @($report.AvailableSources) -join ', ' } else { 'N/D' }
@@ -2339,6 +2702,212 @@ function Show-AIOLangWinPECompatibilityDiagnostics {
     }
 }
 
+
+function Test-AIOLangEastAsianLocale {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$Locale)
+
+    $normalized = Normalize-AIOLangLocale -Locale $Locale
+    return [bool]($normalized -and $normalized -in @($script:AIOLangPolicy.EastAsianLocales))
+}
+
+function Test-AIOLangWinPEBaseLanguagePack {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [object]$Package)
+
+    $identity = if ($Package.PSObject.Properties['IdentityName']) { [string]$Package.IdentityName } else { '' }
+    $packageName = if ($Package.PSObject.Properties['PackageName']) { [string]$Package.PackageName } else { '' }
+    $name = if ($Package.PSObject.Properties['Name']) { [string]$Package.Name } else { '' }
+    $combined = "$identity $packageName $name"
+    return [bool]($combined -match '(?i)Microsoft-Windows-WinPE-LanguagePack-Package' -or $name -ieq 'lp.cab')
+}
+
+function Test-AIOLangWinPEFontSupportPackage {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [object]$Package)
+
+    $identity = if ($Package.PSObject.Properties['IdentityName']) { [string]$Package.IdentityName } else { '' }
+    $packageName = if ($Package.PSObject.Properties['PackageName']) { [string]$Package.PackageName } else { '' }
+    $name = if ($Package.PSObject.Properties['Name']) { [string]$Package.Name } else { '' }
+    return (Test-AIOLangPolicyPatternSet -Text "$identity $packageName $name" -Patterns ([string[]]$script:AIOLangPolicy.WinPEFontSupportPatterns))
+}
+
+function Get-AIOLangWinPELocalizationMode {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [object[]]$Inventory,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [object[]]$TargetImages,
+        [Parameter(Mandatory = $true)] [string[]]$Locales
+    )
+
+    $targets = @($TargetImages | Where-Object { $null -ne $_ })
+    if ($targets.Count -eq 0) {
+        return [pscustomobject]@{ Mode = 'NotAvailable'; Complete = $false; MissingBase = [string[]]@(); MissingFontSupport = [string[]]@() }
+    }
+
+    $missingBase = New-Object System.Collections.Generic.List[string]
+    $missingFonts = New-Object System.Collections.Generic.List[string]
+    foreach ($image in $targets) {
+        foreach ($locale in $Locales) {
+            $packages = @(Get-AIOLangPackagesForImage -Inventory $Inventory -Image $image -Locales @($locale) -Category 'WinPE')
+            if (@($packages | Where-Object { Test-AIOLangWinPEBaseLanguagePack -Package $_ }).Count -eq 0) {
+                [void]$missingBase.Add("$($image.Architecture):$locale")
+                continue
+            }
+            if ((Test-AIOLangEastAsianLocale -Locale $locale) -and @($packages | Where-Object { Test-AIOLangWinPEFontSupportPackage -Package $_ }).Count -eq 0) {
+                [void]$missingFonts.Add("$($image.Architecture):$locale")
+            }
+        }
+    }
+
+    $complete = ($missingBase.Count -eq 0 -and $missingFonts.Count -eq 0)
+    return [pscustomobject]@{
+        Mode = $(if ($complete) { 'FullWinPE' } else { 'SetupResourcesOnly' })
+        Complete = [bool]$complete
+        MissingBase = [string[]]$missingBase.ToArray()
+        MissingFontSupport = [string[]]$missingFonts.ToArray()
+    }
+}
+
+function Save-AIOLangEastAsianFontPayload {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$MountPath,
+        [Parameter(Mandatory = $true)] [object[]]$Payloads,
+        [Parameter(Mandatory = $true)] [string]$Architecture,
+        [Parameter(Mandatory = $true)] [string[]]$Locales,
+        [Parameter(Mandatory = $true)] [string]$CacheRoot
+    )
+
+    $eastAsian = @($Locales | ForEach-Object { Normalize-AIOLangLocale -Locale $_ } | Where-Object { $_ -and (Test-AIOLangEastAsianLocale -Locale $_) } | Select-Object -Unique)
+    if ($eastAsian.Count -eq 0) { return @() }
+
+    $archRoot = Join-Path $CacheRoot $Architecture
+    $bootSource = Join-Path $MountPath 'Windows\Boot\Fonts'
+    $bootCache = Join-Path $archRoot 'BootFonts'
+    if (-not (Test-Path -LiteralPath $bootSource -PathType Container)) {
+        throw "No existe Windows\\Boot\\Fonts en el indice usado para preparar soporte de fuentes de Asia oriental ($Architecture)."
+    }
+    if (-not (Test-Path -LiteralPath $bootCache -PathType Container)) {
+        Initialize-AIOLangDirectory -Path $bootCache -Empty
+        Copy-AIOLangTree -Source $bootSource -Destination $bootCache
+    }
+    $bootCount = @(Get-ChildItem -LiteralPath $bootCache -File -ErrorAction SilentlyContinue).Count
+    if ($bootCount -eq 0) { throw "No se pudieron capturar fuentes de arranque para $Architecture." }
+
+    $results = New-Object System.Collections.Generic.List[object]
+    foreach ($locale in $eastAsian) {
+        $key = $locale.ToLowerInvariant()
+        $fontNames = @($script:AIOLangPolicy.EastAsianFontFiles[$key])
+        if ($fontNames.Count -eq 0) { continue }
+        $systemCache = Join-Path $archRoot ("$locale\SystemFonts")
+        Initialize-AIOLangDirectory -Path $systemCache -Empty
+        $captured = New-Object System.Collections.Generic.List[string]
+        foreach ($fontName in $fontNames) {
+            $source = Join-Path $MountPath ("Windows\Fonts\$fontName")
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+                Write-AIOLangLog -Level WARN -Message "Fuente EA '$fontName' no encontrada para $locale en install.wim; se continuara con las disponibles."
+                continue
+            }
+            Copy-AIOLangFileWithRetry -Source $source -Destination (Join-Path $systemCache $fontName)
+            [void]$captured.Add($fontName)
+        }
+        if ($captured.Count -eq 0) {
+            throw "No se encontraron fuentes de respaldo para '$locale'. Sin WinPE FontSupport, Windows Setup podria mostrar caracteres vacios."
+        }
+
+        $support = [pscustomobject]@{
+            Locale = $locale
+            Architecture = $Architecture
+            BootFontsRoot = $bootCache
+            BootFontCount = $bootCount
+            SystemFontsRoot = $systemCache
+            SystemFontNames = [string[]]$captured.ToArray()
+        }
+        foreach ($payload in @($Payloads | Where-Object { $_.Architecture -eq $Architecture -and $_.Locale -eq $locale })) {
+            $payload | Add-Member -MemberType NoteProperty -Name EastAsianFontSupport -Value $support -Force
+        }
+        [void]$results.Add($support)
+        Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context "Capturar fuentes EA $locale" -State 'Success' -Details $support
+    }
+    return [object[]]$results.ToArray()
+}
+
+function Add-AIOLangEastAsianFontSupport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$MountPath,
+        [Parameter(Mandatory = $true)] [object[]]$Payloads,
+        [Parameter(Mandatory = $true)] [string]$Architecture,
+        [Parameter(Mandatory = $true)] [string[]]$Locales,
+        [Parameter(Mandatory = $true)] [string]$Context
+    )
+
+    $supports = @($Payloads | Where-Object {
+        $_.Architecture -eq $Architecture -and $_.Locale -in $Locales -and $_.PSObject.Properties['EastAsianFontSupport'] -and $null -ne $_.EastAsianFontSupport
+    } | ForEach-Object { $_.EastAsianFontSupport } | Sort-Object Locale -Unique)
+    if ($supports.Count -eq 0) {
+        return [pscustomobject]@{ Applied = $false; FileCount = 0; Locales = [string[]]@(); SystemFontNames = [string[]]@() }
+    }
+
+    $bootDestination = Join-Path $MountPath 'Windows\Boot\Fonts'
+    $systemDestination = Join-Path $MountPath 'Windows\Fonts'
+    Initialize-AIOLangDirectory -Path $bootDestination
+    Initialize-AIOLangDirectory -Path $systemDestination
+    $files = New-Object System.Collections.Generic.List[string]
+    $processed = New-Object System.Collections.Generic.List[string]
+    foreach ($support in $supports) {
+        if (Test-Path -LiteralPath $support.BootFontsRoot -PathType Container) {
+            Copy-AIOLangTree -Source $support.BootFontsRoot -Destination $bootDestination
+        }
+        foreach ($fontName in @($support.SystemFontNames)) {
+            $source = Join-Path $support.SystemFontsRoot $fontName
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Falta la fuente EA preparada '$source'." }
+            Copy-AIOLangFileWithRetry -Source $source -Destination (Join-Path $systemDestination $fontName)
+            if ($fontName -notin $files) { [void]$files.Add($fontName) }
+        }
+        if ($support.Locale -notin $processed) { [void]$processed.Add($support.Locale) }
+    }
+
+    $result = [pscustomobject]@{
+        Applied = $true
+        FileCount = $files.Count
+        Locales = [string[]]$processed.ToArray()
+        SystemFontNames = [string[]]$files.ToArray()
+    }
+    Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context $Context -State 'Success' -Details $result
+    Write-AIOLangLog -Level INFO -Message ("Soporte de fuentes EA aplicado en boot.wim: idiomas {0}; fuentes especificas {1}." -f ($processed -join ', '), ($files -join ', '))
+    return $result
+}
+
+function Assert-AIOLangEastAsianFontSupport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$MountPath,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [string[]]$ExpectedFontFiles,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [string[]]$Locales,
+        [Parameter(Mandatory = $true)] [string]$Context,
+        [string]$Mode = 'FontSupportOnly'
+    )
+
+    $bootRoot = Join-Path $MountPath 'Windows\Boot\Fonts'
+    $bootCount = if (Test-Path -LiteralPath $bootRoot -PathType Container) { @(Get-ChildItem -LiteralPath $bootRoot -File -ErrorAction SilentlyContinue).Count } else { 0 }
+    $missing = @($ExpectedFontFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $MountPath ("Windows\Fonts\$_")) -PathType Leaf) })
+    if ($bootCount -eq 0 -or $missing.Count -gt 0) {
+        throw "$Context fallo: soporte de fuentes EA incompleto. BootFonts=$bootCount; faltantes=$($missing -join ', ')."
+    }
+    $result = [pscustomobject]@{
+        Context = $Context
+        Mode = $Mode
+        EastAsianLocales = [string[]]$Locales
+        ExpectedSystemFonts = [string[]]$ExpectedFontFiles
+        MissingSystemFonts = [string[]]$missing
+        BootFontCount = $bootCount
+        Complete = $true
+    }
+    Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context $Context -State 'VerifiedEastAsianFonts' -Details $result
+    return $result
+}
 
 function Expand-AIOLangArchiveFull {
     [CmdletBinding()]
@@ -2702,6 +3271,107 @@ function Get-AIOLangEntriesIndexSha256 {
         [void]$lines.Add(('{0}|{1}|{2}|{3}|{4}|{5}' -f $relative, [bool]$entry.Existed, [string]$entry.Type, [int64]$entry.Size, [int]$entry.FileCount, $hash))
     }
     return Get-AIOLangTextSha256 -Text (($lines -join "`n") + "`n")
+}
+
+
+function Get-AIOLangVolumeFreeSpace {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$Path)
+
+    $probe = $Path
+    while (-not (Test-Path -LiteralPath $probe) -and -not [string]::IsNullOrWhiteSpace($probe)) {
+        $parent = Split-Path -Parent $probe
+        if ($parent -eq $probe) { break }
+        $probe = $parent
+    }
+    if ([string]::IsNullOrWhiteSpace($probe)) { throw "No se pudo resolver un volumen para '$Path'." }
+    $resolvedProbe = (Resolve-Path -LiteralPath $probe -ErrorAction Stop).Path
+    $root = [System.IO.Path]::GetPathRoot($resolvedProbe)
+    try {
+        $drive = New-Object -TypeName System.IO.DriveInfo -ArgumentList $root
+        return [pscustomobject]@{ Root = $root; FreeBytes = [int64]$drive.AvailableFreeSpace; TotalBytes = [int64]$drive.TotalSize; Measurable = $true }
+    }
+    catch {
+        $psDrive = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | Where-Object { $_.Root -and $resolvedProbe.StartsWith([string]$_.Root, [System.StringComparison]::OrdinalIgnoreCase) } | Sort-Object { ([string]$_.Root).Length } -Descending | Select-Object -First 1)
+        if ($psDrive.Count -gt 0 -and $null -ne $psDrive[0].Free) {
+            return [pscustomobject]@{ Root = [string]$psDrive[0].Root; FreeBytes = [int64]$psDrive[0].Free; TotalBytes = [int64]($psDrive[0].Used + $psDrive[0].Free); Measurable = $true }
+        }
+        Write-AIOLangLog -Level WARN -Message "No se pudo medir espacio libre para '$Path'; se conserva el resto del Preflight."
+        return [pscustomobject]@{ Root = $root; FreeBytes = [int64]-1; TotalBytes = [int64]-1; Measurable = $false }
+    }
+}
+
+function Assert-AIOLangPreflightDiskSpace {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$MediaRoot,
+        [Parameter(Mandatory = $true)] [string]$SessionRoot,
+        [Parameter(Mandatory = $true)] [object[]]$Inventory,
+        [Parameter(Mandatory = $true)] [object[]]$SelectedImages,
+        [Parameter(Mandatory = $true)] [string[]]$Locales
+    )
+
+    $backupPlan = Get-AIOLangBackupPlan -MediaRoot $MediaRoot -Locales $Locales
+    [int64]$wimBytes = 0
+    [int64]$largestWim = 0
+    foreach ($candidate in @('sources\install.wim','sources\install.esd','sources\boot.wim')) {
+        $path = Join-Path $MediaRoot $candidate
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $length = [int64](Get-Item -LiteralPath $path -ErrorAction Stop).Length
+            $wimBytes += $length
+            if ($length -gt $largestWim) { $largestWim = $length }
+        }
+    }
+
+    $packagePathSet = @{}
+    foreach ($image in @($SelectedImages)) {
+        foreach ($category in @('LanguagePack','LanguageFOD','WinPE')) {
+            foreach ($package in @(Get-AIOLangPackagesForImage -Inventory $Inventory -Image $image -Locales $Locales -Category $category)) {
+                if ($package -and $package.FilePath) { $packagePathSet[[string]$package.FilePath] = $true }
+            }
+        }
+    }
+    $packagePaths = @($packagePathSet.Keys)
+    [int64]$packageBytes = 0
+    foreach ($path in $packagePaths) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) { $packageBytes += [int64](Get-Item -LiteralPath $path -ErrorAction SilentlyContinue).Length }
+    }
+
+    [int64]$gb = 1GB
+    [int64]$mediaNeed = [int64]([math]::Ceiling([double]$backupPlan.TotalBytes + ([double]$largestWim * 1.20) + (2 * $gb)))
+    [int64]$scratchNeed = [int64]([math]::Ceiling(([double]$wimBytes * 2.0) + ([double]$packageBytes * 1.5) + (5 * $gb)))
+    $mediaSpace = Get-AIOLangVolumeFreeSpace -Path $MediaRoot
+    $scratchSpace = Get-AIOLangVolumeFreeSpace -Path $SessionRoot
+
+    if ($mediaSpace.Root -ieq $scratchSpace.Root) {
+        $required = $mediaNeed + $scratchNeed
+        if ($mediaSpace.Measurable) {
+            Write-AIOLangLog -Level INFO -Message ("Preflight de espacio: requerido aprox. {0}; disponible {1} en {2}." -f (Format-AIOLangByteSize -Bytes $required), (Format-AIOLangByteSize -Bytes $mediaSpace.FreeBytes), $mediaSpace.Root)
+            if ($mediaSpace.FreeBytes -lt $required) {
+                throw "Espacio insuficiente en $($mediaSpace.Root): se requieren aproximadamente $(Format-AIOLangByteSize -Bytes $required) y hay $(Format-AIOLangByteSize -Bytes $mediaSpace.FreeBytes)."
+            }
+        }
+    }
+    else {
+        if ($mediaSpace.Measurable) {
+            Write-AIOLangLog -Level INFO -Message ("Preflight de espacio del medio: requerido {0}; disponible {1} en {2}." -f (Format-AIOLangByteSize -Bytes $mediaNeed), (Format-AIOLangByteSize -Bytes $mediaSpace.FreeBytes), $mediaSpace.Root)
+            if ($mediaSpace.FreeBytes -lt $mediaNeed) { throw "Espacio insuficiente en el volumen del medio $($mediaSpace.Root)." }
+        }
+        if ($scratchSpace.Measurable) {
+            Write-AIOLangLog -Level INFO -Message ("Preflight de espacio temporal: requerido {0}; disponible {1} en {2}." -f (Format-AIOLangByteSize -Bytes $scratchNeed), (Format-AIOLangByteSize -Bytes $scratchSpace.FreeBytes), $scratchSpace.Root)
+            if ($scratchSpace.FreeBytes -lt $scratchNeed) { throw "Espacio insuficiente en el volumen temporal $($scratchSpace.Root)." }
+        }
+    }
+
+    return [pscustomobject]@{
+        BackupBytes = [int64]$backupPlan.TotalBytes
+        WimBytes = $wimBytes
+        PackageBytes = $packageBytes
+        MediaRequiredBytes = $mediaNeed
+        ScratchRequiredBytes = $scratchNeed
+        MediaVolume = $mediaSpace.Root
+        ScratchVolume = $scratchSpace.Root
+    }
 }
 
 function Get-AIOLangBackupTargets {
@@ -3217,29 +3887,43 @@ function Restore-AIOLangPreflightBackup {
     if (-not (Test-Path -LiteralPath $MediaRoot -PathType Container)) { throw "No existe el medio destino '$MediaRoot'." }
     if (-not $Force -and -not (Read-AIOLangYesNo -Prompt "Restaurar el medio '$MediaRoot' desde este respaldo" -Default $false)) { return $false }
 
-    foreach ($entry in @($manifest.Entries)) {
-        $relative = [string]$entry.RelativePath
-        $destination = Join-Path $MediaRoot $relative
-        if (Test-Path -LiteralPath $destination) {
-            Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction Stop
-        }
-        if ($entry.Existed) {
-            $source = Join-Path $validated.PayloadRoot $relative
-            Initialize-AIOLangDirectory -Path (Split-Path -Parent $destination)
-            Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force -ErrorAction Stop
-            if ($entry.Type -eq 'File' -and $entry.Sha256) {
-                $hash = Get-AIOLangFileHashSafe -Path $destination
-                if ($hash -ne [string]$entry.Sha256) { throw "La restauracion de '$relative' no supero la verificacion SHA-256." }
+    $entries = @($manifest.Entries)
+    $position = 0
+    Write-Progress -Activity 'Restaurando medio multilingue' -Status "0/$($entries.Count) elementos restaurados (0%)" -PercentComplete 0
+
+    try {
+        foreach ($entry in $entries) {
+            $position++
+            $relative = [string]$entry.RelativePath
+            $destination = Join-Path $MediaRoot $relative
+            
+            if (Test-Path -LiteralPath $destination) {
+                Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction Stop
             }
-            elseif ($entry.Type -eq 'Directory') {
-                $tree = Get-AIOLangDirectoryTreeHash -Path $destination
-                if ([long]$tree.TotalBytes -ne [long]$entry.Size -or
-                    [int]$tree.FileCount -ne [int]$entry.FileCount -or
-                    [string]$tree.SHA256 -ne [string]$entry.Sha256) {
-                    throw "La restauracion del directorio '$relative' no supero la verificacion del arbol SHA-256."
+            if ($entry.Existed) {
+                $source = Join-Path $validated.PayloadRoot $relative
+                Initialize-AIOLangDirectory -Path (Split-Path -Parent $destination)
+                Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force -ErrorAction Stop
+                
+                if ($entry.Type -eq 'File' -and $entry.Sha256) {
+                    $hash = Get-AIOLangFileHashSafe -Path $destination
+                    if ($hash -ne [string]$entry.Sha256) { throw "La restauracion de '$relative' no supero la verificacion SHA-256." }
+                }
+                elseif ($entry.Type -eq 'Directory') {
+                    $tree = Get-AIOLangDirectoryTreeHash -Path $destination
+                    if ([long]$tree.TotalBytes -ne [long]$entry.Size -or
+                        [int]$tree.FileCount -ne [int]$entry.FileCount -or
+                        [string]$tree.SHA256 -ne [string]$entry.Sha256) {
+                        throw "La restauracion del directorio '$relative' no supero la verificacion del arbol SHA-256."
+                    }
                 }
             }
+
+            $percent = if ($entries.Count -gt 0) { [math]::Min(100, [math]::Floor(($position * 100.0) / $entries.Count)) } else { 100 }
+            Write-Progress -Activity 'Restaurando medio multilingue' -Status ("{0}/{1} elementos restaurados ({2}%)" -f $position, $entries.Count, $percent) -PercentComplete $percent
         }
+    } finally {
+        Write-Progress -Activity 'Restaurando medio multilingue' -Completed
     }
 
     Write-AIOLangLog -Level INFO -Message "Medio restaurado desde '$($validated.Root)'."
@@ -3300,19 +3984,68 @@ function Invoke-AIOLangAtomicReplacement {
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw "No existe '$SourcePath'." }
     $destinationDirectory = Split-Path -Parent $DestinationPath
     Initialize-AIOLangDirectory -Path $destinationDirectory
-    $temporaryOld = $DestinationPath + '.aio_old_' + [guid]::NewGuid().ToString('N')
+
+    # El archivo nuevo se materializa y verifica primero EN EL MISMO VOLUMEN
+    # del destino. Solo el ultimo File.Replace/Move es el cambio visible.
+    $stagedNew = Join-Path $destinationDirectory ('.' + [System.IO.Path]::GetFileName($DestinationPath) + '.aio_new_' + [guid]::NewGuid().ToString('N'))
+    $temporaryOld = Join-Path $destinationDirectory ('.' + [System.IO.Path]::GetFileName($DestinationPath) + '.aio_old_' + [guid]::NewGuid().ToString('N'))
+    $sourceResolved = (Resolve-Path -LiteralPath $SourcePath -ErrorAction Stop).Path
+    $replacementComplete = $false
+    $replacementPublished = $false
+    $hadDestination = Test-Path -LiteralPath $DestinationPath -PathType Leaf
     try {
-        if (Test-Path -LiteralPath $DestinationPath) { Move-Item -LiteralPath $DestinationPath -Destination $temporaryOld -Force -ErrorAction Stop }
-        Move-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force -ErrorAction Stop
-        if (Test-Path -LiteralPath $temporaryOld) { Remove-Item -LiteralPath $temporaryOld -Force -ErrorAction Stop }
+        $stagedCopy = Copy-AIOLangFileVerified -Source $sourceResolved -Destination $stagedNew
+        if ($hadDestination) {
+            [System.IO.File]::Replace($stagedNew, $DestinationPath, $temporaryOld, $true)
+        }
+        else {
+            [System.IO.File]::Move($stagedNew, $DestinationPath)
+        }
+        $replacementPublished = $true
+        Clear-AIOLangFileHashCache -Path $DestinationPath
+        $sourceHash = [string]$stagedCopy.SHA256
+        $destinationHash = (Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if (-not $sourceHash -or $sourceHash -ne $destinationHash) { throw "Verificacion SHA-256 fallida despues de reemplazar '$DestinationPath'." }
+        $replacementComplete = $true
     }
     catch {
-        if (-not (Test-Path -LiteralPath $DestinationPath) -and (Test-Path -LiteralPath $temporaryOld)) {
-            Move-Item -LiteralPath $temporaryOld -Destination $DestinationPath -Force -ErrorAction SilentlyContinue
+        $replacementError = $_
+        if (Test-Path -LiteralPath $temporaryOld -PathType Leaf) {
+            try {
+                # Restaurar sin borrar primero el destino. Si el archivo esta
+                # bloqueado, File.Replace falla conservando el respaldo.
+                if (Test-Path -LiteralPath $DestinationPath -PathType Leaf) {
+                    [System.IO.File]::Replace($temporaryOld, $DestinationPath, $stagedNew, $true)
+                }
+                else { [System.IO.File]::Move($temporaryOld, $DestinationPath) }
+                Clear-AIOLangFileHashCache -Path $DestinationPath
+            }
+            catch {
+                throw "Fallo el reemplazo: $($replacementError.Exception.Message). Restauracion incompleta de '$DestinationPath': $($_.Exception.Message). Original conservado en '$temporaryOld'."
+            }
         }
-        throw
+        elseif (-not $hadDestination -and $replacementPublished) {
+            try { Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction Stop }
+            catch { throw "Fallo el reemplazo: $($replacementError.Exception.Message). No se pudo retirar el destino nuevo no verificado '$DestinationPath': $($_.Exception.Message)" }
+        }
+        throw $replacementError
+    }
+    finally {
+        # Nunca eliminar temporaryOld desde finally: puede ser la unica copia
+        # local recuperable si fallo la restauracion.
+        if (Test-Path -LiteralPath $stagedNew -PathType Leaf) { Remove-Item -LiteralPath $stagedNew -Force -ErrorAction SilentlyContinue }
+    }
+    if ($replacementComplete) {
+        if (Test-Path -LiteralPath $temporaryOld -PathType Leaf) {
+            try { Remove-Item -LiteralPath $temporaryOld -Force -ErrorAction Stop }
+            catch { Write-AIOLangLog -Level WARN -Message "Reemplazo verificado; se conserva el respaldo temporal '$temporaryOld' porque no pudo eliminarse: $($_.Exception.Message)" }
+        }
+        if ($sourceResolved -ine $DestinationPath -and (Test-Path -LiteralPath $sourceResolved -PathType Leaf)) {
+            Remove-Item -LiteralPath $sourceResolved -Force -ErrorAction SilentlyContinue
+        }
     }
 }
+
 
 function Convert-AIOLangEsdToWim {
     [CmdletBinding()]
@@ -3324,20 +4057,23 @@ function Convert-AIOLangEsdToWim {
     $destination = Join-Path (Split-Path -Parent $EsdPath) 'install.wim'
     $temporary = Join-Path $ScratchPath 'install.converted.wim'
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
-    $images = @(Get-WindowsImage -ImagePath $EsdPath -ErrorAction Stop)
-    if ($images.Count -eq 0) { throw "No se encontraron indices en '$EsdPath'." }
+    $indexes = @(Get-AIOLangImageIndexes -ImagePath $EsdPath)
+    if ($indexes.Count -eq 0) { throw "No se encontraron indices en '$EsdPath'." }
 
-    foreach ($image in $images) {
+    $position = 0
+    foreach ($index in $indexes) {
+        $position++
         [void](Invoke-AIOLangDism -Arguments @(
-            '/Export-Image', "/SourceImageFile:$EsdPath", "/SourceIndex:$($image.ImageIndex)",
+            '/Export-Image', "/SourceImageFile:$EsdPath", "/SourceIndex:$index",
             "/DestinationImageFile:$temporary", '/Compress:max', '/CheckIntegrity'
-        ) -Context "Convertir install.esd - indice $($image.ImageIndex)/$($images.Count)")
+        ) -Context "Convertir install.esd - indice $position/$($indexes.Count)")
     }
     Invoke-AIOLangAtomicReplacement -SourcePath $temporary -DestinationPath $destination
     Remove-Item -LiteralPath $EsdPath -Force -ErrorAction Stop
     Write-AIOLangLog -Level INFO -Message 'install.esd convertido a install.wim.'
     return $destination
 }
+
 
 function Rebuild-AIOLangWim {
     [CmdletBinding()]
@@ -3347,17 +4083,20 @@ function Rebuild-AIOLangWim {
         [string]$Context = 'Reconstruir WIM'
     )
 
-    $images = @(Get-WindowsImage -ImagePath $WimPath -ErrorAction Stop)
+    $indexes = @(Get-AIOLangImageIndexes -ImagePath $WimPath)
     $temporary = Join-Path $ScratchPath (([System.IO.Path]::GetFileNameWithoutExtension($WimPath)) + '.rebuild.wim')
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
-    foreach ($image in $images) {
+    $position = 0
+    foreach ($index in $indexes) {
+        $position++
         [void](Invoke-AIOLangDism -Arguments @(
-            '/Export-Image', "/SourceImageFile:$WimPath", "/SourceIndex:$($image.ImageIndex)",
+            '/Export-Image', "/SourceImageFile:$WimPath", "/SourceIndex:$index",
             "/DestinationImageFile:$temporary", '/Compress:max', '/CheckIntegrity'
-        ) -Context "$Context - indice $($image.ImageIndex)/$($images.Count)")
+        ) -Context "$Context - indice $position/$($indexes.Count)")
     }
     Invoke-AIOLangAtomicReplacement -SourcePath $temporary -DestinationPath $WimPath
 }
+
 
 function Export-AIOLangSingleInstallIndex {
     [CmdletBinding()]
@@ -3376,49 +4115,75 @@ function Export-AIOLangSingleInstallIndex {
     Invoke-AIOLangAtomicReplacement -SourcePath $temporary -DestinationPath $InstallWim
 }
 
+function Get-AIOLangMountedPackageInventory {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$MountPath)
+
+    # Usar el DISM seleccionado por el modulo (sistema o ADK) y su salida
+    # /English estable. No depender de la version del modulo PowerShell DISM.
+    $result = Invoke-AIOLangDism -Arguments @("/Image:$MountPath", '/Get-Packages', '/Format:List') -Context 'Consultar estado CBS de los paquetes' -Quiet
+    $packages = New-Object System.Collections.Generic.List[object]
+    $identity = $null
+    foreach ($line in @($result.Output)) {
+        if ([string]$line -match '^\s*Package Identity\s*:\s*(.+?)\s*$') {
+            $identity = $matches[1]
+        }
+        elseif ($identity -and [string]$line -match '^\s*State\s*:\s*(.+?)\s*$') {
+            [void]$packages.Add([pscustomobject]@{ PackageName = $identity; PackageState = ($matches[1] -replace '\s', '') })
+            $identity = $null
+        }
+    }
+    if ($packages.Count -eq 0) { throw "DISM no devolvio un inventario CBS verificable para '$MountPath'." }
+    return [object[]]$packages.ToArray()
+}
+
 function Get-AIOLangPackageInstallMatch {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)] [string]$MountPath,
-        [Parameter(Mandatory = $true)] [object]$Package
+        [Parameter(Mandatory = $true)] [object]$Package,
+        [AllowNull()] [AllowEmptyCollection()] [object[]]$InstalledInventory
     )
 
-    $packagesRoot = Join-Path $MountPath 'Windows\Servicing\Packages'
-    if (-not (Test-Path -LiteralPath $packagesRoot -PathType Container)) {
-        return [pscustomobject]@{ Installed = $false; MatchedBy = 'PackagesRootMissing'; MatchPath = $null }
+    if (-not $PSBoundParameters.ContainsKey('InstalledInventory')) {
+        $InstalledInventory = @(Get-AIOLangMountedPackageInventory -MountPath $MountPath)
     }
-
-    if ($Package.PackageName) {
-        $exactPath = Join-Path $packagesRoot ([string]$Package.PackageName + '.mum')
-        if (Test-Path -LiteralPath $exactPath -PathType Leaf) {
-            return [pscustomobject]@{ Installed = $true; MatchedBy = 'PackageNameExact'; MatchPath = $exactPath }
+    $expected = [string]$Package.PackageName
+    $expectedParts = $expected -split '~'
+    $expectedVersion = $null
+    if ($expectedParts.Count -eq 5) {
+        [void][version]::TryParse($expectedParts[4], [ref]$expectedVersion)
+    }
+    $found = $null
+    foreach ($entry in @($InstalledInventory)) {
+        $state = ([string]$entry.PackageState -replace '\s', '')
+        if ($state -notin @('Installed', 'InstallPending')) { continue }
+        $name = [string]$entry.PackageName
+        $parts = $name -split '~'
+        if ($parts.Count -ne 5) { continue }
+        $version = $null
+        if (-not [version]::TryParse($parts[4], [ref]$version)) { continue }
+        $matchesIdentity = $false
+        if ($expectedParts.Count -eq 5 -and $expectedVersion) {
+            # Misma identidad, token, arquitectura e idioma; version igual o
+            # posterior. Un manifiesto antiguo no satisface el paquete pedido.
+            $matchesIdentity = (($parts[0..3] -join '~') -ieq ($expectedParts[0..3] -join '~') -and $version -ge $expectedVersion)
         }
-    }
-
-    # Los CAB de Features on Demand suelen omitir la version despues de "~~".
-    # Buscar por el nombre completo del CAB evita confundir Speech con
-    # TextToSpeech o Basic con un manifiesto auxiliar incluido en el mismo CAB.
-    $fileStem = [System.IO.Path]::GetFileNameWithoutExtension([string]$Package.Name)
-    if (-not [string]::IsNullOrWhiteSpace($fileStem)) {
-        $fileMatches = @(Get-ChildItem -LiteralPath $packagesRoot -File -Filter ($fileStem + '*.mum') -ErrorAction SilentlyContinue)
-        if ($fileMatches.Count -gt 0) {
-            return [pscustomobject]@{ Installed = $true; MatchedBy = 'CabIdentityPrefix'; MatchPath = $fileMatches[0].FullName }
+        elseif ($Package.IdentityName -and $Package.Version -and $Package.Architecture -and $Package.Locale) {
+            $arch = Convert-AIOLangArchitectureName -Architecture $parts[2]
+            $requestedArch = Convert-AIOLangArchitectureName -Architecture $Package.Architecture
+            $matchesIdentity = ($parts[0] -ieq [string]$Package.IdentityName -and
+                $arch -ne 'Unknown' -and $arch -eq $requestedArch -and
+                $parts[3] -ieq [string]$Package.Locale -and $version -ge [version]$Package.Version)
         }
+        if ($matchesIdentity) { $found = $entry; break }
     }
-
-    $identity = [string]$Package.IdentityName
-    $locale = [string]$Package.Locale
-    if (-not [string]::IsNullOrWhiteSpace($identity)) {
-        $identityMatches = @(Get-ChildItem -LiteralPath $packagesRoot -File -Filter '*.mum' -ErrorAction SilentlyContinue | Where-Object {
-            $_.BaseName.IndexOf($identity, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-            ([string]::IsNullOrWhiteSpace($locale) -or $_.BaseName.IndexOf($locale, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
-        })
-        if ($identityMatches.Count -gt 0) {
-            return [pscustomobject]@{ Installed = $true; MatchedBy = 'IdentityAndLocale'; MatchPath = $identityMatches[0].FullName }
-        }
+    return [pscustomobject]@{
+        Installed = [bool]($null -ne $found)
+        MatchedBy = $(if ($found) { 'CbsIdentityAndState' } else { 'NoInstalledCbsMatch' })
+        MatchPath = $(if ($found) { Join-Path (Join-Path $MountPath 'Windows\Servicing\Packages') ($found.PackageName + '.mum') } else { $null })
+        PackageState = $(if ($found) { [string]$found.PackageState } else { $null })
     }
-
-    return [pscustomobject]@{ Installed = $false; MatchedBy = 'NoMatch'; MatchPath = $null }
 }
 
 function Get-AIOLangPackageDisplayName {
@@ -3434,7 +4199,8 @@ function Test-AIOLangNeutralParentPresent {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)] [string]$MountPath,
-        [Parameter(Mandatory = $true)] [object]$Package
+        [Parameter(Mandatory = $true)] [object]$Package,
+        [AllowNull()] [AllowEmptyCollection()] [object[]]$InstalledInventory
     )
 
     if ($Package.Category -eq 'LanguagePack') { return $true }
@@ -3443,25 +4209,70 @@ function Test-AIOLangNeutralParentPresent {
     $text = ([string]$Package.IdentityName + ' ' + [string]$Package.Name).ToLowerInvariant()
 
     if ($Package.Category -eq 'WinPE') {
-        $tokens = @()
-        if ($text -match 'winpe-srt') { $tokens = @('WinPE-SRT-Package') }
-        elseif ($text -match 'winpe-setup-(client|server|asz)') { $tokens = @('WinPE-Setup-', 'WinPE-Setup-Package') }
-        elseif ($text -match 'winpe-setup') { $tokens = @('WinPE-Setup-Package') }
-        elseif ($text -match 'winpe-rejuv') { $tokens = @('WinPE-Rejuv-Package') }
-        elseif ($text -match 'winpe-hta') { $tokens = @('WinPE-HTA-Package') }
-        elseif ($text -match 'winpe-storagewmi') { $tokens = @('WinPE-StorageWMI-Package') }
-        elseif ($text -match 'winpe-enhancedstorage') { $tokens = @('WinPE-EnhancedStorage-Package') }
-        elseif ($text -match 'winpe-scripting') { $tokens = @('WinPE-Scripting-Package') }
-        elseif ($text -match 'winpe-securestartup') { $tokens = @('WinPE-SecureStartup-Package') }
-        elseif ($text -match 'winpe-wds-tools') { $tokens = @('WinPE-WDS-Tools-Package') }
-        elseif ($text -match 'winpe-wmi') { $tokens = @('WinPE-WMI-Package') }
-        elseif ($text -match 'fontsupport|(?:^|[-_])lp(?:[._-]|$)|common-foundation') { return $true }
-        else { return $true }
+        # Paquetes base globales de WinPE y fuentes que no requieren un componente neutral previo.
+        if ((Test-AIOLangPolicyPatternSet -Text $text -Patterns ([string[]]$script:AIOLangPolicy.WinPEFontSupportPatterns)) -or $text -match '(?:^|[-_])lp(?:[._-]|$)|common-foundation|winpe-languagepack') { return $true }
 
-        foreach ($token in $tokens) {
-            if (@(Get-ChildItem -LiteralPath $packagesRoot -File -Filter "*$token*.mum" -ErrorAction SilentlyContinue).Count -gt 0) { return $true }
+        # Para satelites WinPE, no basta con que exista un .mum neutral en
+        # Windows\Servicing\Packages: el manifiesto puede estar almacenado pero
+        # el paquete padre no estar instalado/aplicable en ese indice. Consultar
+        # el estado CBS real y exigir un padre neutral Installed/InstallPending.
+        $packageName = if ($Package.PSObject.Properties['PackageName']) { [string]$Package.PackageName } else { '' }
+        $parts = @($packageName -split '~')
+        if ($parts.Count -eq 5 -and -not [string]::IsNullOrWhiteSpace($parts[3])) {
+            $requestedVersion = $null
+            if ([version]::TryParse($parts[4], [ref]$requestedVersion)) {
+                $inventory = if ($PSBoundParameters.ContainsKey('InstalledInventory')) { @($InstalledInventory) } else { @(Get-AIOLangMountedPackageInventory -MountPath $MountPath) }
+                foreach ($entry in $inventory) {
+                    $state = ([string]$entry.PackageState -replace '\s', '')
+                    if ($state -notin @('Installed', 'InstallPending')) { continue }
+
+                    $candidateParts = @(([string]$entry.PackageName) -split '~')
+                    if ($candidateParts.Count -ne 5) { continue }
+                    if (-not [string]::IsNullOrWhiteSpace($candidateParts[3])) { continue }
+                    if ($candidateParts[0] -ine $parts[0] -or $candidateParts[1] -ine $parts[1] -or $candidateParts[2] -ine $parts[2]) { continue }
+
+                    $candidateVersion = $null
+                    if (-not [version]::TryParse($candidateParts[4], [ref]$candidateVersion)) { continue }
+
+                    # CBS declara para estos satelites una relacion de padre con
+                    # Major/Minor/Build iguales y revision igual o posterior.
+                    if ($candidateVersion.Major -eq $requestedVersion.Major -and
+                        $candidateVersion.Minor -eq $requestedVersion.Minor -and
+                        $candidateVersion.Build -eq $requestedVersion.Build -and
+                        $candidateVersion.Revision -ge $requestedVersion.Revision) {
+                        return $true
+                    }
+                }
+
+                Write-AIOLangLog -Level INFO -Message ("WinPE: se omite {0}; el padre neutral {1}~~{2} no esta Installed/InstallPending con version compatible." -f $Package.Name, $parts[0], $parts[4])
+                return $false
+            }
         }
+
+        # Fallback para paquetes antiguos cuyo metadata no expone PackageName.
+        # En ese caso conservar la deteccion por manifiesto, pero sin considerar
+        # el propio satelite localizado como prueba del padre neutral.
+        $featureName = $null
+        if ($Package.IdentityName -match '(?i)^(WinPE-[A-Za-z0-9_-]+?)(?:-Package)?$') {
+            $featureName = $matches[1]
+        }
+        elseif ($Package.Name -match '(?i)^(WinPE-[A-Za-z0-9-]+?)(?:_[a-z]{2}-[a-z]{2,4})?\.cab$') {
+            $featureName = $matches[1]
+        }
+
+        if ($featureName) {
+            if ($featureName -match '(?i)^WinPE-Setup') {
+                return (@(Get-ChildItem -LiteralPath $packagesRoot -File -Filter "*$featureName*~~*.mum" -ErrorAction SilentlyContinue).Count -gt 0)
+            }
+            return (@(Get-ChildItem -LiteralPath $packagesRoot -File -Filter "*$featureName*~~*.mum" -ErrorAction SilentlyContinue).Count -gt 0)
+        }
+
         return $false
+    }
+
+    # Paquetes FOD (Features on Demand)
+    if ($text -match 'languagefeatures-|internationalfeatures|languageexperience|client-languagepack|server-languagepack') {
+        return $true
     }
 
     $patterns = @()
@@ -3507,11 +4318,12 @@ function Add-AIOLangPackageToImage {
         [Parameter(Mandatory = $true)] [object]$Package,
         [Parameter(Mandatory = $true)] [string]$PackagePath,
         [Parameter(Mandatory = $true)] [string]$Context,
+        [AllowNull()] [AllowEmptyCollection()] [object[]]$InstalledInventory,
         [switch]$AllowNotApplicable
     )
 
     $displayName = Get-AIOLangPackageDisplayName -Package $Package
-    $installMatch = Get-AIOLangPackageInstallMatch -MountPath $MountPath -Package $Package
+    $installMatch = if ($PSBoundParameters.ContainsKey('InstalledInventory')) { Get-AIOLangPackageInstallMatch -MountPath $MountPath -Package $Package -InstalledInventory $InstalledInventory } else { Get-AIOLangPackageInstallMatch -MountPath $MountPath -Package $Package }
     if ($installMatch.Installed) {
         Write-Host " [YA PRESENTE] $displayName" -ForegroundColor DarkGray
         Add-AIOLangDismTranscriptLine -Line ("VERIFICAR | {0} | Estado=YaPresente | Coincidencia={1} | Archivo={2}" -f $displayName, $installMatch.MatchedBy, $installMatch.MatchPath)
@@ -3522,7 +4334,8 @@ function Add-AIOLangPackageToImage {
         })
         return [pscustomobject]@{ Success = $true; State = 'AlreadyPresent'; ExitCode = 0; Match = $installMatch }
     }
-    if (-not (Test-AIOLangNeutralParentPresent -MountPath $MountPath -Package $Package)) {
+    $parentPresent = if ($PSBoundParameters.ContainsKey('InstalledInventory')) { Test-AIOLangNeutralParentPresent -MountPath $MountPath -Package $Package -InstalledInventory $InstalledInventory } else { Test-AIOLangNeutralParentPresent -MountPath $MountPath -Package $Package }
+    if (-not $parentPresent) {
         Write-Host " [OMITIDO] $($Package.Name) - componente neutral no presente." -ForegroundColor DarkYellow
         Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context $Context -State 'SkippedMissingParent' -Details $Package.Name
         return [pscustomobject]@{ Success = $true; State = 'SkippedMissingParent'; ExitCode = 0 }
@@ -3564,13 +4377,25 @@ function Add-AIOLangFeaturePackages {
     $normalizedPackages = @($Packages | Where-Object { $null -ne $_ } | Sort-Object Priority, Locale, Name)
     if ($normalizedPackages.Count -eq 0) {
         Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context $ContextPrefix -State 'NoCompatiblePackages' -Details @{ Count = 0 }
-        return
+        return @()
     }
 
+    $applied = New-Object System.Collections.Generic.List[object]
+    $installedInventory = @(Get-AIOLangMountedPackageInventory -MountPath $MountPath)
     foreach ($package in $normalizedPackages) {
         $context = "$ContextPrefix - $($package.Locale) - $($package.IdentityName)"
-        [void](Add-AIOLangPackageToImage -MountPath $MountPath -Package $package -PackagePath $package.FilePath -Context $context -AllowNotApplicable)
+        $res = Add-AIOLangPackageToImage -MountPath $MountPath -Package $package -PackagePath $package.FilePath -Context $context -InstalledInventory $installedInventory -AllowNotApplicable
+        if ($res -and $res.Success -and ($res.State -in @('Success', 'AlreadyPresent'))) {
+            [void]$applied.Add($package)
+            # Actualizar el inventario solamente cuando DISM pudo cambiar el
+            # estado CBS. Esto permite que un satelite posterior detecte un
+            # padre neutral instalado durante la misma secuencia.
+            if ($res.State -eq 'Success') {
+                $installedInventory = @(Get-AIOLangMountedPackageInventory -MountPath $MountPath)
+            }
+        }
     }
+    return [object[]]$applied.ToArray()
 }
 
 function Assert-AIOLangInstalledPackages {
@@ -3581,18 +4406,20 @@ function Assert-AIOLangInstalledPackages {
         [Parameter(Mandatory = $true)] [string]$Context
     )
 
+    $installedInventory = @(Get-AIOLangMountedPackageInventory -MountPath $MountPath)
     $results = New-Object System.Collections.Generic.List[object]
     $missing = New-Object System.Collections.Generic.List[string]
 
     foreach ($package in @($Packages | Where-Object { $null -ne $_ } | Sort-Object Category, Locale, Name -Unique)) {
         $displayName = Get-AIOLangPackageDisplayName -Package $package
-        $match = Get-AIOLangPackageInstallMatch -MountPath $MountPath -Package $package
-        $state = if ($match.Installed) { 'Installed' } else { 'Missing' }
+        $match = Get-AIOLangPackageInstallMatch -MountPath $MountPath -Package $package -InstalledInventory $installedInventory
+        $state = if ($match.Installed) { $match.PackageState } else { 'Missing' }
         $result = [pscustomobject]@{
             Category   = $package.Category
             Locale     = $package.Locale
             Package    = $displayName
             Installed  = [bool]$match.Installed
+            PackageState = $match.PackageState
             MatchedBy  = $match.MatchedBy
             MatchPath  = $match.MatchPath
         }
@@ -3623,18 +4450,23 @@ function Set-AIOLangInternationalSettings {
         [Parameter(Mandatory = $true)] [string]$DefaultLocale,
         [Parameter(Mandatory = $true)] [string]$ContextPrefix,
         [string]$DistributionPath,
-        [switch]$SetupImage
+        [switch]$SkipLangIni
     )
 
     [void](Invoke-AIOLangDism -Arguments @("/Image:$MountPath", "/Set-AllIntl:$DefaultLocale", '/Quiet') -Context "$ContextPrefix - Set-AllIntl")
     [void](Invoke-AIOLangDism -Arguments @("/Image:$MountPath", "/Set-SKUIntlDefaults:$DefaultLocale", '/Quiet') -Context "$ContextPrefix - Set-SKUIntlDefaults")
     if ($DistributionPath) {
-        [void](Invoke-AIOLangDism -Arguments @("/Image:$MountPath", '/Gen-LangINI', "/Distribution:$DistributionPath", '/Quiet') -Context "$ContextPrefix - Generar lang.ini")
+        # Gen-LangINI reconstruye sources\lang.ini a partir del inventario de
+        # paquetes de ESTA imagen. Microsoft (Add languages to Windows Setup,
+        # paso 4) solo lo ejecuta una vez, contra install.wim -- la unica
+        # imagen que conoce todas las ediciones/idiomas reales del medio. Si
+        # tambien corriera contra boot.wim (WinPE), el lang.ini queda
+        # truncado al inventario de WinPE y corrompe el selector de idioma
+        # de Windows Setup. $SkipLangIni evita eso cuando $MountPath es boot.wim.
+        if (-not $SkipLangIni) {
+            [void](Invoke-AIOLangDism -Arguments @("/Image:$MountPath", '/Gen-LangINI', "/Distribution:$DistributionPath", '/Quiet') -Context "$ContextPrefix - Generar lang.ini")
+        }
         [void](Invoke-AIOLangDism -Arguments @("/Image:$MountPath", "/Set-SetupUILang:$DefaultLocale", "/Distribution:$DistributionPath", '/Quiet') -Context "$ContextPrefix - Idioma de Setup")
-    }
-    elseif ($SetupImage) {
-        [void](Invoke-AIOLangDism -Arguments @("/Image:$MountPath", '/Gen-LangINI', "/Distribution:$MountPath", '/Quiet') -Context "$ContextPrefix - Generar lang.ini de WinPE")
-        [void](Invoke-AIOLangDism -Arguments @("/Image:$MountPath", "/Set-SetupUILang:$DefaultLocale", "/Distribution:$MountPath", '/Quiet') -Context "$ContextPrefix - Idioma de Setup WinPE")
     }
 }
 
@@ -3665,6 +4497,10 @@ function Get-AIOLangWinPEImageDescriptor {
         Build        = $Build
         ImageIndex   = 1
         ImageName    = 'WinPE'
+        ImageDescription = 'Windows Recovery Environment / WinPE'
+        InstallationType = 'WinPE'
+        EditionId    = 'WinPE'
+        ProductFamily = 'WinPE'
     }
 }
 
@@ -3684,18 +4520,25 @@ function Update-AIOLangWinREImage {
     )
 
     $descriptor = Get-AIOLangWinPEImageDescriptor -MountPath $MountPath -Architecture $Architecture -Build $Build
-    $packages = @(Get-AIOLangPackagesForImage -Inventory $Inventory -Image $descriptor -Locales $Locales -Category 'WinPE')
-    if ($packages.Count -eq 0) { throw "No se encontraron paquetes WinPE compatibles para $Architecture / build $Build." }
+    # Microsoft: "Use languages from the Languages and Optional Features ISO,
+    # not from the Windows 10 ADK, to localize WinRE." El ADK solo es fuente
+    # valida para boot.wim/Setup; aqui se excluye para no depender de un
+    # arbol WinPE_OCs que puede no coincidir con el build real de winre.wim.
+    $winREInventory = @($Inventory | Where-Object {
+        $pkgSource = if ($_.PSObject.Properties['Source']) { $_.Source } else { 'Repositorio' }
+        $_.Category -ne 'WinPE' -or ($pkgSource -ne 'ADK WinPE')
+    })
+    $packages = @(Get-AIOLangPackagesForImage -Inventory $winREInventory -Image $descriptor -Locales $Locales -Category 'WinPE')
+    if ($packages.Count -eq 0) { throw "No se encontraron paquetes WinPE compatibles para $Architecture / build $Build (deben provenir del repositorio/ISO de Languages and Optional Features, no del ADK)." }
 
     Mount-AIOLangImage -ImagePath $WinREPath -Index 1 -MountPath $MountPath -ScratchPath $ScratchPath -Context 'Montar winre.wim'
     $committed = $false
     try {
         $script:AIOLangCurrentPhase = 'WinRE'
-        Add-AIOLangFeaturePackages -MountPath $MountPath -Packages $packages -ContextPrefix 'Integrar idioma en WinRE'
+        $appliedWinRE = @(Add-AIOLangFeaturePackages -MountPath $MountPath -Packages $packages -ContextPrefix 'Integrar idioma en WinRE')
         Set-AIOLangInternationalSettings -MountPath $MountPath -DefaultLocale $DefaultLocale -ContextPrefix 'Configurar WinRE'
-        $expectedPackages = @($packages | Where-Object { Test-AIOLangNeutralParentPresent -MountPath $MountPath -Package $_ })
-        if ($expectedPackages.Count -gt 0) {
-            [void](Assert-AIOLangInstalledPackages -MountPath $MountPath -Packages $expectedPackages -Context 'Verificar paquetes de idioma en WinRE')
+        if ($appliedWinRE.Count -gt 0) {
+            [void](Assert-AIOLangInstalledPackages -MountPath $MountPath -Packages $appliedWinRE -Context 'Verificar paquetes de idioma en WinRE')
         }
         [void](Assert-AIOLangMountedWinPELocalization -MountPath $MountPath -Locales $Locales -Context 'Verificar idiomas de WinRE')
         if ($Cleanup) { Invoke-AIOLangComponentCleanup -MountPath $MountPath -Context 'Limpiar winre.wim' -ResetBase:$ResetBase }
@@ -3711,21 +4554,382 @@ function Update-AIOLangWinREImage {
     Rebuild-AIOLangWim -WimPath $WinREPath -ScratchPath $ScratchPath -Context 'Optimizar winre.wim'
 }
 
+function Initialize-AIOLangFileReparseNative {
+    [CmdletBinding()]
+    param()
+
+    if ('AdminImagenOffline.AIOLangReparseNative' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace AdminImagenOffline {
+    public static class AIOLangReparseNative {
+        [StructLayout(LayoutKind.Sequential)]
+        public struct AttributeTagInformation {
+            public uint FileAttributes;
+            public uint ReparseTag;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, ExactSpelling = true)]
+        private static extern SafeFileHandle CreateFileW(string fileName, uint desiredAccess,
+            uint shareMode, IntPtr securityAttributes, uint creationDisposition,
+            uint flagsAndAttributes, IntPtr templateFile);
+
+        [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetFileInformationByHandleEx(SafeFileHandle handle,
+            int informationClass, out AttributeTagInformation information, uint bufferSize);
+
+        public static AttributeTagInformation ReadInfo(string path) {
+            string fullPath = Path.GetFullPath(path);
+            if (!fullPath.StartsWith(@"\\?\", StringComparison.Ordinal)) {
+                fullPath = fullPath.StartsWith(@"\\", StringComparison.Ordinal)
+                    ? @"\\?\UNC\" + fullPath.Substring(2) : @"\\?\" + fullPath;
+            }
+            // Access=0: consultar metadatos. Compartir lectura/escritura/borrado.
+            // OPEN_REPARSE_POINT evita resolver el enlace del archivo final.
+            using (SafeFileHandle handle = CreateFileW(fullPath, 0, 7, IntPtr.Zero,
+                3, 0x00200000 | 0x02000000, IntPtr.Zero)) {
+                if (handle.IsInvalid) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "No se pudo abrir para consultar el reparse tag: " + path);
+                }
+                AttributeTagInformation information;
+                if (!GetFileInformationByHandleEx(handle, 9, out information,
+                    (uint)Marshal.SizeOf(typeof(AttributeTagInformation)))) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "No se pudo consultar el reparse tag: " + path);
+                }
+                if ((information.FileAttributes & 0x400) == 0) information.ReparseTag = 0;
+                return information;
+            }
+        }
+    }
+}
+'@ -ErrorAction Stop
+}
+
+function Get-AIOLangFileReparseInfo {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$Path)
+
+    Initialize-AIOLangFileReparseNative
+    $info = [AdminImagenOffline.AIOLangReparseNative]::ReadInfo($Path)
+    $tag = [uint32]$info.ReparseTag
+    $tagHex = '0x{0:X8}' -f $tag
+    $kind = switch ($tagHex) {
+        '0x00000000' { 'None' }
+        '0x80000008' { 'WIM' }
+        '0x80000017' { 'WOF' }
+        '0xA0000003' { 'MountPoint' }
+        '0xA000000C' { 'SymbolicLink' }
+        default { 'Other' }
+    }
+    return [pscustomobject]@{
+        AttributesValue = [int]$info.FileAttributes
+        Tag = $tag
+        TagHex = $tagHex
+        Kind = $kind
+    }
+}
+
+function Assert-AIOLangFileReparsePolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$Path,
+        [Parameter(Mandatory = $true)] [object]$Snapshot
+    )
+
+    if (($Snapshot.AttributesValue -band [int][System.IO.FileAttributes]::ReparsePoint) -eq 0) { return }
+    if ($null -eq $Snapshot.ReparseTag) {
+        throw "No se pudo identificar el punto de reanalisis de '${Path}': $($Snapshot.Errors -join ' | ')"
+    }
+    # WIM y WOF son filtros de almacenamiento, no enlaces que redirigen a
+    # otra ruta. El filtro gestiona su materializacion durante la escritura.
+    # No borrar el reparse point ni modificar las ACL de su carpeta padre.
+    $tagHex = '0x{0:X8}' -f [uint32]$Snapshot.ReparseTag
+    $isDirectory = ($Snapshot.AttributesValue -band [int][System.IO.FileAttributes]::Directory) -ne 0
+    if ($isDirectory -or $tagHex -notin @('0x80000008', '0x80000017')) {
+        throw "Punto de reanalisis no admitido para escritura: '$Path' (tag $tagHex)."
+    }
+    Write-AIOLangLog -Level INFO -Message "Archivo respaldado por WIM/WOF admitido para copia: '$Path' (tag $tagHex)."
+}
+
+
+function Get-AIOLangFileAccessSnapshot {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$Path)
+
+    $state = [ordered]@{
+        Path = $Path; Exists = $false; Attributes = $null; AttributesValue = $null
+        OwnerSid = $null; Sddl = $null; AccessSddl = $null; Errors = @()
+        ReparseTag = $null; ReparseTagHex = $null; ReparseKind = $null
+    }
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        $state.Exists = $true
+        $state.Attributes = [string]$item.Attributes
+        $state.AttributesValue = [int]$item.Attributes
+    }
+    catch { $state.Errors += $_.Exception.Message }
+    if ($state.Exists -and ($state.AttributesValue -band [int][System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        try {
+            $reparse = Get-AIOLangFileReparseInfo -Path $Path
+            # Leer atributos y tag del mismo handle. Si el filtro materializo
+            # el archivo desde Get-Item, aceptar su nuevo estado sin reparse.
+            $state.AttributesValue = $reparse.AttributesValue
+            $state.Attributes = [string][System.IO.FileAttributes]$reparse.AttributesValue
+            $state.ReparseTag = $reparse.Tag
+            $state.ReparseTagHex = $reparse.TagHex
+            $state.ReparseKind = $reparse.Kind
+        }
+        catch { $state.Errors += "ReparseTag: $($_.Exception.Message)" }
+    }
+    if ($state.Exists) {
+        try {
+            $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+            $sections = [System.Security.AccessControl.AccessControlSections]::Access -bor [System.Security.AccessControl.AccessControlSections]::Owner
+            $state.OwnerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+            $state.Sddl = $acl.GetSecurityDescriptorSddlForm($sections)
+            $state.AccessSddl = $acl.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access)
+        }
+        catch { $state.Errors += $_.Exception.Message }
+    }
+    return [pscustomobject]$state
+}
+
+function Write-AIOLangFileCopyDiagnostic {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$Source,
+        [Parameter(Mandatory = $true)] [string]$Destination,
+        [Parameter(Mandatory = $true)] [string]$Phase,
+        [Parameter(Mandatory = $true)] [string]$Message,
+        [AllowNull()] [object]$OriginalDestination
+    )
+
+    # Se captura antes del desmontaje de emergencia; el paquete de diagnostico
+    # ya recoge los .log de la sesion, incluso cuando el WIM fue descartado.
+    try {
+        $record = [ordered]@{
+            Timestamp = (Get-Date).ToString('o'); Phase = $Phase; Message = $Message
+            OriginalDestination = $OriginalDestination
+            Source = Get-AIOLangFileAccessSnapshot -Path $Source
+            Destination = Get-AIOLangFileAccessSnapshot -Path $Destination
+            Parent = Get-AIOLangFileAccessSnapshot -Path (Split-Path -Parent $Destination)
+        }
+        $json = $record | ConvertTo-Json -Depth 8 -Compress
+        Write-AIOLangLog -Level WARN -Message "Idiomas/acceso: $json"
+        if ($script:AIOLangSessionRoot -and (Test-Path -LiteralPath $script:AIOLangSessionRoot -PathType Container)) {
+            Add-Content -LiteralPath (Join-Path $script:AIOLangSessionRoot 'Idiomas_FileAccess.log') -Value $json -Encoding UTF8 -ErrorAction Stop
+        }
+    }
+    catch { Write-AIOLangLog -Level WARN -Message "No se pudo registrar el acceso de Idiomas a '${Destination}': $($_.Exception.Message)" }
+}
+
+function Invoke-AIOLangFileSecurityCommand {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [ValidateSet('takeown.exe', 'icacls.exe')] [string]$Name,
+        [Parameter(Mandatory = $true)] [string[]]$Arguments
+    )
+
+    $executable = Join-Path $script:AIOLangNativeSystemDirectory $Name
+    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw "No se encontro '$executable'." }
+    # En Windows PowerShell 5.1 stderr nativo puede producir ErrorRecord.
+    # Capturarlo no debe impedir leer y comprobar el codigo real del proceso.
+    $ErrorActionPreference = 'Continue'
+    # El proceso nativo actualiza la variable global, no una copia local.
+    $global:LASTEXITCODE = $null
+    $output = & $executable @Arguments 2>&1
+    $exitCode = $global:LASTEXITCODE
+    $detail = ($output | Out-String).Trim()
+    Write-AIOLangLog -Level INFO -Message "Idiomas: $Name; codigo=$exitCode; $detail"
+    if ($null -eq $exitCode -or $exitCode -ne 0) { throw "Idiomas: $Name fallo con codigo '${exitCode}': $detail" }
+}
+
+function Set-AIOLangCopyFileAttributes {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$Path,
+        [Parameter(Mandatory = $true)] [System.IO.FileAttributes]$Attributes
+    )
+
+    # File.SetAttributes solo admite estos atributos basicos. SparseFile,
+    # Compressed, Encrypted, Directory y ReparsePoint requieren otras APIs
+    # o describen el almacenamiento/tipo del archivo. No se restauran aqui.
+    # Al sobrescribir un archivo disperso de un WIM, SparseFile puede cambiar
+    # sin alterar los bytes; su integridad se verifica por SHA-256 en la copia.
+    $settableMask = [System.IO.FileAttributes]::ReadOnly -bor
+        [System.IO.FileAttributes]::Hidden -bor
+        [System.IO.FileAttributes]::System -bor
+        [System.IO.FileAttributes]::Archive -bor
+        [System.IO.FileAttributes]::Temporary -bor
+        [System.IO.FileAttributes]::Offline -bor
+        [System.IO.FileAttributes]::NotContentIndexed
+    $requested = [System.IO.FileAttributes]([int]$Attributes -band [int]$settableMask)
+    $current = [System.IO.File]::GetAttributes($Path)
+    if (([int]$current -band [int]$settableMask) -eq [int]$requested) { return }
+
+    # Normal es el valor para quitar todos los atributos editables; no se
+    # combina con otros bits ni se compara como un indicador independiente.
+    $toSet = if ([int]$requested -eq 0) { [System.IO.FileAttributes]::Normal } else { $requested }
+    [System.IO.File]::SetAttributes($Path, $toSet)
+    $observed = [System.IO.File]::GetAttributes($Path)
+    if (([int]$observed -band [int]$settableMask) -ne [int]$requested) {
+        throw "No se pudieron establecer los atributos editables '$requested' en '$Path'. Atributos observados: '$observed'."
+    }
+}
+
+function Restore-AIOLangCopyFileSecurity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$Path,
+        [Parameter(Mandatory = $true)] [object]$Original
+    )
+
+    $failures = New-Object System.Collections.Generic.List[string]
+    # Devolver el propietario mientras el permiso temporal aun permite WRITE_DAC.
+    # El SID permite restaurarlo sin depender del idioma del sistema.
+    try {
+        $current = Get-Acl -LiteralPath $Path -ErrorAction Stop
+        if ($current.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $Original.OwnerSid) {
+            Invoke-AIOLangFileSecurityCommand -Name 'icacls.exe' -Arguments @($Path, '/setowner', ('*' + $Original.OwnerSid), '/Q')
+        }
+    }
+    catch { [void]$failures.Add("Propietario: $($_.Exception.Message)") }
+    # Restaurar solo la DACL; no cambiar grupo ni auditoria, ni inventar un
+    # propietario TrustedInstaller como alternativa a la identidad original.
+    try {
+        $current = Get-Acl -LiteralPath $Path -ErrorAction Stop
+        if ($current.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access) -cne $Original.AccessSddl) {
+            $restoreAcl = New-Object System.Security.AccessControl.FileSecurity
+            $restoreAcl.SetSecurityDescriptorSddlForm($Original.Sddl, [System.Security.AccessControl.AccessControlSections]::Access)
+            Set-Acl -LiteralPath $Path -AclObject $restoreAcl -ErrorAction Stop
+        }
+    }
+    catch { [void]$failures.Add("DACL: $($_.Exception.Message)") }
+    try {
+        $restored = Get-AIOLangFileAccessSnapshot -Path $Path
+        if ($restored.OwnerSid -ne $Original.OwnerSid -or $restored.Sddl -cne $Original.Sddl) {
+            throw 'La comprobacion de propietario/DACL no coincide con el respaldo original.'
+        }
+    }
+    catch { [void]$failures.Add($_.Exception.Message) }
+    if ($failures.Count -gt 0) { throw "No se pudo restaurar la seguridad de '${Path}': $($failures -join ' | ')" }
+}
+
+function Copy-AIOLangProtectedFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$Source,
+        [Parameter(Mandatory = $true)] [string]$Destination
+    )
+
+    $original = $null
+    $securityTouched = $false
+    $attributesTouched = $false
+    $copyError = $null
+    try {
+        if (-not (Test-Path -LiteralPath $Source -PathType Leaf -ErrorAction Stop)) { throw "No existe el archivo Idiomas '$Source'." }
+        if (Test-Path -LiteralPath $Destination -PathType Container -ErrorAction Stop) { throw "El destino Idiomas es un directorio: '$Destination'." }
+        $hadDestination = Test-Path -LiteralPath $Destination -PathType Leaf -ErrorAction Stop
+        if ($hadDestination) {
+            $original = Get-AIOLangFileAccessSnapshot -Path $Destination
+            if ($null -eq $original.AttributesValue) { throw "No se pudieron respaldar los atributos de '$Destination'." }
+            if (($original.AttributesValue -band [int][System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                Assert-AIOLangFileReparsePolicy -Path $Destination -Snapshot $original
+            }
+            $mask = [System.IO.FileAttributes]::ReadOnly -bor [System.IO.FileAttributes]::System -bor [System.IO.FileAttributes]::Hidden
+            $writableAttributes = [System.IO.FileAttributes]($original.AttributesValue -band (-bnot [int]$mask))
+        }
+
+        try {
+            try {
+                if ($hadDestination) {
+                    $attributesTouched = $true
+                    Set-AIOLangCopyFileAttributes -Path $Destination -Attributes $writableAttributes
+                }
+                Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
+            }
+            catch {
+                $accessDenied = $false
+                $exception = $_.Exception
+                while ($null -ne $exception) {
+                    if ($exception -is [System.UnauthorizedAccessException] -or (($exception.HResult -band 0xFFFF) -eq 5)) { $accessDenied = $true; break }
+                    $exception = $exception.InnerException
+                }
+                if (-not $hadDestination -or -not $accessDenied) { throw }
+                Write-AIOLangFileCopyDiagnostic -Source $Source -Destination $Destination -Phase 'BeforePermissionRetry' -Message $_.Exception.Message -OriginalDestination $original
+
+                if (-not $original.Sddl -or -not $original.OwnerSid -or -not $original.AccessSddl) {
+                    throw "No se puede reintentar '$Destination': no se pudo respaldar su propietario/DACL. $($original.Errors -join ' | ')"
+                }
+                $securityTouched = $true
+                Invoke-AIOLangFileSecurityCommand -Name 'takeown.exe' -Arguments @('/F', $Destination, '/A')
+                Invoke-AIOLangFileSecurityCommand -Name 'icacls.exe' -Arguments @($Destination, '/grant', '*S-1-5-32-544:F', '/Q')
+                Set-AIOLangCopyFileAttributes -Path $Destination -Attributes $writableAttributes
+                Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
+                Write-AIOLangLog -Level INFO -Message "Idiomas: copia recuperada tras ajustar permisos de '$Destination'."
+            }
+            $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256 -ErrorAction Stop).Hash
+            $destinationHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ($sourceHash -ne $destinationHash) { throw "Verificacion SHA-256 fallida para el archivo Idiomas '$Destination'." }
+        }
+        catch {
+            $copyError = $_
+            Write-AIOLangFileCopyDiagnostic -Source $Source -Destination $Destination -Phase 'CopyFailed' -Message $_.Exception.Message -OriginalDestination $original
+            throw
+        }
+        finally {
+            $restoreErrors = New-Object System.Collections.Generic.List[string]
+            # Atributos primero: todavia contamos con el permiso temporal.
+            if ($attributesTouched) {
+                try { Set-AIOLangCopyFileAttributes -Path $Destination -Attributes ([System.IO.FileAttributes]$original.AttributesValue) }
+                catch { [void]$restoreErrors.Add("Atributos: $($_.Exception.Message)") }
+            }
+            if ($securityTouched) {
+                try { Restore-AIOLangCopyFileSecurity -Path $Destination -Original $original }
+                catch { [void]$restoreErrors.Add($_.Exception.Message) }
+            }
+            if ($restoreErrors.Count -gt 0) {
+                $copyDetail = if ($copyError) { " Error de copia: $($copyError.Exception.Message)." } else { '' }
+                # Una restauracion fallida impide commit aunque la copia funciono.
+                throw "Idiomas: fallo la restauracion de '${Destination}': $($restoreErrors -join ' | ').$copyDetail"
+            }
+        }
+    }
+    catch {
+        Write-AIOLangFileCopyDiagnostic -Source $Source -Destination $Destination -Phase 'FinalFailure' -Message $_.Exception.Message -OriginalDestination $original
+        throw
+    }
+}
+
 function Copy-AIOLangFileWithRetry {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)] [string]$Source,
         [Parameter(Mandatory = $true)] [string]$Destination,
-        [int]$Retries = 8
+        [ValidateRange(1, 20)] [int]$Retries = 8
     )
 
     for ($attempt = 1; $attempt -le $Retries; $attempt++) {
         try {
-            Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
+            Copy-AIOLangProtectedFile -Source $Source -Destination $Destination
             return
         }
         catch {
-            if ($attempt -eq $Retries) { throw }
+            # Solo repetir bloqueos transitorios; un error de permisos o de
+            # restauracion de seguridad debe detener el commit de la imagen.
+            $transient = $false
+            $exception = $_.Exception
+            while ($null -ne $exception) {
+                if (($exception.HResult -band 0xFFFF) -in @(32, 33)) { $transient = $true; break }
+                $exception = $exception.InnerException
+            }
+            if (-not $transient -or $attempt -eq $Retries) { throw }
             Start-Sleep -Milliseconds (250 * $attempt)
         }
     }
@@ -3746,6 +4950,7 @@ function Update-AIOLangInstallWim {
         [Parameter(Mandatory = $true)] [string]$WinREMountPath,
         [Parameter(Mandatory = $true)] [string]$ScratchPath,
         [Parameter(Mandatory = $true)] [string]$WinRECacheRoot,
+        [Parameter(Mandatory = $true)] [string]$EastAsianFontCacheRoot,
         [switch]$IntegrateFod,
         [switch]$UpdateWinRE,
         [switch]$Cleanup,
@@ -3765,35 +4970,39 @@ function Update-AIOLangInstallWim {
             Add-AIOLangLanguagePacks -MountPath $MountPath -Packages $languagePackages -Payloads $Payloads -ContextPrefix "install.wim indice $index"
 
             $fodPackages = @()
+            $appliedFod = @()
             if ($IntegrateFod) {
                 $fodPackages = @(Get-AIOLangPackagesForImage -Inventory $Inventory -Image $image -Locales $Locales -Category 'LanguageFOD')
                 if ($fodPackages.Count -gt 0) {
-                    Add-AIOLangFeaturePackages -MountPath $MountPath -Packages $fodPackages -ContextPrefix "FOD indice $index"
+                    $appliedFod = @(Add-AIOLangFeaturePackages -MountPath $MountPath -Packages $fodPackages -ContextPrefix "FOD indice $index")
                 }
                 else {
                     Write-Host ' [OMITIDO] No hay Features on Demand compatibles para este indice.' -ForegroundColor DarkYellow
                 }
             }
 
-            $expectedPackages = @($languagePackages)
-            if ($IntegrateFod) { $expectedPackages += @($fodPackages) }
+            $expectedPackages = @($languagePackages) + @($appliedFod)
             [void](Assert-AIOLangInstalledPackages -MountPath $MountPath -Packages $expectedPackages -Context "Verificar paquetes install.wim indice $index")
+
+            # En modo sin localizacion WinPE completa, se conservan las fuentes de
+            # Asia oriental desde install.wim. Se capturan una sola vez desde el
+            # ultimo indice seleccionado, despues de integrar LP/FOD, para reutilizarlas
+            # en ambos indices de boot.wim cuando se entra en SetupResourcesOnly.
+            if ($position -eq ($selectedImages.Count - 1)) {
+                [void](Save-AIOLangEastAsianFontPayload -MountPath $MountPath -Payloads $Payloads -Architecture $image.Architecture -Locales $Locales -CacheRoot $EastAsianFontCacheRoot)
+            }
 
             $distribution = if ($position -eq ($selectedImages.Count - 1)) { $MediaRoot } else { $null }
             Set-AIOLangInternationalSettings -MountPath $MountPath -DefaultLocale $DefaultLocale -ContextPrefix "Configurar idioma indice $index" -DistributionPath $distribution
 
             $winreSource = Join-Path $MountPath 'Windows\System32\Recovery\winre.wim'
             if ($UpdateWinRE -and (Test-Path -LiteralPath $winreSource -PathType Leaf)) {
-                $hash = Get-AIOLangFileHashSafe -Path $winreSource
-                if (-not $hash) {
-                    $winreItem = Get-Item -LiteralPath $winreSource -ErrorAction Stop
-                    $hash = ('FALLBACK_{0}_{1}' -f $winreItem.Length, $winreItem.LastWriteTimeUtc.Ticks)
-                }
+                $hash = (Get-FileHash -LiteralPath $winreSource -Algorithm SHA256 -ErrorAction Stop).Hash
                 $hashToken = ($hash -replace '[^A-Za-z0-9]', '')
                 if ([string]::IsNullOrWhiteSpace($hashToken)) { $hashToken = [guid]::NewGuid().ToString('N') }
                 $cacheKey = "$($image.Architecture)_$hash"
                 if (-not $winreCache.ContainsKey($cacheKey)) {
-                    $winreWork = Join-Path $WinRECacheRoot ("winre_{0}_{1}.wim" -f $image.Architecture, $hashToken.Substring(0, [Math]::Min(12, $hashToken.Length)))
+                    $winreWork = Join-Path $WinRECacheRoot ("winre_{0}_{1}.wim" -f $image.Architecture, $hashToken)
                     Copy-AIOLangFileWithRetry -Source $winreSource -Destination $winreWork
                     Update-AIOLangWinREImage -WinREPath $winreWork -Architecture $image.Architecture -Build $image.Build -Inventory $Inventory -Locales $Locales -DefaultLocale $DefaultLocale -MountPath $WinREMountPath -ScratchPath $ScratchPath -Cleanup:$Cleanup -ResetBase:$ResetBase
                     $winreCache[$cacheKey] = $winreWork
@@ -3821,40 +5030,50 @@ function Get-AIOLangBootImageMetadata {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)] [string]$BootWim)
 
-    $images = @(Get-WindowsImage -ImagePath $BootWim -ErrorAction Stop)
+    $records = @(Get-AIOLangImageRecords -ImagePath $BootWim)
     $result = New-Object System.Collections.Generic.List[object]
-    foreach ($summary in $images) {
-        $detail = Get-WindowsImage -ImagePath $BootWim -Index ([int]$summary.ImageIndex) -ErrorAction Stop
-        [void]$result.Add([pscustomobject]@{
+    foreach ($detail in $records) {
+        $obj = [pscustomobject]@{
             ImageIndex       = [int]$detail.ImageIndex
             ImageName        = [string]$detail.ImageName
             ImageDescription = [string]$detail.ImageDescription
             Architecture     = Convert-AIOLangArchitectureName -Architecture $detail.Architecture
             Version          = [version]$detail.Version
-            Build            = [int]([version]$detail.Version).Build
-        })
+            Build            = [int]$detail.Build
+            InstallationType = 'WinPE'
+            EditionId        = 'WinPE'
+            ProductFamily    = 'WinPE'
+        }
+        [void]$result.Add($obj)
     }
     return [object[]]$result.ToArray()
 }
-
 
 function Get-AIOLangPayloadFileIndex {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)] [object]$Payload)
 
-    if ($Payload.PSObject.Properties['FileIndex'] -and $Payload.FileIndex) {
+    if ($Payload.PSObject.Properties['FileIndex'] -and $null -ne $Payload.FileIndex) {
         return $Payload.FileIndex
     }
 
-    $index = @{}
-    if (Test-Path -LiteralPath $Payload.ExtractRoot -PathType Container) {
-        foreach ($path in [System.IO.Directory]::EnumerateFiles($Payload.ExtractRoot, '*', [System.IO.SearchOption]::AllDirectories)) {
-            $key = [System.IO.Path]::GetFileName($path).ToLowerInvariant()
-            if (-not $index.ContainsKey($key)) {
-                $index[$key] = New-Object System.Collections.Generic.List[string]
-            }
-            [void]$index[$key].Add($path)
+    $root = [string]$Payload.ExtractRoot
+    if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath $root -PathType Container)) {
+        throw "No existe el arbol extraido del payload de idioma '$($Payload.Locale)': '$root'."
+    }
+
+    $builders = @{}
+    foreach ($file in [System.IO.Directory]::EnumerateFiles($root, '*', [System.IO.SearchOption]::AllDirectories)) {
+        $key = [System.IO.Path]::GetFileName($file).ToLowerInvariant()
+        if (-not $builders.ContainsKey($key)) {
+            $builders[$key] = New-Object System.Collections.Generic.List[string]
         }
+        [void]$builders[$key].Add($file)
+    }
+
+    $index = @{}
+    foreach ($key in @($builders.Keys)) {
+        $index[$key] = [string[]]@($builders[$key].ToArray() | Sort-Object)
     }
 
     $Payload | Add-Member -MemberType NoteProperty -Name FileIndex -Value $index -Force
@@ -3940,9 +5159,11 @@ function Get-AIOLangIntlLocalesFromMount {
 
     $result = Invoke-AIOLangDism -Arguments @("/Image:$MountPath", '/Get-Intl') -Context $Context -Quiet
     $locales = New-Object System.Collections.Generic.List[string]
+    # Invoke-AIOLangDism fuerza /English; aceptar exclusivamente las entradas
+    # de idiomas instalados, nunca System locale, teclado o idioma de reserva.
     foreach ($line in @($result.Output)) {
-        foreach ($match in [regex]::Matches([string]$line, '(?<![A-Za-z0-9])([A-Za-z]{2,3}(?:-[A-Za-z]{4})?-[A-Za-z]{2})(?![A-Za-z0-9])')) {
-            $locale = Normalize-AIOLangLocale -Locale $match.Groups[1].Value
+        if ([string]$line -match '^\s*Installed language\(s\)\s*:\s*(\S+)\s*$') {
+            $locale = Normalize-AIOLangLocale -Locale $matches[1]
             if ($locale -and $locale -notin $locales) { [void]$locales.Add($locale) }
         }
     }
@@ -3976,7 +5197,7 @@ function Assert-AIOLangMountedWinPELocalization {
             throw "${Context}: sources\lang.ini interno no contiene $($missingLangIni -join ', ')."
         }
 
-        $coreNames = @('setup.exe.mui','setupplatform.exe.mui','w32uires.dll.mui','winsetup.dll.mui','spwizres.dll.mui')
+        $coreNames = [string[]]$script:AIOLangPolicy.SetupCoreMui
         foreach ($locale in $Locales) {
             $localeRoot = Join-Path $MountPath "sources\$locale"
             $muiFiles = if (Test-Path -LiteralPath $localeRoot -PathType Container) {
@@ -4131,6 +5352,16 @@ function Test-AIOLangBootWimLocalization {
         try {
             $role = Get-AIOLangMountedBootImageRole -MountPath $MountPath -Image $image -FallbackSetupIndex $fallbackSetupIndex
             $isSetup = [bool]$role.IsSetup
+
+            if ($plannedUpdate -and [string]$plannedUpdate.Mode -eq 'FontSupportOnly') {
+                $fontResult = Assert-AIOLangEastAsianFontSupport -MountPath $MountPath -ExpectedFontFiles @($plannedUpdate.EastAsianFontFiles) -Locales @($plannedUpdate.EastAsianLocales) -Context "Verificacion final fuentes EA boot.wim indice $index" -Mode 'FontSupportOnly'
+                $fontResult | Add-Member -MemberType NoteProperty -Name Index -Value $index -Force
+                [void]$results.Add($fontResult)
+                [void](Dismount-AIOLangImage -MountPath $MountPath -Mode Discard -Context "Cerrar verificacion fuentes EA boot.wim indice $index")
+                $mounted = $false
+                continue
+            }
+
             $allowResourcesOnlyForIndex = [bool](
                 ($plannedUpdate -and [string]$plannedUpdate.Mode -eq 'SetupResourcesOnly') -or
                 ($AllowSetupResourcesOnly -and $isSetup)
@@ -4138,6 +5369,11 @@ function Test-AIOLangBootWimLocalization {
             Write-AIOLangLog -Level INFO -Message ("boot.wim indice {0}: rol Setup={1}; deteccion={2}." -f $index, $isSetup, (@($role.Reasons) -join ','))
 
             $result = Assert-AIOLangMountedWinPELocalization -MountPath $MountPath -Locales $Locales -Context "Verificacion final boot.wim indice $index" -SetupImage:$isSetup -AllowSetupResourcesOnly:$allowResourcesOnlyForIndex
+            if ($plannedUpdate -and [string]$plannedUpdate.Mode -eq 'SetupResourcesOnly') { $result | Add-Member -MemberType NoteProperty -Name Mode -Value 'SetupResourcesOnly' -Force }
+            if ($plannedUpdate -and @($plannedUpdate.EastAsianFontFiles).Count -gt 0) {
+                $fontVerification = Assert-AIOLangEastAsianFontSupport -MountPath $MountPath -ExpectedFontFiles @($plannedUpdate.EastAsianFontFiles) -Locales @($plannedUpdate.EastAsianLocales) -Context "Verificacion final fuentes EA boot.wim indice $index" -Mode ([string]$plannedUpdate.Mode)
+                $result | Add-Member -MemberType NoteProperty -Name EastAsianFontVerification -Value $fontVerification -Force
+            }
             $result | Add-Member -MemberType NoteProperty -Name Index -Value $index -Force
             [void]$results.Add($result)
             [void](Dismount-AIOLangImage -MountPath $MountPath -Mode Discard -Context "Cerrar verificacion boot.wim indice $index")
@@ -4168,20 +5404,9 @@ function Merge-AIOLangPayloadIntoBootImage {
         return [pscustomobject]@{ Copied = 0; Locales = [string[]]@(); SetupImage = $false }
     }
 
-    $bootMuiNames = @(
-        'appraiser.dll.mui','arunres.dll.mui','cmisetup.dll.mui','compatctrl.dll.mui',
-        'compatprovider.dll.mui','deployprovider.dll.mui','dism.exe.mui','dismapi.dll.mui',
-        'dismcore.dll.mui','dismprov.dll.mui','folderprovider.dll.mui','imagingprovider.dll.mui',
-        'input.dll.mui','logprovider.dll.mui','mediasetupuimgr.dll.mui','nlsbres.dll.mui',
-        'osimageprovider.dll.mui','pnpibs.dll.mui','reagent.dll.mui','rollback.exe.mui',
-        'setup.exe.mui','setupcompat.dll.mui','setupcore.dll.mui','setupmgr.dll.mui',
-        'setupplatform.exe.mui','setupprep.exe.mui','smiengine.dll.mui','spwizres.dll.mui',
-        'upgloader.dll.mui','uxlibres.dll.mui','vhdprovider.dll.mui','w32uires.dll.mui',
-        'wdsclient.dll.mui','wdsimage.dll.mui','wimgapi.dll.mui','wimprovider.dll.mui',
-        'windlp.dll.mui','winsetup.dll.mui','reagent.adml'
-    )
-    $rtfNames = @('vofflps.rtf','credits.rtf','oobe_help_opt_in_details.rtf')
-    $coreNames = @('setup.exe.mui','setupplatform.exe.mui','w32uires.dll.mui','winsetup.dll.mui','spwizres.dll.mui')
+    $bootMuiNames = [string[]]$script:AIOLangPolicy.SetupLocalizedFiles
+    $rtfNames = [string[]]$script:AIOLangPolicy.SetupLocalizedRtf
+    $coreNames = [string[]]$script:AIOLangPolicy.SetupCoreMui
     $copied = 0
     $processedLocales = New-Object System.Collections.Generic.List[string]
 
@@ -4239,27 +5464,24 @@ function Sync-AIOLangBootFiles {
     $mountedSources = Join-Path $MountPath 'sources'
     $mediaSources = Join-Path $MediaRoot 'sources'
 
-    if (Test-Path -LiteralPath (Join-Path $mountedSources 'setup.exe')) {
-        Copy-AIOLangFileWithRetry -Source (Join-Path $mountedSources 'setup.exe') -Destination (Join-Path $mediaSources 'setup.exe')
-    }
-    if (Test-Path -LiteralPath (Join-Path $MountPath 'setup.exe')) {
-        Copy-AIOLangFileWithRetry -Source (Join-Path $MountPath 'setup.exe') -Destination (Join-Path $MediaRoot 'setup.exe')
-    }
-
-    foreach ($locale in $Locales) {
-        $mountedLocale = Join-Path $mountedSources $locale
-        if (Test-Path -LiteralPath $mountedLocale -PathType Container) {
-            Copy-AIOLangTree -Source $mountedLocale -Destination (Join-Path $mediaSources $locale)
-        }
-    }
-
+    # Solo exportar los binarios de sources del indice Setup. El lanzador
+    # setup.exe de la raiz de WinPE NO es el setup.exe de la raiz del medio.
     if ($SetupImage) {
-        $mountedLangIni = Join-Path $mountedSources 'lang.ini'
-        if (-not (Test-Path -LiteralPath $mountedLangIni -PathType Leaf)) {
-            throw "boot.wim indice $Index no contiene sources\lang.ini despues de configurar Windows Setup."
+        foreach ($name in @('setup.exe', 'setuphost.exe')) {
+            $source = Join-Path $mountedSources $name
+            if (Test-Path -LiteralPath $source -PathType Leaf) {
+                Copy-AIOLangFileWithRetry -Source $source -Destination (Join-Path $mediaSources $name)
+            }
         }
-        Copy-AIOLangFileWithRetry -Source $mountedLangIni -Destination (Join-Path $mediaSources 'lang.ini')
     }
+
+    # sources\<locale> y sources\lang.ini en el medio ya los puebla
+    # Merge-AIOLangSetupPayload directamente desde el Language Pack completo
+    # (arbol real de Setup, con dlmanifests/etwproviders/cli/svr/asz).
+    # Copiar de vuelta el subconjunto de boot.wim (~39 MUI de WinPE) o su
+    # lang.ini (regenerado solo con inventario de WinPE) pisaria ese
+    # resultado completo. La sincronizacion es de un solo sentido: medio ->
+    # boot.wim (Copy-AIOLangMediaLangIniToBootImage), nunca al reves.
 
     $mountedBootFonts = Join-Path $MountPath 'Windows\Boot\Fonts'
     if (Test-Path -LiteralPath $mountedBootFonts -PathType Container) {
@@ -4287,6 +5509,9 @@ function Update-AIOLangBootWim {
 
     $images = @(Get-AIOLangBootImageMetadata -BootWim $BootWim)
     $fallbackSetupIndex = Get-AIOLangSetupBootImageIndex -Images $images
+    $localizationPlan = Get-AIOLangWinPELocalizationMode -Inventory $Inventory -TargetImages $images -Locales $Locales
+    $useFullWinPE = ([string]$localizationPlan.Mode -eq 'FullWinPE')
+    Write-AIOLangLog -Level INFO -Message ("Modo de localizacion boot.wim: {0}; LP base faltantes={1}; FontSupport faltantes={2}." -f $localizationPlan.Mode, (@($localizationPlan.MissingBase) -join ','), (@($localizationPlan.MissingFontSupport) -join ','))
     $results = New-Object System.Collections.Generic.List[object]
     foreach ($image in $images) {
         $index = [int]$image.ImageIndex
@@ -4307,44 +5532,86 @@ function Update-AIOLangBootWim {
             $isAzureStackHci = @($setupMums | Where-Object { [System.IO.Path]::GetFileName($_) -match '(?i)WinPE-Setup-ASZ-Package' }).Count -gt 0
             Write-AIOLangLog -Level INFO -Message ("boot.wim indice {0}: rol Setup={1}; deteccion={2}; fallback={3}." -f $index, $isSetup, (@($role.Reasons) -join ','), $fallbackSetupIndex)
 
-            # PowerShell 5.1 puede convertir la ausencia de salida de una funcion en $null
-            # al enlazar un parametro de tipo object[]. Se normaliza expresamente la
-            # coleccion y se eliminan elementos nulos antes de decidir el modo WinPE.
+            # La localizacion WinPE completa exige el Language Pack base (lp.cab)
+            # para todos los idiomas. Para idiomas de Asia oriental tambien se exige
+            # el paquete FontSupport correspondiente; si falta cualquiera de esos
+            # componentes, todo boot.wim entra en SetupResourcesOnly para evitar una
+            # localizacion parcial e inconsistente.
             $packageList = New-Object System.Collections.Generic.List[object]
-            foreach ($candidate in @(Get-AIOLangPackagesForImage -Inventory $Inventory -Image $image -Locales $Locales -Category 'WinPE')) {
-                if ($null -ne $candidate) { [void]$packageList.Add($candidate) }
+            if ($useFullWinPE) {
+                foreach ($candidate in @(Get-AIOLangPackagesForImage -Inventory $Inventory -Image $image -Locales $Locales -Category 'WinPE')) {
+                    if ($null -ne $candidate) { [void]$packageList.Add($candidate) }
+                }
             }
             $packages = [object[]]$packageList.ToArray()
-            $fullWinPE = [bool]($packageList.Count -gt 0)
+            $fullWinPE = [bool]$useFullWinPE
+            $appliedWinPE = @()
+            $eaFonts = [pscustomobject]@{ Applied = $false; FileCount = 0; Locales = [string[]]@(); SystemFontNames = [string[]]@() }
             if ($fullWinPE) {
-                Add-AIOLangFeaturePackages -MountPath $MountPath -Packages ([object[]]$packageList.ToArray()) -ContextPrefix "WinPE indice $index"
-            }
-            elseif (-not $isSetup) {
-                Write-Host " [OMITIDO] boot.wim indice $index no es Setup y no tiene paquetes WinPE compatibles." -ForegroundColor DarkYellow
-                [void](Dismount-AIOLangImage -MountPath $MountPath -Mode Discard -Context "Cerrar boot.wim indice $index sin cambios")
-                $committed = $true
-                [void]$results.Add([pscustomobject]@{ Index = $index; Mode = 'NotModified'; SetupImage = $false; PackageCount = 0; Detection = [string[]]$role.Reasons })
-                continue
+                $appliedWinPE = @(Add-AIOLangFeaturePackages -MountPath $MountPath -Packages ([object[]]$packageList.ToArray()) -ContextPrefix "WinPE indice $index")
             }
             else {
-                Write-Host ' [MODO COMPATIBILIDAD] No hay paquetes WinPE compatibles; se integraran lang.ini y recursos MUI de Setup.' -ForegroundColor Yellow
-                Write-AIOLangLog -Level WARN -Message "boot.wim indice ${index}: se aplicara el modo de recursos Setup sin paquetes WinPE compatibles."
+                $eaFonts = Add-AIOLangEastAsianFontSupport -MountPath $MountPath -Payloads $Payloads -Architecture $image.Architecture -Locales $Locales -Context "Fuentes EA boot.wim indice $index"
+            }
+
+            if (-not $fullWinPE -and -not $isSetup -and -not $eaFonts.Applied) {
+                Write-Host " [OMITIDO] boot.wim indice $index no es Setup; sin WinPE completo ni fuentes EA que aplicar." -ForegroundColor DarkYellow
+                [void](Dismount-AIOLangImage -MountPath $MountPath -Mode Discard -Context "Cerrar boot.wim indice $index sin cambios")
+                $committed = $true
+                [void]$results.Add([pscustomobject]@{ Index = $index; Mode = 'NotModified'; SetupImage = $false; PackageCount = 0; EastAsianFontFiles = [string[]]@(); EastAsianLocales = [string[]]@(); Detection = [string[]]$role.Reasons })
+                continue
+            }
+            elseif (-not $fullWinPE -and -not $isSetup -and $eaFonts.Applied) {
+                Write-Host " [FUENTES EA] boot.wim indice $index recibira soporte tipografico para $(@($eaFonts.Locales) -join ', ')." -ForegroundColor Yellow
+                $fontVerification = Assert-AIOLangEastAsianFontSupport -MountPath $MountPath -ExpectedFontFiles @($eaFonts.SystemFontNames) -Locales @($eaFonts.Locales) -Context "Verificar fuentes EA boot.wim indice $index" -Mode 'FontSupportOnly'
+                Sync-AIOLangBootFiles -MountPath $MountPath -MediaRoot $MediaRoot -Index $index -Locales $Locales -SetupImage:$false
+                [void](Dismount-AIOLangImage -MountPath $MountPath -Mode Commit -Context "Guardar boot.wim indice $index")
+                $committed = $true
+                [void]$results.Add([pscustomobject]@{
+                    Index = $index; Mode = 'FontSupportOnly'; SetupImage = $false; PackageCount = 0
+                    EastAsianFontFiles = [string[]]$eaFonts.SystemFontNames; EastAsianLocales = [string[]]$eaFonts.Locales
+                    Verification = $fontVerification; Detection = [string[]]$role.Reasons
+                })
+                continue
+            }
+            elseif (-not $fullWinPE) {
+                Write-Host ' [MODO SetupResourcesOnly] Sin LP WinPE completo; se integraran lang.ini y recursos MUI de Setup.' -ForegroundColor Yellow
+                if ($eaFonts.Applied) { Write-Host " [FUENTES EA] Se agregara soporte tipografico para $(@($eaFonts.Locales) -join ', ')." -ForegroundColor Yellow }
+                Write-AIOLangLog -Level INFO -Message "boot.wim indice ${index}: SetupResourcesOnly sin localizacion WinPE completa."
             }
 
             if ($isSetup) {
-                Copy-AIOLangMediaLangIniToBootImage -MediaRoot $MediaRoot -MountPath $MountPath
                 [void](Merge-AIOLangPayloadIntoBootImage -MountPath $MountPath -Payloads $Payloads -Architecture $image.Architecture -Locales $Locales -SetupImage -Server:$isServerSetup -AzureStackHci:$isAzureStackHci)
             }
 
             if ($fullWinPE) {
-                Set-AIOLangInternationalSettings -MountPath $MountPath -DefaultLocale $DefaultLocale -ContextPrefix "Configurar boot.wim indice $index" -SetupImage:$isSetup
-                $expectedPackages = @($packages | Where-Object { $null -ne $_ -and (Test-AIOLangNeutralParentPresent -MountPath $MountPath -Package $_) })
-                if ($expectedPackages.Count -gt 0) {
-                    [void](Assert-AIOLangInstalledPackages -MountPath $MountPath -Packages $expectedPackages -Context "Verificar paquetes WinPE indice $index")
+                if ($isSetup) {
+                    # Set-SetupUILang se aplica sobre boot.wim, pero /Distribution
+                    # apunta al medio real (MediaRoot), nunca a $MountPath; Gen-LangINI
+                    # se omite aqui porque ya corrio una vez contra install.wim.
+                    Set-AIOLangInternationalSettings -MountPath $MountPath -DefaultLocale $DefaultLocale -ContextPrefix "Configurar boot.wim indice $index" -DistributionPath $MediaRoot -SkipLangIni
+                }
+                else {
+                    Set-AIOLangInternationalSettings -MountPath $MountPath -DefaultLocale $DefaultLocale -ContextPrefix "Configurar boot.wim indice $index"
+                }
+                if ($appliedWinPE.Count -gt 0) {
+                    [void](Assert-AIOLangInstalledPackages -MountPath $MountPath -Packages $appliedWinPE -Context "Verificar paquetes WinPE indice $index")
                 }
             }
 
+            if ($isSetup) {
+                # Se copia al final, ya con Set-SetupUILang aplicado sobre el
+                # lang.ini maestro del medio (orden documentado por Microsoft:
+                # Gen-LangINI -> Set-SetupUILang -> xcopy hacia boot.wim).
+                Copy-AIOLangMediaLangIniToBootImage -MediaRoot $MediaRoot -MountPath $MountPath
+            }
+
             $verification = Assert-AIOLangMountedWinPELocalization -MountPath $MountPath -Locales $Locales -Context "Verificar localizacion antes de commit boot.wim indice $index" -SetupImage:$isSetup -AllowSetupResourcesOnly:(-not $fullWinPE)
+            if (-not $fullWinPE -and $isSetup) { $verification | Add-Member -MemberType NoteProperty -Name Mode -Value 'SetupResourcesOnly' -Force }
+            if ($eaFonts.Applied) {
+                $fontVerification = Assert-AIOLangEastAsianFontSupport -MountPath $MountPath -ExpectedFontFiles @($eaFonts.SystemFontNames) -Locales @($eaFonts.Locales) -Context "Verificar fuentes EA boot.wim indice $index" -Mode ([string]$verification.Mode)
+                $verification | Add-Member -MemberType NoteProperty -Name EastAsianFontVerification -Value $fontVerification -Force
+            }
 
             if ($Cleanup -and $fullWinPE) { Invoke-AIOLangComponentCleanup -MountPath $MountPath -Context "Limpiar boot.wim indice $index" -ResetBase:$ResetBase }
             Sync-AIOLangBootFiles -MountPath $MountPath -MediaRoot $MediaRoot -Index $index -Locales $Locales -SetupImage:$isSetup
@@ -4355,6 +5622,8 @@ function Update-AIOLangBootWim {
                 Mode = $verification.Mode
                 SetupImage = [bool]$isSetup
                 PackageCount = $packages.Count
+                EastAsianFontFiles = [string[]]$eaFonts.SystemFontNames
+                EastAsianLocales = [string[]]$eaFonts.Locales
                 Verification = $verification
                 Detection = [string[]]$role.Reasons
             })
@@ -4384,10 +5653,14 @@ function Get-AIOLangMediaVerification {
     }
     else { $installImages }
 
+    if (@($selectedImages).Count -eq 0) { throw 'No se encontraron indices de install.wim para verificar.' }
+    if ($Indexes -and @($Indexes | Where-Object { $_ -notin @($selectedImages.ImageIndex) }).Count -gt 0) {
+        throw 'Faltan indices seleccionados en los metadatos de install.wim.'
+    }
     $imageLanguageChecks = New-Object System.Collections.Generic.List[object]
     foreach ($image in $selectedImages) {
         $reportedLanguages = @($image.Languages | Where-Object { $_ } | ForEach-Object { Normalize-AIOLangLocale -Locale $_ } | Select-Object -Unique)
-        $missing = if ($reportedLanguages.Count -gt 0) { @($Locales | Where-Object { $_ -notin $reportedLanguages }) } else { @() }
+        $missing = @($Locales | Where-Object { $_ -notin $reportedLanguages })
         [void]$imageLanguageChecks.Add([pscustomobject]@{
             ImageIndex        = $image.ImageIndex
             ImageName         = $image.ImageName
@@ -4395,7 +5668,7 @@ function Get-AIOLangMediaVerification {
             ReportedLanguages = [string[]]$reportedLanguages
             MetadataAvailable = [bool]($reportedLanguages.Count -gt 0)
             MissingLanguages  = [string[]]$missing
-            Complete          = [bool]($reportedLanguages.Count -eq 0 -or $missing.Count -eq 0)
+            Complete          = [bool]($reportedLanguages.Count -gt 0 -and $missing.Count -eq 0)
         })
     }
 
@@ -4432,7 +5705,7 @@ function Get-AIOLangMediaVerification {
 
     $missingLangIniLocales = @($Locales | Where-Object { $_ -notin $langIniLocales })
 
-    Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context 'Verificar idiomas en metadatos de install.wim' -State 'Success' -Details @{ ImagesChecked = @($selectedImages).Count }
+    Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context 'Verificar idiomas en metadatos de install.wim' -State $(if (@($imageLanguageChecks | Where-Object { -not $_.Complete }).Count -eq 0) { 'Success' } else { 'Failed' }) -Details @{ ImagesChecked = @($selectedImages).Count }
     Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context 'Verificar carpetas localizadas de sources y boot' -State 'Success' -Details @{ LocalesChecked = $Locales.Count }
     
     if (Test-Path -LiteralPath $langIniPath -PathType Leaf) {
@@ -4481,25 +5754,49 @@ function Export-AIOLangReport {
     $media = [System.Net.WebUtility]::HtmlEncode([string]$Report.Configuration.MediaRoot)
     $status = [System.Net.WebUtility]::HtmlEncode([string]$Report.Status)
     $html = @"
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>Reporte de integracion de idiomas</title>
+<title>AdminImagenOffline - Resultado $Status</title>
 <style>
-body{font-family:Segoe UI,Arial,sans-serif;margin:32px;color:#202124}h1{font-size:24px}table{border-collapse:collapse;width:100%;margin-top:18px}th,td{border:1px solid #d0d7de;padding:8px;text-align:left}th{background:#f6f8fa}.ok{color:#137333;font-weight:600}.fail{color:#b3261e;font-weight:600}code{background:#f6f8fa;padding:2px 5px}</style>
+body{font-family:Segoe UI,Arial,sans-serif;margin:24px;background:#f5f5f5;color:#202020}
+main{max-width:1400px;margin:auto;background:white;padding:24px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.12)}
+table{border-collapse:collapse;width:100%;margin:12px 0 28px}
+th,td{border:1px solid #ccc;padding:7px;text-align:left;vertical-align:top}
+th{background:#ececec}
+h1{margin-top:0}
+pre{white-space:pre-wrap;background:#f0f0f0;padding:12px;border-radius:4px}
+.ok{color:#167217}.failed{color:#a31515}
+code{background:#f0f0f0;padding:2px 5px;border-radius:4px}
+</style>
 </head>
-<body>
-<h1>Integracion de idiomas</h1>
-<p>Estado: <span class="$(if ($Report.Status -eq 'Success') {'ok'} else {'fail'})">$status</span></p>
-<p>Medio: <code>$media</code></p>
-<p>Indices: $indexes</p>
-<p>Idiomas: $languages</p>
-<p>Predeterminado: $([System.Net.WebUtility]::HtmlEncode([string]$Report.Configuration.DefaultLocale))</p>
-<p>Inicio: $([System.Net.WebUtility]::HtmlEncode([string]$Report.Started))<br>Fin: $([System.Net.WebUtility]::HtmlEncode([string]$Report.Finished))</p>
+<body><main>
+<h1>AdminImagenOffline - Integracion de idiomas</h1>
+
+<h2>Resumen</h2>
+<table>
+    <tbody>
+        <tr><th>Estado</th><td><span class="$(if ($Report.Status -eq 'Success') {'ok'} else {'failed'})">$status</span></td></tr>
+        <tr><th>Medio</th><td><code>$media</code></td></tr>
+        <tr><th>Indices</th><td>$indexes</td></tr>
+        <tr><th>Idiomas</th><td>$languages</td></tr>
+        <tr><th>Predeterminado</th><td>$([System.Net.WebUtility]::HtmlEncode([string]$Report.Configuration.DefaultLocale))</td></tr>
+        <tr><th>Inicio</th><td>$([System.Net.WebUtility]::HtmlEncode([string]$Report.Started))</td></tr>
+        <tr><th>Fin</th><td>$([System.Net.WebUtility]::HtmlEncode([string]$Report.Finished))</td></tr>
+    </tbody>
+</table>
+
 <h2>Operaciones</h2>
-<table><thead><tr><th>Fecha</th><th>Fase</th><th>Contexto</th><th>Estado</th></tr></thead><tbody>$($operationRows -join "`n")</tbody></table>
-</body>
+<table>
+    <thead>
+        <tr><th>Fecha</th><th>Fase</th><th>Contexto</th><th>Estado</th></tr>
+    </thead>
+    <tbody>
+        $($operationRows -join "`n")
+    </tbody>
+</table>
+</main></body>
 </html>
 "@
     $html | Set-Content -LiteralPath $htmlPath -Encoding utf8
@@ -4531,6 +5828,10 @@ $($ErrorRecord.ScriptStackTrace)
     Write-AIOLangAtomicJson -Path (Join-Path $diagnosticRoot 'Operaciones.json') -InputObject ([object[]]@($script:AIOLangOperationLog)) -Depth 10
     if ($script:AIOLangDismTranscript -and (Test-Path -LiteralPath $script:AIOLangDismTranscript)) {
         Copy-Item -LiteralPath $script:AIOLangDismTranscript -Destination (Join-Path $diagnosticRoot 'DISM_Consola.log') -Force -ErrorAction SilentlyContinue
+    }
+    if ($script:AIOLangSessionRoot -and (Test-Path -LiteralPath $script:AIOLangSessionRoot -PathType Container)) {
+        Get-ChildItem -LiteralPath $script:AIOLangSessionRoot -File -Filter '*.log' -ErrorAction SilentlyContinue |
+            Copy-Item -Destination $diagnosticRoot -Force -ErrorAction SilentlyContinue
     }
     if ($BackupRoot) {
         try {
@@ -4576,6 +5877,9 @@ function Invoke-AIOLangMediaIntegration {
         [switch]$OptimizeWims
     )
 
+    if ($script:AIOLangMountedPaths.Count -gt 0 -and -not (Clear-AIOLangMountedImages)) {
+        throw "Hay montajes pendientes de una sesion anterior: $($script:AIOLangMountedPaths -join ', ')."
+    }
     $started = Get-Date
     $script:AIOLangOperationLog = New-Object System.Collections.ArrayList
     $script:AIOLangMountedPaths = New-Object System.Collections.ArrayList
@@ -4597,7 +5901,8 @@ function Invoke-AIOLangMediaIntegration {
     $mountWinRE = Join-Path $script:AIOLangSessionRoot 'Mount_WinRE'
     $mountBoot = Join-Path $script:AIOLangSessionRoot 'Mount_Boot'
     $winreCacheRoot = Join-Path $script:AIOLangSessionRoot 'WinRE_Cache'
-    foreach ($path in @($scratch, $payloadRoot, $mountInstall, $mountWinRE, $mountBoot, $winreCacheRoot)) {
+    $eastAsianFontCacheRoot = Join-Path $script:AIOLangSessionRoot 'EastAsianFonts'
+    foreach ($path in @($scratch, $payloadRoot, $mountInstall, $mountWinRE, $mountBoot, $winreCacheRoot, $eastAsianFontCacheRoot)) {
         Initialize-AIOLangDirectory -Path $path
     }
 
@@ -4606,7 +5911,7 @@ function Invoke-AIOLangMediaIntegration {
         MediaRoot       = $MediaRoot
         RepositoryRoot  = $RepositoryRoot
         PackageSources  = [string[]]@($Inventory | ForEach-Object { if ($_.PSObject.Properties['Source']) { $_.Source } else { 'Repositorio' } } | Select-Object -Unique)
-        AdkDetected     = [bool]$(if ($script:AIOLangAdkInfo) { $script:AIOLangAdkInfo.Detected } else { $false })
+        AdkDetected     = [bool]$(if ($script:AIOLangAdkInfo -and $script:AIOLangAdkInfo.PSObject.Properties['AdkInstalled']) { $script:AIOLangAdkInfo.AdkInstalled } elseif ($script:AIOLangAdkInfo) { $script:AIOLangAdkInfo.Detected } else { $false })
         AdkRoot         = $(if ($script:AIOLangAdkInfo) { $script:AIOLangAdkInfo.Root } else { $null })
         WinPERoot       = $(if ($script:AIOLangAdkInfo) { $script:AIOLangAdkInfo.WinPERoot } else { $null })
         DismPath        = $script:AIOLangDismPath
@@ -4636,6 +5941,7 @@ function Invoke-AIOLangMediaIntegration {
         # normalizacion de recursos. Aunque esas operaciones usan la sesion
         # temporal, este orden garantiza un punto de restauracion inequivoco.
         $script:AIOLangCurrentPhase = 'Preflight'
+        [void](Assert-AIOLangPreflightDiskSpace -MediaRoot $MediaRoot -SessionRoot $script:AIOLangSessionRoot -Inventory $Inventory -SelectedImages $selectedImages -Locales $Locales)
         Write-Host "`n>> Creando respaldo obligatorio del medio" -ForegroundColor Cyan
         $backup = New-AIOLangPreflightBackup -MediaRoot $MediaRoot -Locales $Locales
         $script:AIOLangLastTerminalState.BackupRoot = $backup.Root
@@ -4653,8 +5959,10 @@ function Invoke-AIOLangMediaIntegration {
         $bootDescriptors = if (Test-Path -LiteralPath $bootWim -PathType Leaf) { @(Get-AIOLangBootImageMetadata -BootWim $bootWim) } else { @() }
         $setupDescriptor = if ($bootDescriptors.Count -gt 0) { @($bootDescriptors | Where-Object { $_.ImageName -match '(?i)setup' } | Sort-Object ImageIndex | Select-Object -First 1)[0] } else { $selectedImages[0] }
         if (-not $setupDescriptor -and $bootDescriptors.Count -gt 0) { $setupDescriptor = @($bootDescriptors | Sort-Object ImageIndex -Descending | Select-Object -First 1)[0] }
+        $selectedProductFamilies = @($selectedImages | ForEach-Object { if ($_.PSObject.Properties['ProductFamily']) { $_.ProductFamily } else { Get-AIOLangImageProductFamily -Image $_ } } | Where-Object { $_ -and $_ -ne 'WinPE' } | Select-Object -Unique)
+        $mediaProductFamily = if ($selectedProductFamilies.Count -eq 1) { [string]$selectedProductFamilies[0] } else { 'Unknown' }
         foreach ($locale in $Locales) {
-            $setupPackage = Get-AIOLangBestPackage -Packages $Inventory -Locale $locale -Architecture $setupDescriptor.Architecture -Build $setupDescriptor.Build -Category 'LanguagePack'
+            $setupPackage = Get-AIOLangBestPackage -Packages $Inventory -Locale $locale -Architecture $setupDescriptor.Architecture -Build $setupDescriptor.Build -Category 'LanguagePack' -ProductFamily $mediaProductFamily
             if (-not $setupPackage) {
                 throw "Falta el paquete $locale compatible con la arquitectura de Setup $($setupDescriptor.Architecture) / build $($setupDescriptor.Build)."
             }
@@ -4680,7 +5988,7 @@ function Invoke-AIOLangMediaIntegration {
 
         $mediaMutationStarted = $true
         $script:AIOLangCurrentPhase = 'install.wim'
-        Update-AIOLangInstallWim -InstallWim $installImage -Images $Images -Indexes $Indexes -Inventory $Inventory -Payloads $payloads -Locales $Locales -DefaultLocale $DefaultLocale -MediaRoot $MediaRoot -MountPath $mountInstall -WinREMountPath $mountWinRE -ScratchPath $scratch -WinRECacheRoot $winreCacheRoot -IntegrateFod:$IntegrateFod -UpdateWinRE:$UpdateWinRE -Cleanup:$Cleanup -ResetBase:$ResetBase
+        Update-AIOLangInstallWim -InstallWim $installImage -Images $Images -Indexes $Indexes -Inventory $Inventory -Payloads $payloads -Locales $Locales -DefaultLocale $DefaultLocale -MediaRoot $MediaRoot -MountPath $mountInstall -WinREMountPath $mountWinRE -ScratchPath $scratch -WinRECacheRoot $winreCacheRoot -EastAsianFontCacheRoot $eastAsianFontCacheRoot -IntegrateFod:$IntegrateFod -UpdateWinRE:$UpdateWinRE -Cleanup:$Cleanup -ResetBase:$ResetBase
 
         if ($ExportSingleIndex -and $Indexes.Count -eq 1) {
             $script:AIOLangCurrentPhase = 'Exportar edicion unica'
@@ -4705,6 +6013,8 @@ function Invoke-AIOLangMediaIntegration {
                 Write-AIOLangLog -Level INFO -Message 'Se omitio la reconstruccion de boot.wim porque ningun indice fue modificado.'
             }
             $setupResourcesOnly = @($bootUpdateResults | Where-Object { $_.Mode -eq 'SetupResourcesOnly' }).Count -gt 0
+            $actualBootModes = [string[]]@($bootUpdateResults | Select-Object -ExpandProperty Mode -Unique)
+            $configuration | Add-Member -MemberType NoteProperty -Name BootLocalizationMode -Value $(if ($actualBootModes.Count -gt 0) { $actualBootModes -join '+' } else { 'NotModified' }) -Force
             $script:AIOLangCurrentPhase = 'Verificar boot.wim final'
             $bootLocalizationVerification = @(Test-AIOLangBootWimLocalization -BootWim $bootWim -Locales $Locales -MountPath $mountBoot -ScratchPath $scratch -UpdateResults $bootUpdateResults -AllowSetupResourcesOnly:$setupResourcesOnly)
         }
@@ -4723,7 +6033,7 @@ function Invoke-AIOLangMediaIntegration {
         if (-not $verification.DefaultInLangIni) {
             throw "El idioma predeterminado '$DefaultLocale' no aparece en sources\lang.ini."
         }
-        $failedLanguageChecks = @($verification.ImageLanguageChecks | Where-Object { $_.MetadataAvailable -and -not $_.Complete })
+        $failedLanguageChecks = @($verification.ImageLanguageChecks | Where-Object { -not $_.Complete })
         if ($failedLanguageChecks.Count -gt 0) {
             $details = @($failedLanguageChecks | ForEach-Object {
                 "indice $($_.ImageIndex): $(@($_.MissingLanguages) -join ', ')"
@@ -4740,8 +6050,12 @@ function Invoke-AIOLangMediaIntegration {
         if ($UpdateWinRE) { Write-Host " [OK] winre.wim actualizado con nuevos componentes WinPE" -ForegroundColor Green }
         if ($UpdateBootWim) {
             $resourcesOnlyCount = @($bootLocalizationVerification | Where-Object { $_.Mode -eq 'SetupResourcesOnly' }).Count
+            $fontOnlyCount = @($bootLocalizationVerification | Where-Object { $_.Mode -eq 'FontSupportOnly' }).Count
             if ($resourcesOnlyCount -gt 0) {
                 Write-Host " [OK] Selector de idiomas de Windows Setup habilitado mediante lang.ini y recursos MUI" -ForegroundColor Green
+                if ($fontOnlyCount -gt 0 -or @($Locales | Where-Object { Test-AIOLangEastAsianLocale -Locale $_ }).Count -gt 0) {
+                    Write-Host " [OK] Soporte de fuentes de Asia oriental aplicado a boot.wim sin requerir WinPE Add-on" -ForegroundColor Green
+                }
                 Write-Host " [ADVERTENCIA] WinPE completo no contiene todos los paquetes de idioma; usa un Add-on compatible para traduccion total." -ForegroundColor Yellow
             }
             else {
@@ -4795,7 +6109,7 @@ function Invoke-AIOLangMediaIntegration {
         $integrationError = $_
         $failedPhase = $script:AIOLangCurrentPhase
         $restorationStatus = 'No requerida'
-        Clear-AIOLangMountedImages
+        $mountsCleared = Clear-AIOLangMountedImages
         $diagnostic = $null
         try {
             $diagnostic = New-AIOLangDiagnosticBundle -ErrorRecord $integrationError -Configuration $configuration -BackupRoot $(if ($backup) { $backup.Root } else { $null })
@@ -4803,7 +6117,11 @@ function Invoke-AIOLangMediaIntegration {
         catch {
             Write-AIOLangLog -Level WARN -Message "No se pudo generar el diagnostico automatico: $($_.Exception.Message)"
         }
-        if ($backup -and $mediaMutationStarted) {
+        if ($backup -and $mediaMutationStarted -and -not $mountsCleared) {
+            $restorationStatus = 'Pendiente: no se pudieron desmontar todas las imagenes'
+            Write-AIOLangLog -Level WARN -Message "Restauracion aplazada. Se conserva el respaldo '$($backup.Root)' y la sesion '$script:AIOLangSessionRoot'."
+        }
+        elseif ($backup -and $mediaMutationStarted) {
             Write-Host "`nLa operacion fallo despues de iniciar cambios en el medio." -ForegroundColor Yellow
             if (Read-AIOLangYesNo -Prompt 'Restaurar automaticamente el medio al estado inicial' -Default $true) {
                 try {
@@ -4863,7 +6181,7 @@ function Invoke-AIOLangMediaIntegration {
         throw $integrationError
     }
     finally {
-        Clear-AIOLangMountedImages
+        $mountsCleared = Clear-AIOLangMountedImages
         if ($script:AIOLangSessionRoot -and (Test-Path -LiteralPath $script:AIOLangSessionRoot)) {
             if ($script:AIOLangDismTranscript -and (Test-Path -LiteralPath $script:AIOLangDismTranscript)) {
                 Initialize-AIOLangDirectory -Path $script:AIOLangReportsRoot
@@ -4872,10 +6190,18 @@ function Invoke-AIOLangMediaIntegration {
                 $script:AIOLangLastPersistentLogPath = $transcriptCopy
                 if ($script:AIOLangLastTerminalState) { $script:AIOLangLastTerminalState.LogPath = $transcriptCopy }
             }
-            Remove-Item -LiteralPath $script:AIOLangSessionRoot -Recurse -Force -ErrorAction SilentlyContinue
+            if ($mountsCleared) {
+                Remove-Item -LiteralPath $script:AIOLangSessionRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            else {
+                Write-Host "Se conserva la sesion para recuperar los montajes pendientes: $script:AIOLangSessionRoot" -ForegroundColor Yellow
+                Write-AIOLangLog -Level WARN -Message "Limpieza aplazada: $script:AIOLangSessionRoot"
+            }
         }
-        $script:AIOLangSessionRoot = $null
-        $script:AIOLangDismTranscript = $null
+        if ($mountsCleared) {
+            $script:AIOLangSessionRoot = $null
+            $script:AIOLangDismTranscript = $null
+        }
         $script:AIOLangCurrentPhase = 'Inicializacion'
     }
 }
@@ -4927,6 +6253,8 @@ function Start-AIOLangIntegrationWizard {
         } | Where-Object { $_ -and $_ -ne 'Unknown' } | Select-Object -Unique)
         $targetBuildsForAdk = [int[]]@($targetImagesForAdk | Where-Object { $_.Build } | Select-Object -ExpandProperty Build -Unique)
 
+        $script:AIOLangAdkScanSummary = $null
+        $adkInventoryError = $null
         $inventoryBuffer = New-Object System.Collections.Generic.List[object]
         $repositoryInventory = @(Get-AIOLangRepositoryInventory -RepositoryRoot $repositoryRoot -ScratchRoot (Join-Path $scanRoot 'Repositorio') -SourceName 'Repositorio')
         foreach ($item in $repositoryInventory) { [void]$inventoryBuffer.Add($item) }
@@ -4953,8 +6281,9 @@ function Start-AIOLangIntegrationWizard {
                 foreach ($item in $adkInventory) { [void]$inventoryBuffer.Add($item) }
             }
             catch {
-                Write-AIOLangLog -Level WARN -Message "No se pudo analizar el complemento WinPE detectado: $($_.Exception.Message)"
-                Write-Host "[ADVERTENCIA] Se detecto WinPE, pero no pudo analizarse: $($_.Exception.Message)" -ForegroundColor Yellow
+                $adkInventoryError = $_.Exception.Message
+                Write-AIOLangLog -Level WARN -Message "No se pudo analizar el complemento WinPE detectado: $adkInventoryError"
+                Write-Host "[ADVERTENCIA] Se detecto WinPE, pero no pudo analizarse: $adkInventoryError" -ForegroundColor Yellow
             }
         }
 
@@ -4964,10 +6293,10 @@ function Start-AIOLangIntegrationWizard {
         Write-Host '=======================================================' -ForegroundColor Cyan
         Write-Host '                    RESUMEN PREVIO                     ' -ForegroundColor Cyan
         Write-Host '=======================================================' -ForegroundColor Cyan
-        Write-Host " Medio origen : $mediaRoot" -ForegroundColor White
-        Write-Host " Repositorio  : $repositoryRoot" -ForegroundColor White
-        Write-Host " Imagen       : $([System.IO.Path]::GetFileName($installImage))" -ForegroundColor White
-        Show-AIOLangAdkStatus -AdkInfo $adkInfo
+        Write-Host " Medio origen           : $mediaRoot" -ForegroundColor White
+        Write-Host " Repositorio            : $repositoryRoot" -ForegroundColor White
+        Write-Host " Imagen                 : $([System.IO.Path]::GetFileName($installImage))" -ForegroundColor White
+        Show-AIOLangAdkStatus -AdkInfo $adkInfo -MediaArchitectures $targetArchitecturesForAdk
         if ($adkInfo.WinPERoot) {
             $adkWinPeBuilds = @($adkInventory | Where-Object { $_.Build } | Select-Object -ExpandProperty Build -Unique | Sort-Object)
             $adkBuildText = if ($adkWinPeBuilds.Count -gt 0) { $adkWinPeBuilds -join ", " } else { 'N/D' }
@@ -4979,29 +6308,46 @@ function Start-AIOLangIntegrationWizard {
                 @()
             }
             $scanSummary = $script:AIOLangAdkScanSummary
-            if ($scanSummary -and $scanSummary.FullScanSkipped) {
-                Write-Host " WinPE ADK    : $($scanSummary.AnalyzedCount) sondeado(s) de $($scanSummary.CandidateCount) | 0 compatibles con install.wim | Build(s): $adkBuildText" -ForegroundColor White
-                Write-Host '               Escaneo completo omitido: la familia WinPE no es compatible con el medio.' -ForegroundColor DarkGray
+            if ($adkInventoryError) {
+                Write-Host " Inventario WinPE       : No se pudo completar: $adkInventoryError" -ForegroundColor Yellow
+            }
+            elseif ($scanSummary -and $scanSummary.FullScanSkipped) {
+                Write-Host " Inventario WinPE       : Parcial | $($scanSummary.AnalyzedCount) sondeado(s) de $($scanSummary.CandidateCount) | Build(s): $adkBuildText" -ForegroundColor White
+                Write-Host '                         Escaneo completo omitido: la familia WinPE no es compatible con el medio.' -ForegroundColor DarkGray
             }
             else {
                 $analyzedCount = if ($scanSummary) { $scanSummary.AnalyzedCount } else { @($adkInventory).Count }
-                Write-Host " WinPE ADK    : $analyzedCount analizados | $(@($adkCompatibleInstall).Count) compatibles con install.wim | Build(s): $adkBuildText" -ForegroundColor White
+                Write-Host " Inventario WinPE       : $analyzedCount analizados para las arquitecturas e idiomas del medio | Build(s): $adkBuildText" -ForegroundColor White
+            }
+            if (-not $adkInventoryError) {
+                Write-Host " Compatibilidad WinPE   : $(@($adkCompatibleInstall).Count) coinciden con arquitectura/build de install.wim" -ForegroundColor White
             }
         }
         Write-Host ''
         Show-AIOLangInventorySummary -Inventory $inventory -TargetImages $images
 
         $indexes = Select-AIOLangInstallIndexes -Images $images
+        Assert-AIOLangEditionLanguageSupport -Images $images -Indexes $indexes
+        Assert-AIOLangProductFamilyConsistency -Images $images -Indexes $indexes
         $selectedImagesForChoice = @($images | Where-Object { [int]$_.ImageIndex -in $indexes })
         $locales = Select-AIOLangLocales -Inventory $inventory -TargetImages $selectedImagesForChoice
         $coverage = Assert-AIOLangPackageCoverage -Inventory $inventory -Images $images -Indexes $indexes -Locales $locales
         $defaultLocale = Select-AIOLangDefaultLocale -SelectedImages $coverage.Images -SelectedLocales $locales
 
+        # Microsoft: "Use languages from the Languages and Optional Features
+        # ISO, not from the Windows 10 ADK, to localize WinRE." El ADK solo es
+        # fuente valida para boot.wim/Setup; winre.wim solo debe tomar CAB
+        # WinPE del repositorio del usuario (LOF ISO).
+        $winReWinPEInventory = @($inventory | Where-Object {
+            $pkgSource = if ($_.PSObject.Properties['Source']) { $_.Source } else { 'Repositorio' }
+            $_.Category -ne 'WinPE' -or ($pkgSource -ne 'ADK WinPE')
+        })
+
         $relevantFod = @()
         $winRePackages = @()
         foreach ($image in $coverage.Images) {
             $relevantFod += @(Get-AIOLangPackagesForImage -Inventory $inventory -Image $image -Locales $locales -Category 'LanguageFOD')
-            $winRePackages += @(Get-AIOLangPackagesForImage -Inventory $inventory -Image $image -Locales $locales -Category 'WinPE')
+            $winRePackages += @(Get-AIOLangPackagesForImage -Inventory $winReWinPEInventory -Image $image -Locales $locales -Category 'WinPE')
         }
         $relevantFod = @($relevantFod | Sort-Object FilePath -Unique)
         $winRePackages = @($winRePackages | Sort-Object FilePath -Unique)
@@ -5011,10 +6357,11 @@ function Start-AIOLangIntegrationWizard {
             $bootPackages += @(Get-AIOLangPackagesForImage -Inventory $inventory -Image $bootImage -Locales $locales -Category 'WinPE')
         }
         $bootPackages = @($bootPackages | Sort-Object FilePath -Unique)
+        $bootLocalizationPlan = if ($bootImages.Count -gt 0) { Get-AIOLangWinPELocalizationMode -Inventory $inventory -TargetImages $bootImages -Locales $locales } else { [pscustomobject]@{ Mode = 'NotAvailable'; Complete = $false; MissingBase = [string[]]@(); MissingFontSupport = [string[]]@() } }
         $relevantWinPE = @($winRePackages + $bootPackages | Sort-Object FilePath -Unique)
 
         $winPeCompatibility = @()
-        $winPeCompatibility += @(Get-AIOLangWinPECompatibilityReport -Inventory $inventory -TargetImages $coverage.Images -Locales $locales -Context 'winre.wim')
+        $winPeCompatibility += @(Get-AIOLangWinPECompatibilityReport -Inventory $inventory -TargetImages $coverage.Images -Locales $locales -Context 'winre.wim' -ExcludeAdkSource)
         if ($bootImages.Count -gt 0) {
             $winPeCompatibility += @(Get-AIOLangWinPECompatibilityReport -Inventory $inventory -TargetImages $bootImages -Locales $locales -Context 'boot.wim')
         }
@@ -5046,13 +6393,18 @@ function Start-AIOLangIntegrationWizard {
         if (-not (Test-Path -LiteralPath $bootWim -PathType Leaf)) {
             Write-Host ' [OMITIDO] El medio no contiene sources\boot.wim.' -ForegroundColor DarkGray
         }
-        elseif ($bootPackages.Count -gt 0) {
-            $updateBootWim = Read-AIOLangYesNo -Prompt "Actualizar boot.wim y habilitar los idiomas en la pantalla inicial de Windows Setup ($($bootPackages.Count) paquetes WinPE)" -Default $true
+        elseif ([string]$bootLocalizationPlan.Mode -eq 'FullWinPE') {
+            $updateBootWim = Read-AIOLangYesNo -Prompt "Actualizar boot.wim con localizacion WinPE completa ($($bootPackages.Count) paquetes compatibles)" -Default $true
         }
         else {
-            Write-Host ' [ADVERTENCIA] No hay paquetes WinPE compatibles para boot.wim.' -ForegroundColor Yellow
-            Write-Host '               Puede usarse el modo de compatibilidad: copia lang.ini y recursos MUI al indice Setup.' -ForegroundColor DarkYellow
-            $updateBootWim = Read-AIOLangYesNo -Prompt 'Habilitar de todos modos los idiomas en la pantalla inicial de Windows Setup' -Default $true
+            Write-Host ' [MODO SetupResourcesOnly] No hay un juego WinPE completo para todos los idiomas seleccionados.' -ForegroundColor Yellow
+            Write-Host '   - install.wim: localizacion completa mediante LP/FOD' -ForegroundColor DarkYellow
+            Write-Host '   - boot.wim Setup: lang.ini + recursos MUI de Setup' -ForegroundColor DarkYellow
+            if (@($locales | Where-Object { Test-AIOLangEastAsianLocale -Locale $_ }).Count -gt 0) { Write-Host '   - boot.wim indices 1/2: soporte de fuentes de Asia oriental desde install.wim' -ForegroundColor DarkYellow }
+            Write-Host '   - winre.wim: solo se modifica si existen CAB WinPE compatibles del repositorio' -ForegroundColor DarkYellow
+            if (@($bootLocalizationPlan.MissingBase).Count -gt 0) { Write-Host "   LP WinPE faltante: $(@($bootLocalizationPlan.MissingBase) -join ', ')" -ForegroundColor DarkGray }
+            if (@($bootLocalizationPlan.MissingFontSupport).Count -gt 0) { Write-Host "   FontSupport faltante: $(@($bootLocalizationPlan.MissingFontSupport) -join ', ')" -ForegroundColor DarkGray }
+            $updateBootWim = Read-AIOLangYesNo -Prompt 'Habilitar los idiomas en Windows Setup mediante SetupResourcesOnly' -Default $true
         }
 
         if ($relevantWinPE.Count -eq 0 -and $adkInfo.WinPERoot -and $winPeMismatchReports.Count -eq 0) {
@@ -5094,11 +6446,13 @@ function Start-AIOLangIntegrationWizard {
         Write-Host " Idiomas              : $($locales -join ', ')" -ForegroundColor White
         Write-Host " Predeterminado       : $defaultLocale" -ForegroundColor White
         Write-Host " Features on Demand   : $integrateFod ($($relevantFod.Count) detectadas)" -ForegroundColor White
-        Write-Host " ADK                  : $($adkInfo.Detected)" -ForegroundColor White
+        $adkInstalledForPlan = if ($adkInfo.PSObject.Properties['AdkInstalled']) { [bool]$adkInfo.AdkInstalled } else { [bool]$adkInfo.Detected }
+        Write-Host " ADK instalado        : $adkInstalledForPlan" -ForegroundColor White
         $compatibleWinPeCount = @($relevantWinPE).Count
-        Write-Host " WinPE Add-on         : $([bool]$adkInfo.WinPERoot) ($(@($adkInventory).Count) analizadas | $compatibleWinPeCount compatibles)" -ForegroundColor White
+        Write-Host " Fuente WinPE         : $([bool]$adkInfo.WinPERoot) ($(@($adkInventory).Count) analizadas | $compatibleWinPeCount compatibles)" -ForegroundColor White
         Write-Host " winre.wim            : $updateWinRE ($($winRePackages.Count) compatibles)" -ForegroundColor White
         Write-Host " boot.wim             : $updateBootWim ($($bootPackages.Count) compatibles)" -ForegroundColor White
+        Write-Host " Modo boot.wim        : $($bootLocalizationPlan.Mode)" -ForegroundColor White
         Write-Host " DISM                  : $($adkInfo.ActiveDismSource) $($adkInfo.ActiveDismVersion)" -ForegroundColor White
         Write-Host " Limpieza             : $cleanup | ResetBase: $resetBase" -ForegroundColor White
         Write-Host " Optimizar WIM        : $optimizeWims" -ForegroundColor White
