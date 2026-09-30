@@ -1,3 +1,12 @@
+1.5.7
+====================================================
+- Idiomas: soporte de fuentes de Asia oriental (ja-JP, ko-KR, zh-CN, zh-HK, zh-TW). Sin un WinPE completo, el modulo captura las fuentes desde install.wim y las copia a ambos indices de boot.wim (modo SetupResourcesOnly) y verifica que queden presentes. El modo FullWinPE ahora exige lp.cab por idioma y, para ja/ko/zh, tambien WinPE-FontSupport.
+- Idiomas: nuevas validaciones previas. Se bloquean las ediciones que restringen idiomas adicionales (SingleLanguage / CountrySpecific) y la seleccion que mezcla imagenes Client y Server en una misma ejecucion.
+- Actualizaciones: nueva opcion "Ejecutar verificaciones completas Pre/Post-Commit" en el asistente. Al desactivarla se omiten los informes completos en WinRE, install.wim y boot.wim, pero se conserva siempre la verificacion estructural final.
+- Actualizaciones: deteccion de LCU de la etapa ESU de Windows 10 en imagenes cliente no LTSC. El modulo se detiene con una explicacion clara, porque el paquete de preparacion no concede el derecho ESU a una imagen offline; nunca se omiten comprobaciones de licencia.
+- Actualizaciones e Idiomas: copia de archivos protegidos mas segura. Solo se admiten destinos respaldados por WIM/WOF entre los puntos de reanalisis, se registra un diagnostico de acceso y seguridad antes de reintentar ante "acceso denegado", y los atributos y la seguridad originales se restauran exactamente.
+====================================================
+
 1.5.6
 ====================================================
 - Panel "Estado Actual" optimizado: nuevo motor de cache (Modulo-Dashboard.ps1) que evita relecturas innecesarias del registro offline al navegar entre submenus; la identidad de la imagen montada (ruta, punto de montaje e indice) decide cuando refrescar los metadatos en vez de fechas de archivo.

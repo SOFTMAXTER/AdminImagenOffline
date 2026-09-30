@@ -41,6 +41,8 @@ El módulo clasifica paquetes CAB y MSU mediante identidades y contenido interno
 - Puede exportar una sola edición cuando se selecciona un único índice.
 - Puede reconstruir y optimizar todos los WIM.
 - Puede usar `wimlib-imagex.exe` para ajustar la fecha interna de creación.
+- Puede omitir las verificaciones completas Pre/Post-Commit conservando siempre la verificación estructural final.
+- Detecta LCU de la etapa ESU de Windows 10 en imágenes cliente no LTSC y detiene la integración con una explicación.
 - Genera reportes JSON, HTML, registro DISM y diagnóstico ZIP.
 
 ## Requisitos
@@ -66,7 +68,7 @@ El módulo detecta Windows ADK y utiliza la versión más reciente de DISM dispo
 Para ajustar `CREATIONTIME` interno debe existir:
 
 ```text
-E:\windows\AdminImagenOffline\Tools\wimlib-imagex.exe
+E:\windows\AdminImagenOffline\Tools\wimlib\wimlib-imagex.exe
 ```
 
 o una instalación accesible desde `PATH`.
@@ -149,6 +151,8 @@ Setup Dynamic Update. Se fusiona en la superficie `sources` del medio y, cuando 
 
 Paquetes Extended Security Updates. El módulo no elimina ni omite requisitos de licencia o activación.
 
+Si la LCU pertenece a la etapa ESU de Windows 10 y la imagen es cliente no LTSC, el módulo se detiene antes de modificar el medio: el paquete de preparación no concede por sí solo el derecho ESU a una imagen offline. Despliega la imagen, activa ESU por el método autorizado y aplica la LCU en el sistema en línea, o usa un medio LTSC compatible.
+
 ### Enablement
 
 Paquetes de habilitación que relacionan familias de servicio, por ejemplo 26100 y 26200.
@@ -222,6 +226,10 @@ CBS decide si:
 - acepta la reaplicación;
 - considera que no es necesaria;
 - determina que no es aplicable.
+
+### Verificaciones completas Pre/Post-Commit
+
+Opción *"Ejecutar verificaciones completas Pre/Post-Commit"* (activada por defecto). Genera informes completos antes y después del commit en `winre.wim`, `install.wim` y `boot.wim`. Si la desactivas, el resumen final lo indica y se conserva la verificación estructural final.
 
 ### StartComponentCleanup
 
@@ -437,7 +445,7 @@ CBS puede conservar o restablecer una identidad neutral durante el mantenimiento
 
 ### No aparece la opción de CREATIONTIME
 
-Instala `wimlib-imagex.exe` en `Tools` o agrégalo a `PATH`. El resto del mantenimiento puede completarse sin esa herramienta.
+Instala `wimlib-imagex.exe` en `Tools\wimlib` o agrégalo a `PATH`. El resto del mantenimiento puede completarse sin esa herramienta.
 
 ### install.esd no es aceptado
 
@@ -458,6 +466,10 @@ No cierres la consola mientras DISM esté trabajando.
 ### El módulo regresó al menú después de un error
 
 La versión actual muestra un resumen final y espera `ENTER`. Verifica que `Modulo-Actualizaciones.ps1` sea la versión más reciente.
+
+### Se detuvo por una LCU de la etapa ESU
+
+Es una protección, no un fallo. Consulta la sección *ESU* de las categorías reconocidas para ver las alternativas.
 
 ## Advertencias
 

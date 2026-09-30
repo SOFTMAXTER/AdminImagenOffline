@@ -1,5 +1,5 @@
 
-# AdminImagenOffline V1.5.6 by SOFTMAXTER
+# AdminImagenOffline V1.5.7 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -9,15 +9,13 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.6 (Changelog)
+## 🆕 Novedades en la Versión 1.5.7 (Changelog)
 
-* **Panel "Estado Actual" Optimizado**: Nuevo motor de cache (`Modulo-Dashboard.ps1`) que evita relecturas innecesarias del registro offline de la imagen montada al navegar entre submenús; la identidad de la imagen (ruta, punto de montaje e índice) decide cuándo refrescar los metadatos en vez de fechas de archivo, evitando falsos positivos cuando otros módulos montan/desmontan colmenas.
-* **Estilo de Pestañas Unificado**: Nuevo módulo compartido `Modulo-UI.ps1` con un control de pestañas personalizado (fondo oscuro, tipografía en negrita y acento de color en la pestaña activa) aplicado a los gestores de Servicios Offline, Unattend y Tweaks para una experiencia visual más consistente.
-* **Diagnóstico de Actualizaciones Reforzado**: Cuando falla una integración, el módulo de Actualizaciones conserva un paquete de diagnóstico con `Error.txt`, información de imágenes DISM montadas, registros de sesión, transcripción de DISM, manifiesto Preflight y reportes JSON/HTML. Si la compresión ZIP falla, se conserva la carpeta de diagnóstico como respaldo.
-* **Copia de SetupDU Más Robusta**: Antes de reemplazar archivos existentes dentro de `boot.wim`, el flujo de Setup Dynamic Update retira atributos de solo lectura, sistema y oculto (`R/S/H`) para reducir bloqueos causados por atributos del archivo. Los problemas de permisos NTFS continúan registrándose como error y quedan disponibles en el diagnóstico automático.
-* **Motor Appx/MSIX Reforzado**: El inyector ahora lee la identidad real de los paquetes desde `AppxManifest.xml` / `AppxBundleManifest.xml`, consulta mediante DISM las apps ya aprovisionadas y clasifica cada elemento de la cola como **INSTALAR**, **ACTUALIZAR**, **REPARAR** u **OMITIR** según familia y versión. Puede actualizar paquetes locales más recientes cuando se habilita la opción correspondiente.
-* **Reparación Appx y Control de Dependencias**: Se detectan y limpian marcas `Deprovisioned` para permitir la recuperación de aplicaciones eliminadas; las dependencias se obtienen de los manifiestos reales del paquete o bundle y se seleccionan por familia, versión y arquitectura compatible. La búsqueda de licencias XML exige coincidencia comprobada con la familia del paquete.
-* **Despliegue Appx Más Seguro**: Las bibliotecas se procesan antes que las aplicaciones, se permite cancelar de forma segura después del paquete en curso, se controlan las colmenas offline antes de ejecutar DISM y los logs DISM de operaciones fallidas se conservan para diagnóstico.
+* **Idiomas con Soporte de Fuentes de Asia Oriental**: Para `ja-JP`, `ko-KR`, `zh-CN`, `zh-HK` y `zh-TW`, si no hay un WinPE completo el módulo captura las fuentes desde `install.wim`, las copia a ambos índices de `boot.wim` (modo `SetupResourcesOnly`) y verifica que queden presentes. El modo `FullWinPE` ahora exige `lp.cab` por idioma y, para japonés, coreano y chino, también `WinPE-FontSupport`.
+* **Validaciones Previas en Idiomas**: Se bloquean las ediciones que restringen idiomas adicionales (`SingleLanguage` / `CountrySpecific`) y las selecciones que mezclan imágenes Client y Server en una misma ejecución.
+* **Verificaciones Pre/Post-Commit Opcionales**: El asistente de Actualizaciones incorpora la opción *"Ejecutar verificaciones completas Pre/Post-Commit"*. Al desactivarla se omiten los informes completos en WinRE, `install.wim` y `boot.wim`, pero la verificación estructural final se conserva siempre.
+* **Protección ante LCU de la Etapa ESU (Windows 10)**: En imágenes cliente no LTSC, el módulo detecta una LCU de la etapa ESU y se detiene con una explicación clara, ya que el paquete de preparación no concede por sí solo el derecho ESU a una imagen offline. Nunca se omiten comprobaciones de licencia.
+* **Copia de Archivos Protegidos Más Segura**: En Actualizaciones e Idiomas, solo se admiten destinos respaldados por WIM/WOF entre los puntos de reanálisis, se registra un diagnóstico de acceso y seguridad antes de reintentar ante *"acceso denegado"* y los atributos y la seguridad originales se restauran exactamente.
 
 ## Características Principales
 
@@ -57,7 +55,8 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
     ├── AdminImagenOffline.exe    <-- Ejecutable Lanzador Principal
     ├── Tools/
     │   ├── oscdimg.exe
-    │   └── SetLockScreen.zip
+    │   ├── SetLockScreen.zip
+    │   └── wimlib/                <-- wimlib-imagex.exe (ajuste de CREATIONTIME)
     └── Script/
         ├── AdminImagenOffline.ps1
         ├── Modulo-Actualizaciones.ps1
@@ -65,6 +64,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
         ├── Modulo-Appx.ps1
         ├── Modulo-Bloatware.ps1
         ├── Modulo-Conversion.ps1
+        ├── Modulo-Dashboard.ps1
         ├── Modulo-DeployVHD.ps1
         ├── Modulo-Drivers.ps1
         ├── Modulo-EditIndex.ps1
@@ -135,8 +135,8 @@ Diseñado para preparar la distribución y el despliegue final de tu sistema per
 ### [ 4 ] Actualizaciones e Idiomas (Servicing)
 Menú unificado para los dos motores de servicing offline:
 
-* **Integrar Actualizaciones:** Motor de servicing para medios extraídos (`install.wim`, `winre.wim`, `boot.wim`) que clasifica paquetes CAB/MSU por identidad y contenido interno (sin depender de listas de KB), respeta el orden SSU → Enablement/ESU → LCU, aplica Setup Dynamic Update y reinyecta `winre.wim` ya actualizado. Crea un respaldo *Preflight* antes de tocar el medio y genera reportes JSON/HTML de cada operación. Guía completa en [README_Modulo-Actualizaciones.md](README_Modulo-Actualizaciones.md).
-* **Integrar Idiomas / Crear Medio Multilingüe:** Integra Language Packs, Language Features on Demand y recursos MUI en un medio extraído, con detección automática de ADK/WinPE Add-on y validación de idioma/arquitectura/familia de build antes de modificar nada. Igual que el módulo de Actualizaciones, trabaja de forma transaccional con respaldo *Preflight* y verificación SHA-256. Guía completa en [README_Modulo-Lenguajes.md](README_Modulo-Lenguajes.md).
+* **Integrar Actualizaciones:** Motor de servicing para medios extraídos (`install.wim`, `winre.wim`, `boot.wim`) que clasifica paquetes CAB/MSU por identidad y contenido interno (sin depender de listas de KB), respeta el orden SSU → Enablement/ESU → LCU, aplica Setup Dynamic Update y reinyecta `winre.wim` ya actualizado. Crea un respaldo *Preflight* antes de tocar el medio y genera reportes JSON/HTML de cada operación. Incluye verificaciones Pre/Post-Commit opcionales y detiene la integración con un aviso claro si detecta una LCU de la etapa ESU de Windows 10 en una imagen cliente no LTSC (nunca omite comprobaciones de licencia). Guía completa en [README_Modulo-Actualizaciones.md](README_Modulo-Actualizaciones.md).
+* **Integrar Idiomas / Crear Medio Multilingüe:** Integra Language Packs, Language Features on Demand y recursos MUI en un medio extraído, con detección automática de ADK/WinPE Add-on y validación de idioma/arquitectura/familia de build antes de modificar nada. Igual que el módulo de Actualizaciones, trabaja de forma transaccional con respaldo *Preflight* y verificación SHA-256. Bloquea ediciones que restringen idiomas adicionales y la mezcla de imágenes Client y Server, y en idiomas de Asia oriental (`ja`, `ko`, `zh`) garantiza las fuentes necesarias en `boot.wim`. Guía completa en [README_Modulo-Lenguajes.md](README_Modulo-Lenguajes.md).
 
 ### [ 5 ] Drivers (Inyectar / Eliminar)
 Gestión completa de los controladores *offline*.

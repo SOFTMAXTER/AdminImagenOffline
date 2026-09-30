@@ -39,6 +39,8 @@ El módulo trabaja de forma transaccional: antes de la primera modificación cre
 - Puede conservar el idioma actual o establecer uno nuevo como predeterminado.
 - Puede exportar una sola edición cuando se selecciona un único índice.
 - Puede reconstruir los WIM con compresión máxima.
+- Bloquea ediciones que restringen idiomas adicionales (`SingleLanguage`, `CountrySpecific`) y selecciones que mezclan imágenes Client y Server.
+- Garantiza fuentes de Asia oriental (`ja-JP`, `ko-KR`, `zh-CN`, `zh-HK`, `zh-TW`) en `boot.wim`.
 - Genera reportes JSON, HTML, registro DISM y diagnóstico ZIP.
 
 ## Requisitos
@@ -216,6 +218,15 @@ Este modo habilita el selector de idiomas de Windows Setup mediante:
 
 No afirma que todo WinPE haya sido traducido. El resumen final muestra una advertencia cuando faltan paquetes WinPE completos.
 
+## Idiomas de Asia oriental
+
+Para `ja-JP`, `ko-KR`, `zh-CN`, `zh-HK` y `zh-TW` las fuentes dependen del modo de localización de WinPE:
+
+- **FullWinPE**: exige `lp.cab` por idioma y `WinPE-FontSupport` para japonés, coreano y chino.
+- **SetupResourcesOnly**: las fuentes se capturan desde `install.wim` y se copian a `Windows\Boot\Fonts` y `Windows\Fonts` en ambos índices de `boot.wim`.
+
+Después de copiarlas, el módulo verifica que las fuentes esperadas existan; si faltan, la operación falla en lugar de declarar éxito.
+
 ## Respaldo y restauración
 
 Antes de la primera modificación se crea un respaldo en una ruta similar a:
@@ -340,6 +351,14 @@ El proceso puede necesitar temporalmente más espacio que el tamaño de `install
 ### El módulo regresó al menú después de un error
 
 La versión actual muestra primero un resumen final y espera `ENTER`. Revisa que el archivo instalado sea la versión más reciente del módulo.
+
+### La edición no admite idiomas adicionales
+
+Las ediciones `SingleLanguage` o `CountrySpecific` restringen los idiomas completos. Selecciona una edición multilingüe compatible.
+
+### La selección mezcla Client y Server
+
+Procesa las imágenes Client y Server por separado para que los Language Packs y los recursos de Windows Setup mantengan una única familia de producto.
 
 ## Advertencias
 
