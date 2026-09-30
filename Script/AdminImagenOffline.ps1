@@ -1587,7 +1587,7 @@ function Updates-Languages-Menu {
         Write-Host "       (install.wim, winre.wim, boot.wim y SetupDU)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "   [2] Integrar Idiomas / Crear Medio Multilingue" -ForegroundColor Cyan
-        Write-Host "       (Agrega Language Packs, FODs y LXPs a la imagen)" -ForegroundColor Gray
+        Write-Host "       (Agrega Language Packs y Features on Demand a la imagen)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
