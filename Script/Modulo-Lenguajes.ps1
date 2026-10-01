@@ -12,7 +12,8 @@
       - Detecta automaticamente el ADK y el complemento de Windows PE.
       - Combina los paquetes WinPE instalados con el repositorio seleccionado.
       - Valida idioma, arquitectura y familia de build antes de modificar el medio.
-      - Infiere la familia de build desde los paquetes detectados, sin tablas fijas.
+      - Obtiene bases CBS de cada indice WIM/ESD y consulta aplicabilidad antes de integrar, sin tablas de builds.
+      - Aplaza la limpieza si hay operaciones pendientes o no se puede consultar su estado.
       - Distingue paquetes WinPE encontrados de los realmente compatibles con el medio.
       - Diagnostica por separado paquetes WinPE encontrados, compatibles e incompatibles.
       - Integra paquetes de idioma antes de sus componentes dependientes.
@@ -106,6 +107,7 @@ $script:AIOLangLastTerminalState = $null
 $script:AIOLangMountedPaths = New-Object System.Collections.ArrayList
 $script:AIOLangOperationLog = New-Object System.Collections.ArrayList
 $script:AIOLangPackageMetadataCache = @{}
+$script:AIOLangImageServicingCache = @{}
 $script:AIOLangApplicationRoot = Split-Path -Parent $PSScriptRoot
 $script:AIOLangReportsRoot = Join-Path $script:AIOLangApplicationRoot 'Reportes\Idiomas'
 $script:AIOLangFileHashCache = @{}
@@ -1319,56 +1321,97 @@ function Show-AIOLangAdkStatus {
     Write-Host " Ruta DISM              : $($AdkInfo.ActiveDismPath)" -ForegroundColor DarkGray
 }
 
+function Get-AIOLangServicingBuildEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [string[]]$Paths,
+        [Parameter(Mandatory = $true)] [string]$Architecture
+    )
+
+    $evidence = New-Object System.Collections.Generic.List[object]
+    # Identidades de la base y de sus idiomas. No aceptar LCUs, FOD ajenos,
+    # WinSxS, un CAB del repositorio o una cadena de version en otro archivo.
+    $identity = 'Microsoft-Windows-(?:(?:Client|Server|WinPE)-LanguagePack|Foundation|WinPE)-Package'
+    $pattern = '(?i)^[\\/]?Windows[\\/]servicing[\\/]Packages[\\/](' + $identity + ')~31bf3856ad364e35~([^~]+)~[^~]*~(\d+\.\d+\.\d+\.\d+)\.mum$'
+    foreach ($path in $Paths) {
+        if ([string]$path -notmatch $pattern) { continue }
+        $name = $matches[1]; $arch = $matches[2]; $version = [version]$matches[3]
+        if ((Convert-AIOLangArchitectureName -Architecture $arch) -ne $Architecture) { continue }
+        if ($version.Build -le 0) { continue }
+        [void]$evidence.Add([pscustomobject]@{ Build = $version.Build; Identity = $name; Path = $path })
+    }
+    return [object[]]$evidence.ToArray()
+}
+
+function Get-AIOLangImageServicingEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$ImagePath,
+        [Parameter(Mandatory = $true)] [int]$Index,
+        [Parameter(Mandatory = $true)] [string]$Architecture
+    )
+
+    $file = Get-Item -LiteralPath $ImagePath -ErrorAction Stop
+    $key = '{0}|{1}|{2}|{3}|{4}|{5}' -f $file.FullName, $Index, $file.Length, $file.LastWriteTimeUtc.Ticks, $Architecture, $script:AIOLangDismPath
+    if (-not $script:AIOLangImageServicingCache) { $script:AIOLangImageServicingCache = @{} }
+    if ($script:AIOLangImageServicingCache.ContainsKey($key)) {
+        return [object[]]$script:AIOLangImageServicingCache[$key]
+    }
+    # List-Image lee la metadata del contenedor WIM/ESD sin montar, exportar
+    # ni modificar el medio. La aplicabilidad final se consulta en CBS.
+    $listing = Invoke-AIOLangDism -Arguments @('/List-Image', "/ImageFile:$ImagePath", "/Index:$Index") -Context "Consultar base CBS del indice $Index" -Quiet
+    $paths = [string[]]@($listing.Output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -match '(?i)^[\\/]?Windows[\\/]servicing[\\/]Packages[\\/].+\.mum$' })
+    $evidence = @(Get-AIOLangServicingBuildEvidence -Paths $paths -Architecture $Architecture)
+    $script:AIOLangImageServicingCache[$key] = [object[]]$evidence
+    $bases = @($evidence | Select-Object -ExpandProperty Build -Unique | Sort-Object)
+    Write-AIOLangLog -Level INFO -Message "Base CBS observada: '$ImagePath', indice $Index, $Architecture; builds=$($bases -join ',')."
+    if ($bases.Count -eq 0) {
+        Write-AIOLangLog -Level WARN -Message 'No se identifico una base CBS: solo se aceptara coincidencia exacta de build, sin inferir equivalencias.'
+    }
+    return [object[]]$evidence
+}
+
+function Get-AIOLangImageServicingBuilds {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [object]$Image)
+    if ($Image.PSObject.Properties['ServicingBuilds']) { return [int[]]@($Image.ServicingBuilds) }
+    return [int[]]@()
+}
+
 function Test-AIOLangBuildCompatibility {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)] [int]$TargetBuild,
-        [AllowNull()] [object]$PackageBuild
+        [AllowNull()] [object]$PackageBuild,
+        [AllowNull()] [AllowEmptyCollection()] [int[]]$ServicingBuilds = @()
     )
 
-    [int]$normalizedPackageBuild = 0
-    if ($null -eq $PackageBuild -or
-        -not [int]::TryParse([string]$PackageBuild, [ref]$normalizedPackageBuild) -or
-        $normalizedPackageBuild -le 0 -or $TargetBuild -le 0) {
-        return $true
+    [int]$package = 0
+    if ($TargetBuild -le 0 -or $null -eq $PackageBuild -or
+        -not [int]::TryParse([string]$PackageBuild, [ref]$package) -or $package -le 0) {
+        return $false
     }
-
-    if ($normalizedPackageBuild -eq $TargetBuild) { return $true }
-    if ($normalizedPackageBuild -gt $TargetBuild) { return $false }
-
-    # Familias historicamente compartidas sin mantener una lista de builds:
-    # - revisiones enablement dentro de la misma centena (19041->19045,
-    #   22621->22631);
-    # - bases de servicing terminadas en x100 que alimentan builds posteriores
-    #   del mismo millar (por ejemplo 26100 -> 26200/26300).
-    # Esto elimina el antiguo delta fijo de 500, que podia aceptar/rechazar
-    # generaciones por una distancia numerica arbitraria.
-    if ([math]::Floor($TargetBuild / 100) -eq [math]::Floor($normalizedPackageBuild / 100)) { return $true }
-
-    $targetThousand = [int][math]::Floor($TargetBuild / 1000)
-    $packageThousand = [int][math]::Floor($normalizedPackageBuild / 1000)
-    $packageRemainder = $normalizedPackageBuild % 1000
-    if ($targetThousand -eq $packageThousand -and $packageRemainder -eq 100) { return $true }
-
-    return $false
+    # Las bases proceden de los paquetes del indice concreto, nunca del
+    # repositorio ni de proximidad numerica entre versiones comerciales.
+    $observed = @($ServicingBuilds | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+    if ($observed.Count -gt 0) { return ($package -in $observed) }
+    return ($package -eq $TargetBuild)
 }
-
 
 function Get-AIOLangBuildFamily {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)] [int]$Build,
-        [AllowEmptyCollection()] [int[]]$ReferenceBuilds = @()
+        [AllowEmptyCollection()] [int[]]$ReferenceBuilds = @(),
+        [AllowNull()] [AllowEmptyCollection()] [int[]]$ServicingBuilds = @()
     )
 
     if ($Build -le 0) { return $Build }
 
-    # La familia se infiere de las builds realmente disponibles en los
-    # paquetes de idioma/FOD. Se prefiere la referencia compatible mas alta,
-    # por ser la base mas cercana a la imagen objetivo. Sin referencias, la
-    # build se conserva tal cual y no se depende de una tabla mantenida a mano.
+    # Solo relacionar referencias con bases CBS observadas en el indice.
+    # La mera presencia de un CAB en el repositorio no acredita compatibilidad.
     $compatibleReferences = @($ReferenceBuilds | Where-Object {
-        $_ -gt 0 -and (Test-AIOLangBuildCompatibility -TargetBuild $Build -PackageBuild $_)
+        $_ -gt 0 -and (Test-AIOLangBuildCompatibility -TargetBuild $Build -PackageBuild $_ -ServicingBuilds $ServicingBuilds)
     } | Sort-Object -Unique -Descending)
 
     if ($compatibleReferences.Count -gt 0) {
@@ -1396,7 +1439,7 @@ function Get-AIOLangBuildFamiliesFromImages {
         catch { $build = 0 }
 
         if ($build -le 0) { continue }
-        $family = Get-AIOLangBuildFamily -Build $build -ReferenceBuilds $ReferenceBuilds
+        $family = Get-AIOLangBuildFamily -Build $build -ReferenceBuilds $ReferenceBuilds -ServicingBuilds (Get-AIOLangImageServicingBuilds -Image $image)
         if ($family -gt 0 -and $family -notin $families) { [void]$families.Add($family) }
     }
     return [int[]]@($families.ToArray() | Sort-Object)
@@ -2305,6 +2348,9 @@ function Get-AIOLangImageMetadata {
             ProductFamily    = $null
         }
         $obj.ProductFamily = Get-AIOLangImageProductFamily -Image $obj
+        $evidence = @(Get-AIOLangImageServicingEvidence -ImagePath $ImagePath -Index $obj.ImageIndex -Architecture $obj.Architecture)
+        $obj | Add-Member -NotePropertyName ServicingBuilds -NotePropertyValue ([int[]]@($evidence | Select-Object -ExpandProperty Build -Unique))
+        $obj | Add-Member -NotePropertyName ServicingEvidence -NotePropertyValue ([object[]]$evidence)
         [void]$details.Add($obj)
     }
     return [object[]]$details.ToArray()
@@ -2383,7 +2429,7 @@ function Select-AIOLangLocales {
             $localeCandidate = [string]$_
             $missingTarget = @($TargetImages | Where-Object {
                 $family = if ($_.PSObject.Properties['ProductFamily'] -and $_.ProductFamily) { [string]$_.ProductFamily } else { Get-AIOLangImageProductFamily -Image $_ }
-                -not (Get-AIOLangBestPackage -Packages $Inventory -Locale $localeCandidate -Architecture $_.Architecture -Build $_.Build -Category 'LanguagePack' -ProductFamily $family)
+                -not (Get-AIOLangBestPackage -Packages $Inventory -Locale $localeCandidate -Architecture $_.Architecture -Build $_.Build -Category 'LanguagePack' -ProductFamily $family -ServicingBuilds (Get-AIOLangImageServicingBuilds -Image $_))
             })
             $missingTarget.Count -eq 0
         })
@@ -2443,7 +2489,8 @@ function Get-AIOLangBestPackage {
         [Parameter(Mandatory = $true)] [string]$Architecture,
         [Parameter(Mandatory = $true)] [int]$Build,
         [Parameter(Mandatory = $true)] [string]$Category,
-        [string]$ProductFamily = 'Unknown'
+        [string]$ProductFamily = 'Unknown',
+        [AllowNull()] [AllowEmptyCollection()] [int[]]$ServicingBuilds = @()
     )
 
     $normalizedPackages = @($Packages | Where-Object { $null -ne $_ })
@@ -2453,7 +2500,7 @@ function Get-AIOLangBestPackage {
         $packageFamily = if ($_.PSObject.Properties['ProductFamily']) { [string]$_.ProductFamily } else { 'Neutral' }
         $_.Category -eq $Category -and $_.Supported -and $_.Locale -eq $Locale -and
         $_.Architecture -eq $Architecture -and
-        (Test-AIOLangBuildCompatibility -TargetBuild $Build -PackageBuild $_.Build) -and
+        (Test-AIOLangBuildCompatibility -TargetBuild $Build -PackageBuild $_.Build -ServicingBuilds $ServicingBuilds) -and
         (Test-AIOLangProductCompatibility -ImageFamily $ProductFamily -PackageFamily $packageFamily -Category $Category)
     })
     if ($candidates.Count -eq 0) { return $null }
@@ -2486,7 +2533,7 @@ function Assert-AIOLangPackageCoverage {
     foreach ($image in $selectedImages) {
         foreach ($locale in $Locales) {
             $imageFamily = if ($image.PSObject.Properties['ProductFamily'] -and $image.ProductFamily) { [string]$image.ProductFamily } else { Get-AIOLangImageProductFamily -Image $image }
-            $package = Get-AIOLangBestPackage -Packages $Inventory -Locale $locale -Architecture $image.Architecture -Build $image.Build -Category 'LanguagePack' -ProductFamily $imageFamily
+            $package = Get-AIOLangBestPackage -Packages $Inventory -Locale $locale -Architecture $image.Architecture -Build $image.Build -Category 'LanguagePack' -ProductFamily $imageFamily -ServicingBuilds (Get-AIOLangImageServicingBuilds -Image $image)
             if (-not $package) {
                 [void]$missing.Add("$locale / $($image.Architecture) / build $($image.Build) (indice $($image.ImageIndex))")
             }
@@ -2561,14 +2608,14 @@ function Get-AIOLangPackagesForImage {
         $packageFamily = if ($_.PSObject.Properties['ProductFamily']) { [string]$_.ProductFamily } else { 'Neutral' }
         $_.Category -eq $Category -and $_.Supported -and $_.Locale -in $Locales -and
         $_.Architecture -eq $Image.Architecture -and
-        (Test-AIOLangBuildCompatibility -TargetBuild ([int]$Image.Build) -PackageBuild $_.Build) -and
+        (Test-AIOLangBuildCompatibility -TargetBuild ([int]$Image.Build) -PackageBuild $_.Build -ServicingBuilds (Get-AIOLangImageServicingBuilds -Image $Image)) -and
         (Test-AIOLangProductCompatibility -ImageFamily $imageFamily -PackageFamily $packageFamily -Category $Category)
     })
 
     if ($Category -eq 'LanguagePack') {
         $best = New-Object System.Collections.Generic.List[object]
         foreach ($locale in $Locales) {
-            $item = Get-AIOLangBestPackage -Packages $result -Locale $locale -Architecture $Image.Architecture -Build $Image.Build -Category 'LanguagePack' -ProductFamily $imageFamily
+            $item = Get-AIOLangBestPackage -Packages $result -Locale $locale -Architecture $Image.Architecture -Build $Image.Build -Category 'LanguagePack' -ProductFamily $imageFamily -ServicingBuilds (Get-AIOLangImageServicingBuilds -Image $Image)
             if ($item) { [void]$best.Add($item) }
         }
         return [object[]]$best.ToArray()
@@ -2608,7 +2655,7 @@ function Get-AIOLangWinPECompatibilityReport {
     foreach ($image in @($TargetImages)) {
         $architecture = Convert-AIOLangArchitectureName -Architecture $image.Architecture
         $build = [int]$image.Build
-        $key = "$architecture|$build"
+        $key = "$architecture|$build|$((Get-AIOLangImageServicingBuilds -Image $image) -join ',')"
         if ($seenTargets.ContainsKey($key)) { continue }
         $seenTargets[$key] = $true
 
@@ -2634,7 +2681,7 @@ function Get-AIOLangWinPECompatibilityReport {
             $_.Supported -and $_.Locale -in $Locales -and $_.Architecture -eq $architecture -and
             $_.Category -in @('LanguagePack', 'LanguageFOD') -and $null -ne $_.Build
         } | Select-Object -ExpandProperty Build -Unique | Sort-Object)
-        $family = Get-AIOLangBuildFamily -Build $build -ReferenceBuilds $referenceBuilds
+        $family = Get-AIOLangBuildFamily -Build $build -ReferenceBuilds $referenceBuilds -ServicingBuilds (Get-AIOLangImageServicingBuilds -Image $image)
         $availableFamilies = @(Get-AIOLangBuildFamiliesFromPackages -Packages $sameTarget)
         $availableVersions = @($sameTarget | Where-Object { $_.Version } | Select-Object -ExpandProperty Version -Unique | Sort-Object)
         $availableSources = @($sameTarget | ForEach-Object { if ($_.PSObject.Properties['Source']) { $_.Source } else { 'Repositorio' } } | Select-Object -Unique | Sort-Object)
@@ -4341,6 +4388,24 @@ function Add-AIOLangPackageToImage {
         return [pscustomobject]@{ Success = $true; State = 'SkippedMissingParent'; ExitCode = 0 }
     }
 
+    # Get-PackageInfo admite CAB. Los manifiestos expandidos de un ESD
+    # conservan la comprobacion nativa de Add-Package y la verificacion CBS
+    # posterior; no asumir que Get-PackageInfo admite un archivo .mum.
+    if ([System.IO.Path]::GetExtension($PackagePath) -ieq '.cab') {
+        $info = Invoke-AIOLangDism -Arguments @("/Image:$MountPath", '/Get-PackageInfo', "/PackagePath:$PackagePath") -Context "$Context - comprobar aplicabilidad CBS" -Quiet
+        $applicability = @($info.Output | Where-Object { [string]$_ -match '^\s*Applicable\s*:\s*(Yes|No)\s*$' })
+        if ($applicability.Count -ne 1) { throw "No se pudo determinar la aplicabilidad CBS de '$($Package.Name)' en '$MountPath'." }
+        if ([string]$applicability[0] -match ':\s*No\s*$') {
+            Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context $Context -State 'NotApplicable' -Details @{ Package = $Package.Name; MountPath = $MountPath; Evidence = [string]$applicability[0] }
+            if (-not $AllowNotApplicable) { throw "CBS indica que '$($Package.Name)' no es aplicable a '$MountPath'." }
+            Write-Host " [OMITIDO] $($Package.Name) - CBS indica que no es aplicable." -ForegroundColor DarkYellow
+            return [pscustomobject]@{ Success = $true; State = 'NotApplicable'; ExitCode = 0 }
+        }
+    }
+    else {
+        Write-AIOLangLog -Level INFO -Message "${Context}: manifiesto expandido; aplicabilidad a cargo de Add-Package y verificacion posterior de identidades CBS."
+    }
+
     $scratch = if ($Script:Scratch_DIR) { $Script:Scratch_DIR } else { Join-Path $script:AIOLangSessionRoot 'Scratch' }
     Initialize-AIOLangDirectory -Path $scratch
     return Invoke-AIOLangDism -Arguments @(
@@ -4470,6 +4535,22 @@ function Set-AIOLangInternationalSettings {
     }
 }
 
+function Get-AIOLangPendingServicingState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$MountPath)
+    try {
+        if (Test-Path -LiteralPath (Join-Path $MountPath 'Windows\WinSxS\pending.xml') -PathType Leaf -ErrorAction Stop) {
+            return [pscustomobject]@{ Known = $true; Pending = $true; Reason = 'pending.xml presente; la limpieza requiere completar las operaciones pendientes.' }
+        }
+        $packages = @(Get-AIOLangMountedPackageInventory -MountPath $MountPath)
+        $pending = @($packages | Where-Object { ([string]$_.PackageState -replace '\s', '') -in @('InstallPending', 'UninstallPending', 'PartiallyInstalled') })
+        return [pscustomobject]@{ Known = $true; Pending = ($pending.Count -gt 0); Reason = $(if ($pending.Count) { 'CBS tiene paquetes pendientes: ' + (($pending | ForEach-Object { $_.PackageName }) -join ', ') } else { 'Sin operaciones CBS pendientes.' }) }
+    }
+    catch {
+        return [pscustomobject]@{ Known = $false; Pending = $false; Reason = "No se pudo comprobar el estado CBS: $($_.Exception.Message)" }
+    }
+}
+
 function Invoke-AIOLangComponentCleanup {
     [CmdletBinding()]
     param(
@@ -4478,6 +4559,14 @@ function Invoke-AIOLangComponentCleanup {
         [switch]$ResetBase
     )
 
+    $state = Get-AIOLangPendingServicingState -MountPath $MountPath
+    if (-not $state.Known -or $state.Pending) {
+        $status = if ($state.Pending) { 'SkippedPendingActions' } else { 'SkippedUnknownServicingState' }
+        Write-Host " [APLAZADO] ${Context}: $($state.Reason)" -ForegroundColor Yellow
+        Write-AIOLangLog -Level WARN -Message "${Context}: $status; $($state.Reason)"
+        Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context $Context -State $status -Details $state
+        return
+    }
     $scratch = if ($Script:Scratch_DIR) { $Script:Scratch_DIR } else { Join-Path $script:AIOLangSessionRoot 'Scratch' }
     $arguments = @("/Image:$MountPath", '/Cleanup-Image', '/StartComponentCleanup', "/ScratchDir:$scratch")
     if ($ResetBase) { $arguments += '/ResetBase' }
@@ -4519,7 +4608,11 @@ function Update-AIOLangWinREImage {
         [switch]$ResetBase
     )
 
-    $descriptor = Get-AIOLangWinPEImageDescriptor -MountPath $MountPath -Architecture $Architecture -Build $Build
+    $winREImages = @(Get-AIOLangBootImageMetadata -BootWim $WinREPath)
+    if ($winREImages.Count -ne 1) { throw 'winre.wim debe contener exactamente un indice.' }
+    $descriptor = $winREImages[0]
+    if ($descriptor.Architecture -ne $Architecture) { throw 'La arquitectura de WinRE no coincide con install.wim.' }
+    $Build = [int]$descriptor.Build
     # Microsoft: "Use languages from the Languages and Optional Features ISO,
     # not from the Windows 10 ADK, to localize WinRE." El ADK solo es fuente
     # valida para boot.wim/Setup; aqui se excluye para no depender de un
@@ -5029,24 +5122,11 @@ function Update-AIOLangInstallWim {
 function Get-AIOLangBootImageMetadata {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)] [string]$BootWim)
-
-    $records = @(Get-AIOLangImageRecords -ImagePath $BootWim)
-    $result = New-Object System.Collections.Generic.List[object]
-    foreach ($detail in $records) {
-        $obj = [pscustomobject]@{
-            ImageIndex       = [int]$detail.ImageIndex
-            ImageName        = [string]$detail.ImageName
-            ImageDescription = [string]$detail.ImageDescription
-            Architecture     = Convert-AIOLangArchitectureName -Architecture $detail.Architecture
-            Version          = [version]$detail.Version
-            Build            = [int]$detail.Build
-            InstallationType = 'WinPE'
-            EditionId        = 'WinPE'
-            ProductFamily    = 'WinPE'
-        }
-        [void]$result.Add($obj)
+    $images = @(Get-AIOLangImageMetadata -ImagePath $BootWim)
+    foreach ($image in $images) {
+        $image.InstallationType = 'WinPE'; $image.EditionId = 'WinPE'; $image.ProductFamily = 'WinPE'
     }
-    return [object[]]$result.ToArray()
+    return [object[]]$images
 }
 
 function Get-AIOLangPayloadFileIndex {
@@ -5927,6 +6007,7 @@ function Invoke-AIOLangMediaIntegration {
         ResetBase       = [bool]$ResetBase
         ExportSingle    = [bool]$ExportSingleIndex
         OptimizeWims    = [bool]$OptimizeWims
+        ImageServicingEvidence = [object[]]@($selectedImages | Select-Object ImageIndex, Build, Architecture, ServicingBuilds, ServicingEvidence)
     }
 
     $backup = $null
@@ -5962,7 +6043,7 @@ function Invoke-AIOLangMediaIntegration {
         $selectedProductFamilies = @($selectedImages | ForEach-Object { if ($_.PSObject.Properties['ProductFamily']) { $_.ProductFamily } else { Get-AIOLangImageProductFamily -Image $_ } } | Where-Object { $_ -and $_ -ne 'WinPE' } | Select-Object -Unique)
         $mediaProductFamily = if ($selectedProductFamilies.Count -eq 1) { [string]$selectedProductFamilies[0] } else { 'Unknown' }
         foreach ($locale in $Locales) {
-            $setupPackage = Get-AIOLangBestPackage -Packages $Inventory -Locale $locale -Architecture $setupDescriptor.Architecture -Build $setupDescriptor.Build -Category 'LanguagePack' -ProductFamily $mediaProductFamily
+            $setupPackage = Get-AIOLangBestPackage -Packages $Inventory -Locale $locale -Architecture $setupDescriptor.Architecture -Build $setupDescriptor.Build -Category 'LanguagePack' -ProductFamily $mediaProductFamily -ServicingBuilds (Get-AIOLangImageServicingBuilds -Image $setupDescriptor)
             if (-not $setupPackage) {
                 throw "Falta el paquete $locale compatible con la arquitectura de Setup $($setupDescriptor.Architecture) / build $($setupDescriptor.Build)."
             }
@@ -6241,6 +6322,7 @@ function Start-AIOLangIntegrationWizard {
         $scanRoot = Join-Path $scanBase ('AIOL_SCAN_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
         Initialize-AIOLangDirectory -Path $scanRoot -Empty
         $script:AIOLangPackageMetadataCache = @{}
+        $script:AIOLangImageServicingCache = @{}
 
         # Se obtiene primero la metadata de las imagenes. Asi el ADK se limita
         # desde el principio a la arquitectura, idiomas y builds realmente
@@ -6251,7 +6333,7 @@ function Start-AIOLangIntegrationWizard {
         $targetArchitecturesForAdk = [string[]]@($targetImagesForAdk | ForEach-Object {
             Convert-AIOLangArchitectureName -Architecture $_.Architecture
         } | Where-Object { $_ -and $_ -ne 'Unknown' } | Select-Object -Unique)
-        $targetBuildsForAdk = [int[]]@($targetImagesForAdk | Where-Object { $_.Build } | Select-Object -ExpandProperty Build -Unique)
+        $targetBuildsForAdk = [int[]]@($targetImagesForAdk | ForEach-Object { $_.Build; Get-AIOLangImageServicingBuilds -Image $_ } | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
 
         $script:AIOLangAdkScanSummary = $null
         $adkInventoryError = $null
