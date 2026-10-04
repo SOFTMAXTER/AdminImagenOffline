@@ -288,14 +288,40 @@ Los índices de `boot.wim` que no fueron modificados se omiten en la verificaci�
 Salidas habituales:
 
 ```text
-E:\windows\AdminImagenOffline\Reportes\Idiomas\
-├── Idiomas_AAAAMMDD_HHMMSS.json
-├── Idiomas_AAAAMMDD_HHMMSS.html
-├── DISM_Idiomas_AAAAMMDD_HHMMSS.log
-└── Diagnostico_AAAAMMDD_HHMMSS.zip
+E:\windows\AdminImagenOffline\
+├── Reportes\
+│   ├── Idiomas\
+│   │   ├── Idiomas_AAAAMMDD_HHMMSS.json
+│   │   └── Idiomas_AAAAMMDD_HHMMSS.html
+│   └── Diagnosticos\
+│       └── Idiomas\
+│           └── Diagnostico_AIOL_AAAAMMDD_HHMMSS.zip
+└── Logs\
+    └── Idiomas_AAAAMMDD_HHMMSS.log
 ```
 
-El ZIP de diagnóstico se genera ante errores e incluye la información disponible antes de limpiar la sesión temporal.
+El archivo `Idiomas_AAAAMMDD_HHMMSS.log` en `Logs` es la transcripción DISM de la ejecución; se copia al terminar, tanto si la operación finaliza correctamente como si falla.
+
+### Diagnóstico ante errores
+
+Si ocurre un error, el módulo crea `Diagnostico_AIOL_AAAAMMDD_HHMMSS` y lo comprime en un ZIP antes de limpiar la sesión temporal. El contenido es el siguiente:
+
+```text
+Diagnostico_AIOL_AAAAMMDD_HHMMSS.zip
+├── Error.txt                    (fase, mensaje, línea, código y pila de llamadas)
+├── Configuracion.json
+├── Operaciones.json
+├── Idiomas_AAAAMMDD_HHMMSS.json (informe de fallo)
+├── Idiomas_AAAAMMDD_HHMMSS.html (informe de fallo)
+├── DISM_MountedImageInfo.txt
+├── Preflight_manifest.json      (si existe respaldo)
+└── Logs\
+    ├── 0001_*.log / *.txt / *.json  (logs DISM nativos de la sesión)
+    ├── DISM_Consola.log
+    └── AdminImagenOffline.log
+```
+
+Si no se puede crear el ZIP, se conserva la carpeta `Diagnostico_AIOL_*` sin comprimir en `Reportes\Diagnosticos\Idiomas`.
 
 ## Mensajes finales
 

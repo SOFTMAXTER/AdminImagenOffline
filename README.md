@@ -1,5 +1,5 @@
 
-# AdminImagenOffline V1.5.7 by SOFTMAXTER
+# AdminImagenOffline V1.5.8 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -9,13 +9,10 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.7 (Changelog)
+## 🆕 Novedades en la Versión 1.5.8 (Changelog)
 
-* **Idiomas con Soporte de Fuentes de Asia Oriental**: Para `ja-JP`, `ko-KR`, `zh-CN`, `zh-HK` y `zh-TW`, si no hay un WinPE completo el módulo captura las fuentes desde `install.wim`, las copia a ambos índices de `boot.wim` (modo `SetupResourcesOnly`) y verifica que queden presentes. El modo `FullWinPE` ahora exige `lp.cab` por idioma y, para japonés, coreano y chino, también `WinPE-FontSupport`.
-* **Validaciones Previas en Idiomas**: Se bloquean las ediciones que restringen idiomas adicionales (`SingleLanguage` / `CountrySpecific`) y las selecciones que mezclan imágenes Client y Server en una misma ejecución.
-* **Verificaciones Pre/Post-Commit Opcionales**: El asistente de Actualizaciones incorpora la opción *"Ejecutar verificaciones completas Pre/Post-Commit"*. Al desactivarla se omiten los informes completos en WinRE, `install.wim` y `boot.wim`, pero la verificación estructural final se conserva siempre.
-* **Protección ante LCU de la Etapa ESU (Windows 10)**: En imágenes cliente no LTSC, el módulo detecta una LCU de la etapa ESU y se detiene con una explicación clara, ya que el paquete de preparación no concede por sí solo el derecho ESU a una imagen offline. Nunca se omiten comprobaciones de licencia.
-* **Copia de Archivos Protegidos Más Segura**: En Actualizaciones e Idiomas, solo se admiten destinos respaldados por WIM/WOF entre los puntos de reanálisis, se registra un diagnóstico de acceso y seguridad antes de reintentar ante *"acceso denegado"* y los atributos y la seguridad originales se restauran exactamente.
+* **Diagnóstico de Idiomas Alineado con Actualizaciones**: Ante un error, el ZIP de diagnóstico se genera en `Reportes\Diagnosticos\Idiomas` (`Diagnostico_AIOL_AAAAMMDD_HHMMSS`) e incluye `Error.txt`, la configuración y las operaciones de la sesión, un informe de fallo JSON/HTML, el estado de las imágenes DISM montadas, los logs DISM de la sesión, la transcripción DISM, el manifiesto *Preflight* y el registro de AdminImagenOffline. Si no es posible crear el ZIP, se conserva la carpeta de diagnóstico.
+* **Log DISM Persistente en Idiomas**: El registro DISM de cada ejecución se guarda en la carpeta `Logs` (`Idiomas_AAAAMMDD_HHMMSS.log`) y su ruta se muestra al finalizar la integración, igual que ya ocurría en Actualizaciones.
 
 ## Características Principales
 

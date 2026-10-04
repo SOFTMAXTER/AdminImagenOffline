@@ -376,10 +376,13 @@ No deben interpretarse como el mismo dato.
 Salidas habituales:
 
 ```text
-E:\windows\AdminImagenOffline\Reportes\Actualizaciones\
-├── Resultado_AIOU_AAAAMMDD_HHMMSS.json
-├── Resultado_AIOU_AAAAMMDD_HHMMSS.html
-└── Actualizaciones_AAAAMMDD_HHMMSS.log
+E:\windows\AdminImagenOffline\
+├── Reportes\
+│   └── Actualizaciones\
+│       ├── Resultado_AIOU_AAAAMMDD_HHMMSS.json
+│       └── Resultado_AIOU_AAAAMMDD_HHMMSS.html
+└── Logs\
+    └── Actualizaciones_AAAAMMDD_HHMMSS.log
 ```
 
 Diagnósticos:
@@ -388,6 +391,8 @@ Diagnósticos:
 E:\windows\AdminImagenOffline\Reportes\Diagnosticos\Actualizaciones\
 └── Diagnostico_AIOU_AAAAMMDD_HHMMSS.zip
 ```
+
+El ZIP se genera ante errores e incluye `Error.txt`, el informe de fallo JSON/HTML, `DISM_MountedImageInfo.txt`, el manifiesto `Preflight_manifest.json` (si existe respaldo) y la carpeta `Logs` con los logs DISM de la sesión, `DISM_Consola.log` y `AdminImagenOffline.log`. Si no se puede comprimir, se conserva la carpeta `Diagnostico_AIOU_*`.
 
 Los reportes incluyen:
 
