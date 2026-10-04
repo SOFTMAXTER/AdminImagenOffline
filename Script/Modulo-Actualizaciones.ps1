@@ -8,7 +8,7 @@
       - Detecta medios extraidos con install.wim y boot.wim.
       - Acepta un repositorio plano o subcarpetas por categoria.
       - Clasifica CAB/MSU por identidades y contenido interno, sin listas KB.
-      - Detecta MSU modernos con firma WIM y extrae metadatos mediante wimgapi.dll con respaldo DISM.
+      - Detecta MSU modernos con firma WIM y extrae metadatos con wimlib, wimgapi.dll y respaldo DISM.
       - Normaliza versiones CBS cortas BUILD.REVISION.MAJOR.MINOR a 10.0.BUILD.REVISION.
       - Extrae el SSU integrado en la LCU y lo reutiliza en WinRE/WinPE.
       - Procesa SSU, Enablement y ESU antes de la LCU final.
@@ -41,10 +41,14 @@
       - Reutiliza Preflight como respaldo maestro y evita duplicar WIM/Setup durante la misma sesion.
       - Puede reconstruir todos los WIM y ajustar su fecha interna de creacion.
       - Busca herramientas compartidas en AdminImagenOffline\Tools y, como respaldo, en el PATH del sistema.
-      - La politica LCU de WinRE es automatica y no requiere seleccion manual.
+      - La politica WinRE prioriza SafeOS y verifica CBS; no confunde actualizar SSU con actualizar recuperacion.
+      - Aplaza limpieza/ResetBase con operaciones pendientes o estado CBS desconocido.
+      - Repara solo dependencias conocidas de recuperacion desde ubicaciones acotadas, con igual version binaria y SHA-256; registra otras importaciones para validacion en ejecucion.
       - Optimiza enumeracion, hashes, metadatos CBS, escritura atomica y deduplicacion sin paralelizar WIM.
       - Detecta automaticamente AdminImagenOffline\Actualizaciones como repositorio predeterminado.
-      - Detecta automaticamente Windows ADK y el complemento WinPE; utiliza el DISM mas reciente disponible.
+      - Detecta Windows ADK y usa el mismo DISM nativo para consultas, montajes y mantenimiento.
+      - Conserva el firmante UEFI del medio por defecto y verifica cualquier conversion explicita a CA 2023/2011.
+      - Entrega la cadena MSU al resolvedor nativo de DISM; no reconstruye payloads para forzar su instalacion.
       - Verifica despues de SetupDU que boot.wim conserve lang.ini y los recursos MUI de todos los TrustedLocales.
 
     Estructura opcional recomendada:
@@ -66,6 +70,17 @@
     clasificar cada CAB/MSU por nombre y metadatos internos.
 .NOTES
     Implementacion original para AdminImagenOffline.
+    Referencias de mantenimiento (consultadas el 01/10/2026):
+    https://learn.microsoft.com/windows/deployment/update/media-dynamic-update
+    https://learn.microsoft.com/windows/deployment/update/catalog-checkpoint-cumulative-updates
+    https://learn.microsoft.com/windows-hardware/manufacture/desktop/winpe-create-usb-bootable-drive
+    Sintaxis de consultas revisada el 02/10/2026:
+    https://learn.microsoft.com/windows-hardware/manufacture/desktop/dism-global-options-for-command-line-syntax
+    https://learn.microsoft.com/windows-hardware/manufacture/desktop/dism-image-management-command-line-options-s14
+    Firmas incorporadas EFI revisadas el 02/10/2026:
+    https://learn.microsoft.com/windows/win32/seccrypto/example-c-program--verifying-the-signature-of-a-pe-file
+    https://learn.microsoft.com/powershell/module/microsoft.powershell.security/get-authenticodesignature
+    El examen PE es diagnostico; no reproduce los contextos de carga/SxS de Windows.
 	No modifica ni omite comprobaciones de licencia ESU.
 .AUTHOR
     SOFTMAXTER
@@ -104,6 +119,8 @@ $script:AIOUpdateDismSource = 'Sistema'
 $script:AIOUpdateAdkInfo = $null
 $script:AIOUpdateExpandPath = Join-Path $script:AIOUpdateNativeSystemDirectory 'expand.exe'
 $script:AIOUpdateSessionRoot = $null
+$script:AIOUpdateMaintenanceResults = New-Object System.Collections.ArrayList
+$script:AIOUpdateBootSignatureResults = New-Object System.Collections.ArrayList
 $script:AIOUpdateMountedPaths = New-Object System.Collections.ArrayList
 $script:AIOUpdateDismTranscript = $null
 $script:AIOUpdatePackagePathMap = @{}
@@ -132,6 +149,7 @@ $script:AIOUpdateCbsFactsCache = @{}
 $script:AIOUpdateRepositoryInventoryCache = @{}
 $script:AIOUpdateInstalledNameCache = @{}
 $script:AIOUpdateWimEntryCache = @{}
+$script:AIOUpdateExtractedFileCache = @{}
 $script:AIOUpdateWimApiReady = $false
 $script:AIOUpdateOptimizationStats = [ordered]@{
     HashCacheHits = 0
@@ -239,7 +257,8 @@ $script:AIOUpdateLegacyEnablementTargets = @(
 
 $script:AIOUpdateModernMsuPayloadPatterns = @(
     'SSU-*.cab', '*ServicingStack*.cab', '*AggregatedMetadata*.cab',
-    '*Windows*.wim', 'RCU-*.wim', 'RCU-*.cab', '*Windows*.cab', '*Windows*.psf'
+    # El inventario lee CAB/WIM; los PSF son payload y no se analizan aqui.
+    '*Windows*.wim', 'RCU-*.wim', 'RCU-*.cab', '*Windows*.cab'
 )
 $script:AIOUpdateSsuCabPatterns = @('SSU-*.cab', '*SSU*.cab', '*ServicingStack*.cab', '*Servicing-Stack*.cab')
 $script:AIOUpdateMetadataWimPatterns = @(
@@ -646,6 +665,15 @@ function Initialize-AIOUpdateServicingEnvironment {
     $adkInfo.ActiveDismSource = $selectedSource
     $script:AIOUpdateAdkInfo = $adkInfo
 
+    # /English no es compatible con /?. Una consulta de montajes es de solo
+    # lectura y devuelve la version nativa sin depender del idioma del host.
+    $probe = Invoke-AIOUpdateDism -Arguments @('/Get-MountedImageInfo') -Context 'Comprobar DISM activo' -SuccessCodes @(0) -Quiet
+    $nativeVersion = $null
+    foreach ($line in $probe.Output) { if ([string]$line -match '^Version:\s*(\d+\.\d+\.\d+\.\d+)') { $nativeVersion = [version]$Matches[1]; break } }
+    if (-not $nativeVersion) { throw "No se pudo confirmar la version nativa del DISM seleccionado. Registro DISM: $($probe.LogPath)" }
+    $adkInfo | Add-Member -NotePropertyName ExecutableFileVersion -NotePropertyValue $selectedVersion -Force
+    $adkInfo.ActiveDismVersion = $nativeVersion
+    $selectedVersion = $nativeVersion
     Write-AIOUpdateLog -Level INFO -Message ("ADK detectado={0}; DISM activo={1} {2}; Ruta={3}." -f $adkInfo.Detected, $selectedSource, $selectedVersion, $selectedPath)
     return $adkInfo
 }
@@ -850,7 +878,8 @@ function Get-AIOUpdateExitCodeText {
         2148468992 { return 'CBS no pudo procesar el paquete.' }
         2147956499 { return 'El almacen de componentes quedo en un estado no mantenible (0x80073713). Revisa el orden y los prerrequisitos de los paquetes.' }
         552        { return 'El MSU no pudo aplicar su archivo Unattend.xml (0x80070228). Puede ocurrir al procesar una LCU checkpoint desde una carpeta mezclada con otros MSU.' }
-        87         { return 'Parametro invalido (0x80070057): CBS no pudo resolver la unidad de arranque (BootDrive) al aplicar el MSU directamente sobre esta imagen offline. Tipico al procesar un checkpoint LCU sobre boot.wim/WinPE via el motor UUP; se reintenta extrayendo el CAB interno.' }
+        87         { return 'Parametro incorrecto. Revisa la salida y el registro de DISM para identificar la opcion o combinacion rechazada.' }
+        2147942487 { return 'Parametro incorrecto (HRESULT 0x80070057). Revisa la salida y el registro de DISM para identificar la opcion o combinacion rechazada.' }
         2147942512 { return 'No hay espacio suficiente en el disco.' }
         3242328343 { return 'El directorio de montaje ya esta en uso.' }
         default    { return 'Error DISM no clasificado por el modulo.' }
@@ -2162,6 +2191,21 @@ function Add-AIOUpdateDismTranscriptLine {
     catch {}
 }
 
+function ConvertTo-AIOUpdateDismDisplayLine {
+    [CmdletBinding()]
+    param(
+        [AllowNull()] [AllowEmptyString()] [string]$Line,
+        [AllowNull()] [string]$DisplayIdentity
+    )
+    if ([string]::IsNullOrWhiteSpace($DisplayIdentity)) { return $Line }
+    $match = [regex]::Match([string]$Line, '^(?<prefix>\s*Processing\s+\d+\s+of\s+\d+\s+-)(?<label>.*)$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($match.Success -and $match.Groups['label'].Value.Trim() -in @('', 'Expand')) {
+        return ($match.Groups['prefix'].Value + ' ' + $DisplayIdentity.Trim())
+    }
+    # Conservar las identidades reales y cualquier otro mensaje de DISM.
+    return $Line
+}
+
 function Invoke-AIOUpdateDism {
     [CmdletBinding()]
     param(
@@ -2196,9 +2240,21 @@ function Invoke-AIOUpdateDism {
         Join-Path $env:TEMP ("AIO_DISM_{0}.log" -f [guid]::NewGuid().ToString('N'))
     }
 
-    $effectiveArguments = @('/English') + $Arguments
-    $hasExplicitLogPath = (@($effectiveArguments | Where-Object { $_ -match '^/LogPath:' }).Count -gt 0)
-    if (-not $hasExplicitLogPath) {
+    # Microsoft no admite /English junto a /? o su alias /Get-Help.
+    # Mantener ingles en las consultas que se analizan; la ayuda usa el idioma nativo.
+    $helpRequested = (@($Arguments | Where-Object { $_ -in @('/?', '/Get-Help') }).Count -gt 0)
+    $effectiveArguments = @($Arguments)
+    if ($helpRequested) {
+        $effectiveArguments = @($effectiveArguments | Where-Object { $_ -ine '/English' })
+    }
+    elseif ('/English' -notin $effectiveArguments) {
+        $effectiveArguments = @('/English') + $effectiveArguments
+    }
+    $explicitLogPaths = @($effectiveArguments | Where-Object { $_ -match '^/LogPath:' })
+    if ($explicitLogPaths.Count -gt 0) {
+        $dismLog = ([string]$explicitLogPaths[-1]).Substring(9)
+    }
+    else {
         $effectiveArguments += "/LogPath:$dismLog"
     }
 
@@ -2246,8 +2302,8 @@ function Invoke-AIOUpdateDism {
             $stderrTask = $process.StandardError.ReadToEndAsync()
         }
         elseif ($rewritePackageIdentity) {
-            # Para MSU modernos DISM muestra "Processing ... - Expand" porque
-            # primero procesa el contenedor. El mantenimiento real no cambia:
+            # Para MSU modernos DISM puede mostrar "Processing ... - Expand"
+            # o dejar vacia la etiqueta mientras procesa el contenedor. El mantenimiento real no cambia:
             # solo se sustituye esa etiqueta visual por la identidad CBS que ya
             # fue obtenida de update.mum durante el inventario.
             #
@@ -2264,11 +2320,7 @@ function Invoke-AIOUpdateDism {
                 [void]$captured.Add($rawLine)
                 Add-AIOUpdateDismTranscriptLine -Line $rawLine
 
-                $displayLine = $rawLine
-                $processingMatch = [regex]::Match($rawLine, '^(?<prefix>\s*Processing\s+\d+\s+of\s+\d+\s+-\s*)Expand(?<suffix>.*)$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-                if ($processingMatch.Success) {
-                    $displayLine = $processingMatch.Groups['prefix'].Value + $DisplayIdentity + $processingMatch.Groups['suffix'].Value
-                }
+                $displayLine = ConvertTo-AIOUpdateDismDisplayLine -Line $rawLine -DisplayIdentity $DisplayIdentity
 
                 # Barra nativa de DISM: [=====      12.3%      ]
                 # Se redibuja sobre la misma linea y se omiten refrescos
@@ -2389,13 +2441,14 @@ function Invoke-AIOUpdateDism {
 
         if (-not $recoveredAfterCaptureError) {
             $prefix = if ($processStarted) { 'Error durante la ejecucion/captura de DISM' } else { 'No se pudo iniciar DISM' }
-            $message = "$prefix para '$Context': $($captureException.Exception.Message)"
+            $message = "$prefix para '$Context': $($captureException.Exception.Message). Registro DISM: $dismLog"
             Write-AIOUpdateLog -Level ERROR -Message $message
             Add-AIOUpdateDismTranscriptLine -Line ("ERROR | {0}" -f $message)
             if (-not $NoThrow) { throw $message }
             return [pscustomobject]@{
                 Success       = $false
                 State         = if ($processStarted) { 'ExecutionCaptureFailed' } else { 'FailedToStart' }
+                ErrorMessage  = $message
                 ExitCode      = -1
                 UnsignedCode  = [uint32]4294967295
                 Output        = [string[]]($captured.ToArray())
@@ -2433,6 +2486,13 @@ function Invoke-AIOUpdateDism {
     $hexCode = '0x{0:X8}' -f $unsigned
     $description = Get-AIOUpdateExitCodeText -ExitCode $exitCode
     $message = "$Context fallo. Codigo DISM: $exitCode ($hexCode). $description"
+    # Las consultas Quiet pueden fallar antes de crear la sesion/diagnostico ZIP.
+    # Conservar su detalle nativo tambien en Registro.log y en la excepcion.
+    $nativeDetail = @($captured.ToArray() | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last 12)
+    if ($nativeDetail.Count -gt 0) {
+        $message += "`nSalida DISM:`n" + ($nativeDetail -join "`n")
+    }
+    $message += "`nRegistro DISM: $dismLog"
     Write-AIOUpdateLog -Level ERROR -Message $message
 
     if (-not $NoThrow) { throw $message }
@@ -2440,6 +2500,7 @@ function Invoke-AIOUpdateDism {
     return [pscustomobject]@{
         Success       = $false
         State         = 'Failed'
+        ErrorMessage  = $message
         ExitCode      = $exitCode
         UnsignedCode  = $unsigned
         Output        = [string[]]($captured.ToArray())
@@ -2546,6 +2607,54 @@ function Test-AIOUpdateWimContainerSignature {
     }
 }
 
+function Invoke-AIOUpdateWimlibRead {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string[]]$Arguments)
+    $wimlib = Find-AIOUpdateWimlib
+    if (-not $wimlib) { return [pscustomobject]@{ Success = $false; Output = @(); ExitCode = -1 } }
+    # Invocacion directa con argumentos separados; compatible con Windows PowerShell 5.1.
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
+    try {
+        $global:LASTEXITCODE = -1
+        $output = @(& $wimlib @Arguments 2>&1 | ForEach-Object { [string]$_ })
+        $code = $global:LASTEXITCODE
+        return [pscustomobject]@{ Success = ($code -eq 0); Output = [string[]]$output; ExitCode = $code }
+    }
+    catch { return [pscustomobject]@{ Success = $false; Output = @($_.Exception.Message); ExitCode = -1 } }
+}
+
+function Get-AIOUpdateCachedWimFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$WimPath,
+        [Parameter(Mandatory = $true)] [int]$Index,
+        [Parameter(Mandatory = $true)] [string]$ImagePath,
+        [Parameter(Mandatory = $true)] [string]$ScratchPath,
+        [Parameter(Mandatory = $true)] [string]$StagingRoot
+    )
+    $file = Get-Item -LiteralPath $WimPath -ErrorAction Stop
+    # Cache de esta sesion, invalidada al cambiar el WIM o el indice donante.
+    $identity = '{0}|{1}|{2}|{3}' -f $file.FullName.ToLowerInvariant(), $file.Length, $file.LastWriteTimeUtc.Ticks, $Index
+    $root = Join-Path (Join-Path $StagingRoot 'RecoveryDependencyCache') (Get-AIOUpdateTextSha256 -Text $identity)
+    $relative = $ImagePath.Replace('/', '\').TrimStart('\')
+    if ($relative -match '(^|\\)\.{1,2}(\\|$)' -or $relative -match '[:*?"<>|\x00-\x1f]' -or -not $relative) { throw 'Ruta interna WIM no valida.' }
+    $destination = Join-Path $root $relative
+    if (-not $script:AIOUpdateExtractedFileCache) { $script:AIOUpdateExtractedFileCache = @{} }
+    if ($script:AIOUpdateExtractedFileCache.ContainsKey($destination) -and (Test-Path -LiteralPath $destination -PathType Leaf)) {
+        $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($hash -eq $script:AIOUpdateExtractedFileCache[$destination]) { return $destination }
+    }
+    # Una copia alterada nunca puede volver a aparecer como donante tras un fallo.
+    if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Force -ErrorAction Stop }
+    if (Invoke-AIOUpdateWimExtractPath -WimPath $WimPath -Index $Index -ImagePath $relative -DestinationPath $destination -TemporaryPath $ScratchPath) {
+        $script:AIOUpdateExtractedFileCache[$destination] = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash
+        return $destination
+    }
+    return $null
+}
+
+
 function Get-AIOUpdateWimImageEntries {
     [CmdletBinding()]
     param(
@@ -2561,20 +2670,18 @@ function Get-AIOUpdateWimImageEntries {
         return [string[]]$script:AIOUpdateWimEntryCache[$cacheKey]
     }
 
-    $result = Invoke-AIOUpdateDism -Arguments @(
-        '/List-Image',
-        "/ImageFile:$($file.FullName)",
-        '/Index:1'
-    ) -Context "Enumerando contenedor WIM $($file.Name)" -SuccessCodes @(0) -NoThrow -Quiet
+    $result = Invoke-AIOUpdateWimlibRead -Arguments @('dir', $file.FullName, '1')
+    if (-not $result.Success) {
+        $result = Invoke-AIOUpdateDism -Arguments @('/List-Image', "/ImageFile:$($file.FullName)", '/Index:1') -Context "Enumerando contenedor WIM $($file.Name)" -SuccessCodes @(0) -NoThrow -Quiet
+    }
 
     if (-not $result.Success) {
-        $script:AIOUpdateWimEntryCache[$cacheKey] = [string[]]@()
         return @()
     }
 
     $entries = New-Object System.Collections.Generic.List[string]
     foreach ($line in @($result.Output)) {
-        $value = ([string]$line).Trim()
+        $value = ([string]$line).Trim().Replace('/', '\')
         if ([string]::IsNullOrWhiteSpace($value)) { continue }
 
         $candidate = $null
@@ -2601,42 +2708,46 @@ function Invoke-AIOUpdateWimExtractPath {
         [Parameter(Mandatory = $true)] [string]$WimPath,
         [Parameter(Mandatory = $true)] [string]$ImagePath,
         [Parameter(Mandatory = $true)] [string]$DestinationPath,
-        [Parameter(Mandatory = $true)] [string]$TemporaryPath
+        [Parameter(Mandatory = $true)] [string]$TemporaryPath,
+        [ValidateRange(1, 2147483647)] [int]$Index = 1
     )
-
-    if (-not (Initialize-AIOUpdateWimApi)) { return $false }
+    $relative = $ImagePath.Replace('\', '/').TrimStart('/')
+    if (-not $relative -or $relative -match '(^|/)\.{1,2}(/|$)' -or $relative -match '[:*?"<>|\x00-\x1f]') { throw 'Ruta interna WIM no valida.' }
+    $work = Join-Path $TemporaryPath ('WimExtract_' + [guid]::NewGuid().ToString('N'))
+    Initialize-AIOUpdateDirectory -Path $work
     Initialize-AIOUpdateDirectory -Path (Split-Path -Parent $DestinationPath)
-    Initialize-AIOUpdateDirectory -Path $TemporaryPath
-
+    $leaf = ($relative -split '/')[-1]
+    $extracted = Join-Path $work $leaf
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
     [uint32]$creationResult = 0
     $hWim = [IntPtr]::Zero
     $hImage = [IntPtr]::Zero
     try {
+        $result = Invoke-AIOUpdateWimlibRead -Arguments @('extract', $WimPath, [string]$Index, ('/' + $relative), "--dest-dir=$work", '--no-acls', '--no-attributes', '--no-globs')
+        if ($result.Success -and (Test-Path -LiteralPath $extracted -PathType Leaf) -and
+            -not ((Get-Item -LiteralPath $extracted).Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            Move-Item -LiteralPath $extracted -Destination $DestinationPath -Force -ErrorAction Stop
+            Write-AIOUpdateLog -Level INFO -Message ("Extraccion selectiva wimlib: indice={0}; ruta={1}; segundos={2:N2}." -f $Index, $ImagePath, $timer.Elapsed.TotalSeconds)
+            return $true
+        }
+        Remove-Item -LiteralPath $extracted -Force -ErrorAction SilentlyContinue
+        if (-not (Initialize-AIOUpdateWimApi)) { return $false }
         $hWim = [AIOUpdate.WimNative]::OpenRead($WimPath, [ref]$creationResult)
-        if ($hWim -eq [IntPtr]::Zero) {
-            throw "WIMCreateFile fallo con Win32=$([AIOUpdate.WimNative]::LastError)."
-        }
-
-        if ([AIOUpdate.WimNative]::WIMSetTemporaryPath($hWim, $TemporaryPath) -eq 0) {
-            throw "WIMSetTemporaryPath fallo con Win32=$([AIOUpdate.WimNative]::LastError)."
-        }
-
-        $hImage = [AIOUpdate.WimNative]::WIMLoadImage($hWim, 1)
-        if ($hImage -eq [IntPtr]::Zero) {
-            throw "WIMLoadImage fallo con Win32=$([AIOUpdate.WimNative]::LastError)."
-        }
-
-        $pathsToTry = @($ImagePath.TrimStart('\'), ('\' + $ImagePath.TrimStart('\'))) | Select-Object -Unique
-        foreach ($candidate in $pathsToTry) {
-            Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction SilentlyContinue
-            if ([AIOUpdate.WimNative]::WIMExtractImagePath($hImage, $candidate, $DestinationPath, 0) -ne 0) {
-                if (Test-Path -LiteralPath $DestinationPath -PathType Leaf) {
-                    return $true
-                }
+        if ($hWim -eq [IntPtr]::Zero) { throw "WIMCreateFile fallo con Win32=$([AIOUpdate.WimNative]::LastError)." }
+        if ([AIOUpdate.WimNative]::WIMSetTemporaryPath($hWim, $work) -eq 0) { throw "WIMSetTemporaryPath fallo con Win32=$([AIOUpdate.WimNative]::LastError)." }
+        $hImage = [AIOUpdate.WimNative]::WIMLoadImage($hWim, [uint32]$Index)
+        if ($hImage -eq [IntPtr]::Zero) { throw "WIMLoadImage fallo con Win32=$([AIOUpdate.WimNative]::LastError)." }
+        foreach ($candidate in @($relative.Replace('/', '\'), ('\' + $relative.Replace('/', '\')))) {
+            Remove-Item -LiteralPath $extracted -Force -ErrorAction SilentlyContinue
+            if ([AIOUpdate.WimNative]::WIMExtractImagePath($hImage, $candidate, $extracted, 0) -ne 0 -and
+                (Test-Path -LiteralPath $extracted -PathType Leaf) -and
+                -not ((Get-Item -LiteralPath $extracted).Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                Move-Item -LiteralPath $extracted -Destination $DestinationPath -Force -ErrorAction Stop
+                Write-AIOUpdateLog -Level INFO -Message ("Extraccion selectiva wimgapi: indice={0}; ruta={1}; segundos={2:N2}." -f $Index, $ImagePath, $timer.Elapsed.TotalSeconds)
+                return $true
             }
         }
-
-        Write-AIOUpdateLog -Level WARN -Message "wimgapi no pudo extraer '$ImagePath' desde '$WimPath' (Win32=$([AIOUpdate.WimNative]::LastError))."
+        Write-AIOUpdateLog -Level INFO -Message "No se pudo extraer selectivamente '$ImagePath' del indice $Index; se usara el respaldo nativo si es necesario."
         return $false
     }
     catch {
@@ -2644,14 +2755,12 @@ function Invoke-AIOUpdateWimExtractPath {
         return $false
     }
     finally {
-        if ($hImage -ne [IntPtr]::Zero) {
-            try { [void][AIOUpdate.WimNative]::WIMCloseHandle($hImage) } catch {}
-        }
-        if ($hWim -ne [IntPtr]::Zero) {
-            try { [void][AIOUpdate.WimNative]::WIMCloseHandle($hWim) } catch {}
-        }
+        if ($hImage -ne [IntPtr]::Zero) { try { [void][AIOUpdate.WimNative]::WIMCloseHandle($hImage) } catch {} }
+        if ($hWim -ne [IntPtr]::Zero) { try { [void][AIOUpdate.WimNative]::WIMCloseHandle($hWim) } catch {} }
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+
 
 function Expand-AIOUpdateWimContainerEntries {
     [CmdletBinding()]
@@ -2788,20 +2897,8 @@ function Expand-AIOUpdateWimContainerEntries {
 function Assert-AIOUpdateNoMountedImages {
     [CmdletBinding()]
     param()
-
-    try {
-        $mounted = @(Get-WindowsImage -Mounted -ErrorAction Stop | Where-Object {
-            $_.MountStatus -notin @('Invalid', 'NeedsRemount')
-        })
-        if ($mounted.Count -gt 0) {
-            $paths = $mounted | ForEach-Object { $_.Path }
-            throw "Hay imagenes montadas por DISM: $($paths -join ', '). Desmonta o descarta esos montajes antes de continuar."
-        }
-    }
-    catch {
-        if ($_.Exception.Message -like 'Hay imagenes montadas*') { throw }
-        Write-AIOUpdateLog -Level WARN -Message "No se pudo consultar Get-WindowsImage -Mounted: $($_.Exception.Message)"
-    }
+    $mounted = @(Get-AIOUpdateNativeMountedImages)
+    if ($mounted.Count) { throw "Hay imagenes montadas por DISM: $(($mounted.Path) -join ', '). Desmonta esos montajes antes de continuar." }
 }
 
 function Test-AIOUpdateMediaWritable {
@@ -3701,33 +3798,127 @@ el MSU completo en el repositorio.
     }
 }
 
+function Get-AIOUpdatePackageArchitectureInfo {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [System.IO.FileInfo]$File,
+        [AllowNull()] [psobject]$Metadata,
+        [string]$Category = ''
+    )
+
+    $roots = @()
+    if ($Metadata) {
+        if ($Metadata.PSObject.Properties['CbsRootIdentities']) {
+            $roots = @($Metadata.CbsRootIdentities | Where-Object { $_ })
+        }
+        if ($roots.Count -eq 0 -and $Metadata.UpdateMumText) {
+            foreach ($fragment in [regex]::Split([string]$Metadata.UpdateMumText, '(?i)(?=<\?xml\s)')) {
+                if ([string]::IsNullOrWhiteSpace($fragment)) { continue }
+                try {
+                    $root = Get-AIOUpdateCbsRootIdentity -XmlText $fragment
+                    if ($root) { $roots += $root }
+                }
+                catch { } # El nombre propio sigue disponible si el XML esta incompleto.
+            }
+        }
+    }
+
+    # Elegir la identidad del payload pedido, no SSU/parent/wrappers incluidos
+    # en el mismo MSU. Las arquitecturas de componentes WOW64 no son destinos.
+    if ($Category -and $script:AIOUpdateIdentityPatterns.Contains($Category)) {
+        $pattern = [string]$script:AIOUpdateIdentityPatterns[$Category]
+        $roots = @($roots | Where-Object {
+            $parts = ([string]$_.Prefix) -split '~'
+            $parts.Count -eq 4 -and $parts[0] -match $pattern -and
+                $parts[1] -ieq '31bf3856ad364e35' -and -not $parts[3]
+        })
+    }
+    $architectures = @($roots | ForEach-Object {
+        $parts = ([string]$_.Prefix) -split '~'
+        if ($parts.Count -eq 4) { Convert-AIOUpdateArchitectureName -Architecture $parts[2] }
+    } | Where-Object { $_ -in @($script:AIOUpdateArchitectureCatalog.Name) } | Sort-Object -Unique)
+    if ($architectures.Count -gt 0) {
+        return [pscustomobject]@{ Architectures = [string[]]$architectures; Source = 'Identidad raiz CBS propia' }
+    }
+
+    $tokens = @($script:AIOUpdateArchitectureCatalog | ForEach-Object { @($_.Name) + @($_.Aliases) + @($_.AdkFolder) } | ForEach-Object { $_ } | Sort-Object -Unique)
+    $tokenPattern = ($tokens | ForEach-Object { [regex]::Escape([string]$_) }) -join '|'
+    $architectures = @([regex]::Matches($File.Name, "(?i)(?:^|[-_.])($tokenPattern)(?:[-_.]|$)") | ForEach-Object {
+        Convert-AIOUpdateArchitectureName -Architecture $_.Groups[1].Value
+    } | Where-Object { $_ -in @($script:AIOUpdateArchitectureCatalog.Name) } | Sort-Object -Unique)
+    return [pscustomobject]@{
+        Architectures = [string[]]$architectures
+        Source = $(if ($architectures.Count -gt 0) { 'Nombre del paquete' } else { 'No determinada' })
+    }
+}
+
 function Get-AIOUpdatePackageArchitectureHints {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)] [System.IO.FileInfo]$File,
-        [AllowNull()] [psobject]$Metadata
+        [AllowNull()] [psobject]$Metadata,
+        [string]$Category = ''
     )
+    return [string[]](Get-AIOUpdatePackageArchitectureInfo -File $File -Metadata $Metadata -Category $Category).Architectures
+}
 
-    $probe = $File.Name
-    if ($Metadata) {
-        $probe += "`n" + [string]$Metadata.UpdateMumText + "`n" + [string]$Metadata.Text
+function Get-AIOUpdateLcuFamilyKey {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [psobject]$Package)
+
+    $info = Get-AIOUpdatePackageArchitectureInfo -File ([System.IO.FileInfo]$Package.FullName) -Metadata $Package.Metadata -Category 'LCU'
+    $architectures = @($info.Architectures)
+    if ($architectures.Count -eq 0) {
+        # Compatibilidad con inventarios construidos por otros llamadores:
+        # aceptar solo un destino concreto, nunca la union de pistas ambiguas.
+        $architectures = @($Package.Architectures | Where-Object { $_ } | ForEach-Object {
+            Convert-AIOUpdateArchitectureName -Architecture $_
+        } | Where-Object { $_ -in @($script:AIOUpdateArchitectureCatalog.Name) } | Sort-Object -Unique)
+        $info.Source = 'Arquitectura declarada en inventario'
     }
-
-    $values = New-Object System.Collections.Generic.List[string]
-    foreach ($match in [regex]::Matches($probe, '(?i)processorArchitecture\s*=\s*"([^"]+)"')) {
-        $raw = $match.Groups[1].Value
-        $value = if ($raw -match '(?i)^wow64$') { 'x64' } else { Convert-AIOUpdateArchitectureName -Architecture $raw }
-        if ($value -and $value -notin @('Unknown', 'neutral', 'msil')) { [void]$values.Add($value) }
+    if ($architectures.Count -ne 1) {
+        throw "No se puede preparar la cadena LCU de '$($Package.Name)': falta una arquitectura objetivo unica y fiable."
     }
-
-    $architectureTokens = @($script:AIOUpdateArchitectureCatalog | ForEach-Object { @($_.Name) + @($_.Aliases) + @($_.AdkFolder) } | ForEach-Object { $_ } | Sort-Object -Unique)
-    $architectureTokenPattern = ($architectureTokens | ForEach-Object { [regex]::Escape([string]$_) }) -join '|'
-    foreach ($match in [regex]::Matches($File.Name, "(?i)(?:^|[-_.])($architectureTokenPattern)(?:[-_.]|$)")) {
-        $value = Convert-AIOUpdateArchitectureName -Architecture $match.Groups[1].Value
-        if ($value -and $value -ne 'Unknown') { [void]$values.Add($value) }
+    $version = $null
+    if (-not $Package.VersionReliable -or -not [version]::TryParse([string]$Package.Version, [ref]$version) -or $version.Build -lt [int]$script:AIOUpdatePolicy.MinimumRecognizedCbsBuild) {
+        throw "No se puede preparar la cadena LCU de '$($Package.Name)': falta una version CBS fiable."
     }
+    $Package | Add-Member -NotePropertyName Architectures -NotePropertyValue ([string[]]$architectures) -Force
+    $Package | Add-Member -NotePropertyName ArchitectureSource -NotePropertyValue $info.Source -Force
+    $Package | Add-Member -NotePropertyName VersionBuild -NotePropertyValue ([int]$version.Build) -Force
+    $product = if ($Package.ProductHint) { ([string]$Package.ProductHint).ToLowerInvariant() } else { 'any' }
+    return ('{0}|{1}|{2}' -f $version.Build, $architectures[0], $product)
+}
 
-    return [string[]]@($values.ToArray() | Sort-Object -Unique)
+function Set-AIOUpdateLcuTargets {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [AllowEmptyCollection()] [object[]]$Inventory)
+
+    $packages = @($Inventory | Where-Object { $_.Category -eq 'LCU' -and $_.Extension -eq '.msu' -and $_.Installable })
+    foreach ($package in $packages) {
+        $family = Get-AIOUpdateLcuFamilyKey -Package $package
+        $package | Add-Member -NotePropertyName LcuFamily -NotePropertyValue $family -Force
+        $package | Add-Member -NotePropertyName IsLcuTarget -NotePropertyValue $true -Force
+        $package | Add-Member -NotePropertyName IsLcuPrerequisiteCandidate -NotePropertyValue $false -Force
+    }
+    foreach ($group in @($packages | Group-Object -Property LcuFamily)) {
+        $items = @($group.Group | Sort-Object @{ Expression = { [version]$_.Version }; Descending = $true }, @{ Expression = { $_.Size }; Descending = $true }, Name)
+        $target = $items[0]
+        $checkpointCapable = Test-AIOUpdateCheckpointLcuCapability -Packages $items
+        foreach ($item in $items) {
+            $item | Add-Member -NotePropertyName LcuTargetName -NotePropertyValue $target.Name -Force
+            if ($item.FullName -ieq $target.FullName) { continue }
+            $item.IsLcuTarget = $false
+            if ($checkpointCapable) {
+                $item.IsLcuPrerequisiteCandidate = $true
+            }
+            else {
+                $item.Installable = $false
+                $script:AIOUpdateOptimizationStats.DuplicatePackagesSkipped++
+            }
+        }
+        Write-AIOUpdateLog -Level INFO -Message "Cadena LCU $($group.Name): objetivo=$($target.Name); MSU anteriores disponibles=$([math]::Max(0, $items.Count - 1)); solo el objetivo se programa para Add-Package."
+    }
 }
 
 function Get-AIOUpdatePackageEditionHints {
@@ -3873,7 +4064,11 @@ function Test-AIOUpdatePackageCompatibility {
     }
 
     $targetArch = Convert-AIOUpdateArchitectureName -Architecture $Architecture
-    $hints = @($Package.Architectures)
+    # @($null) contiene un elemento: no representa una arquitectura real.
+    # Normalizar alias y descartar valores vacios antes de filtrar candidatos.
+    $hints = @($Package.Architectures | Where-Object {
+        -not [string]::IsNullOrWhiteSpace([string]$_)
+    } | ForEach-Object { Convert-AIOUpdateArchitectureName -Architecture $_ } | Sort-Object -Unique)
     if ($hints.Count -gt 0 -and $targetArch -notin $hints) {
         return [pscustomobject]@{
             Compatible = $false
@@ -3935,6 +4130,7 @@ function Get-AIOUpdateCompatiblePackages {
 
     $compatible = New-Object System.Collections.Generic.List[object]
     foreach ($package in @(Get-AIOUpdatePackages -Inventory $Inventory -Category $Category)) {
+        if ($package.Category -eq 'LCU' -and $package.Extension -eq '.msu' -and $package.PSObject.Properties['IsLcuTarget'] -and -not $package.IsLcuTarget) { continue }
         $test = Test-AIOUpdatePackageCompatibility -Package $package -Architecture $Architecture -Build $Build -ImageName $ImageName -EditionId $EditionId
         if ($test.Compatible) {
             [void]$compatible.Add($package)
@@ -4732,6 +4928,7 @@ function Get-AIOUpdatePackageInventory {
         [Parameter(Mandatory = $true)] [string]$ScratchRoot
     )
 
+    Write-Host ' Leyendo metadatos del repositorio de actualizaciones...' -ForegroundColor DarkCyan
     $resolvedRoot = (Resolve-Path -LiteralPath $RepositoryRoot -ErrorAction Stop).Path
     $files = @(Get-AIOUpdateRepositoryPackageFiles -RepositoryRoot $resolvedRoot)
     $signatureLines = New-Object System.Collections.Generic.List[string]
@@ -4747,7 +4944,10 @@ function Get-AIOUpdatePackageInventory {
     try {
         foreach ($file in $files) {
             Write-Progress -Activity 'Clasificando actualizaciones' -Status "$position de $($files.Count) procesados; actual: $($file.Name)" -PercentComplete ([int][math]::Floor(($position * 100.0) / [math]::Max(1, $files.Count)))
+            $metadataTimer = [System.Diagnostics.Stopwatch]::StartNew()
+            Write-AIOUpdateLog -Level INFO -Message "Iniciando lectura de metadatos: $($file.Name)."
             $classification = Get-AIOUpdatePackageCategory -File $file -RepositoryRoot $resolvedRoot -ScratchRoot $ScratchRoot
+            Write-AIOUpdateLog -Level INFO -Message ("Metadatos leidos: {0}; segundos={1:N2}." -f $file.Name, $metadataTimer.Elapsed.TotalSeconds)
             $metadata = $classification.Metadata
             $versionInfo = if ($metadata) {
                 [pscustomobject]@{
@@ -4785,6 +4985,7 @@ function Get-AIOUpdatePackageInventory {
                 ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique
             }
 
+            $architectureInfo = Get-AIOUpdatePackageArchitectureInfo -File $file -Metadata $metadata -Category $classification.Category
             [void]$inventory.Add([pscustomobject]@{
                 File          = $file
                 FullName      = $file.FullName
@@ -4801,8 +5002,11 @@ function Get-AIOUpdatePackageInventory {
                 Auxiliary     = ($classification.Category -eq 'Auxiliary')
                 Installable   = ($classification.Category -notin @('Auxiliary', 'Unknown'))
                 IsCheckpoint  = [bool]$isCheckpoint
+                IsLcuTarget   = $true
+                IsLcuPrerequisiteCandidate = $false
                 Metadata      = $metadata
-                Architectures = [string[]](Get-AIOUpdatePackageArchitectureHints -File $file -Metadata $metadata)
+                Architectures = [string[]]$architectureInfo.Architectures
+                ArchitectureSource = [string]$architectureInfo.Source
                 Editions      = [string[]](Get-AIOUpdatePackageEditionHints -Metadata $metadata)
                 ExplicitEditions = [string[]](Get-AIOUpdatePackageExplicitEditionHints -Metadata $metadata)
                 ProductHint   = Get-AIOUpdatePackageProductHint -File $file -Metadata $metadata -Category $classification.Category
@@ -4815,71 +5019,8 @@ function Get-AIOUpdatePackageInventory {
         Write-Progress -Activity 'Clasificando actualizaciones' -Completed
     }
 
-    $lcuMsu = @(
-        $inventory.ToArray() |
-            Where-Object { $_.Category -eq 'LCU' -and $_.Extension -eq '.msu' } |
-            Sort-Object Version, Size, Name
-    )
-
-    # Deduplicacion previa a DISM por familia CBS real:
-    # - Nunca se agrupan distintas builds bajo una familia generica. Una futura
-    #   rama 28xxx queda separada de 26100/26xxx automaticamente.
-    # - En familias con capacidad de checkpoint se conservan las LCUs previas
-    #   como posibles requisitos. En familias sin esa capacidad se omiten las
-    #   revisiones claramente superseded.
-    $groupedLcus = @(
-        $lcuMsu |
-            Group-Object -Property {
-                $rawBuild = if ($_.VersionReliable -and $_.VersionBuild -gt 0) { [int]$_.VersionBuild } else { 0 }
-                $buildKey = if ($rawBuild -gt 0) { [string]$rawBuild } else { 'unknown' }
-                $archKey = if ($_.Architectures -and @($_.Architectures).Count -gt 0) { (@($_.Architectures) | Sort-Object) -join ',' } else { 'any' }
-                $productKey = if ($_.ProductHint) { [string]$_.ProductHint } else { 'windows' }
-                "$buildKey|$archKey|$productKey"
-            }
-    )
-
-    foreach ($group in $groupedLcus) {
-        $items = @($group.Group | Sort-Object Version, Size, Name)
-        if ($items.Count -le 1) { continue }
-
-        $checkpointCapableFamily = Test-AIOUpdateCheckpointLcuCapability -Packages $items
-
-        $withVersion = @($items | Where-Object { $_.VersionReliable -and $_.Version -gt [version]'0.0.0.0' })
-        $target = if ($withVersion.Count -gt 0) {
-            $withVersion |
-                Sort-Object @{ Expression = { $_.Version }; Descending = $true },
-                            @{ Expression = { $_.Size }; Descending = $true } |
-                Select-Object -First 1
-        }
-        else {
-            $items |
-                Sort-Object @{ Expression = { $_.Size }; Descending = $true }, Name |
-                Select-Object -First 1
-        }
-
-        foreach ($item in $items) {
-            if (([string]$item.FullName) -ieq ([string]$target.FullName)) { continue }
-
-            if ($checkpointCapableFamily) {
-                $item.IsCheckpoint = $true
-                if ($item.Reason -notmatch '(?i)checkpoint') {
-                    $item.Reason = $item.Reason + '; LCU anterior conservada como checkpoint/candidato de prerrequisito en esta familia CBS'
-                }
-            }
-            elseif ($item.IsCheckpoint) {
-                # Respeta una identidad de checkpoint explicitamente detectada
-                # en metadatos, incluso fuera del umbral moderno.
-                continue
-            }
-            else {
-                $item.Installable = $false
-                $script:AIOUpdateOptimizationStats.DuplicatePackagesSkipped++
-                $targetLabel = if ($target.KB) { $target.KB } else { $target.Name }
-                $item.Reason = $item.Reason + "; superseded por $targetLabel; omitida antes de DISM"
-                Write-AIOUpdateLog -Level INFO -Message "LCU superseded omitida: $($item.Name) -> $($target.Name)."
-            }
-        }
-    }
+    # La misma identidad de familia gobierna la seleccion y el staging.
+    Set-AIOUpdateLcuTargets -Inventory ([object[]]$inventory.ToArray())
 
     $resultInventory = [object[]]($inventory.ToArray())
     Initialize-AIOUpdateServicingBuildRelations -Inventory $resultInventory
@@ -4935,30 +5076,29 @@ function Format-AIOUpdateByteSize {
 
 function Get-AIOUpdateImageMetadata {
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ImagePath
-    )
-
-    $summaries = @(Get-WindowsImage -ImagePath $ImagePath -ErrorAction Stop)
-    if ($summaries.Count -eq 0) { throw "No se encontraron indices en '$ImagePath'." }
-
-    $details = New-Object System.Collections.Generic.List[object]
-    foreach ($summary in $summaries) {
-        $index = [int]$summary.ImageIndex
-        try {
-            $detail = Get-WindowsImage -ImagePath $ImagePath -Index $index -ErrorAction Stop
-            if (-not $detail.Version -or $null -eq $detail.Architecture) {
-                throw 'DISM no devolvio Version o Architecture.'
-            }
-            [void]$details.Add($detail)
+    param([Parameter(Mandatory = $true)] [string]$ImagePath)
+    $summary = Invoke-AIOUpdateDism -Arguments @('/Get-ImageInfo', "/ImageFile:$ImagePath") -Context 'Consultar indices WIM' -SuccessCodes @(0) -Quiet
+    $indexes = @($summary.Output | ForEach-Object { if ([string]$_ -match '^\s*Index\s*:\s*(\d+)\s*$') { [int]$Matches[1] } } | Sort-Object -Unique)
+    if (-not $indexes.Count) { throw "DISM no devolvio indices reconocibles para '$ImagePath'." }
+    foreach ($index in $indexes) {
+        $result = Invoke-AIOUpdateDism -Arguments @('/Get-ImageInfo', "/ImageFile:$ImagePath", "/Index:$index") -Context "Consultar metadatos WIM indice $index" -SuccessCodes @(0) -Quiet
+        $fields = @{}
+        foreach ($line in $result.Output) {
+            if ([string]$line -match '^\s*([^:]+?)\s*:\s*(.*?)\s*$') { $fields[$Matches[1].Trim()] = $Matches[2] }
         }
-        catch {
-            throw "No fue posible obtener metadatos detallados del indice $index en '$ImagePath': $($_.Exception.Message)"
+        $version = $null
+        if (-not [version]::TryParse([string]$fields['Version'], [ref]$version) -or -not $fields['Architecture'] -or -not $fields['Name']) {
+            throw "DISM no devolvio Version, Architecture y Name validos para el indice $index."
+        }
+        $revision = 0
+        if ($fields.ContainsKey('ServicePack Build') -and -not [int]::TryParse($fields['ServicePack Build'], [ref]$revision)) { throw 'ServicePack Build no reconocido.' }
+        if ($version.Revision -lt 0) { $version = New-Object version($version.Major, $version.Minor, $version.Build, $revision) }
+        [pscustomobject]@{
+            ImageIndex = $index; ImageName = $fields['Name']; ImageDescription = $fields['Description']
+            Version = $version; Architecture = $fields['Architecture']; EditionId = $fields['Edition']
+            InstallationType = $fields['Installation']; ServicePackBuild = $revision
         }
     }
-
-    return [object[]]($details.ToArray())
 }
 
 function Select-AIOUpdateInstallIndexes {
@@ -5170,7 +5310,7 @@ function Clear-AIOUpdateMountedImages {
         # Si /Mount-Image fallo antes de crear el montaje, solo liberar la
         # ruta cuando DISM confirme que ya no figura en su registro.
         try {
-            $mounted = @(Get-WindowsImage -Mounted -ErrorAction Stop)
+            $mounted = @(Get-AIOUpdateNativeMountedImages)
             $pending = @($mounted | Where-Object {
                 ([string]$_.Path).TrimEnd('\', '/') -ieq $mountPath.TrimEnd('\', '/')
             })
@@ -5185,20 +5325,52 @@ function Clear-AIOUpdateMountedImages {
     return ($script:AIOUpdateMountedPaths.Count -eq 0)
 }
 
+function ConvertFrom-AIOUpdateDismRecords {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()] [string[]]$Lines, [Parameter(Mandatory = $true)] [string]$StartKey)
+    $record = $null
+    foreach ($line in $Lines) {
+        if ($line -match '^\s*([^:]+?)\s*:\s*(.*?)\s*$') {
+            $key = $Matches[1].Trim(); $value = $Matches[2]
+            if ($key -eq $StartKey) {
+                if ($null -ne $record) { [pscustomobject]$record }
+                $record = [ordered]@{}
+            }
+            if ($null -ne $record) { $record[$key] = $value }
+        }
+    }
+    if ($null -ne $record) { [pscustomobject]$record }
+}
+
+function Get-AIOUpdateNativeMountedImages {
+    [CmdletBinding()]
+    param()
+    $result = Invoke-AIOUpdateDism -Arguments @('/Get-MountedImageInfo') -Context 'Consultar montajes DISM' -SuccessCodes @(0) -Quiet
+    $records = @(ConvertFrom-AIOUpdateDismRecords -Lines $result.Output -StartKey 'Mount Dir')
+    if (-not $records.Count -and ($result.Output -join "`n") -notmatch '(?i)No mounted images found') {
+        throw 'DISM no confirmo un registro de montajes reconocible; se detiene antes de modificar el medio.'
+    }
+    foreach ($record in $records) {
+        [pscustomobject]@{ Path = $record.'Mount Dir'; MountStatus = $record.Status; ImagePath = $record.'Image File'; ImageIndex = $record.'Image Index' }
+    }
+}
+
 function Get-AIOUpdateMountedPackageInventory {
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$MountPath,
-
-        [switch]$Strict
-    )
-
+    param([Parameter(Mandatory = $true)] [string]$MountPath, [switch]$Strict)
     try {
-        return @(
-            Get-WindowsPackage -Path $MountPath -ErrorAction Stop |
-                Select-Object PackageName, PackageState, ReleaseType, InstallTime
-        )
+        $result = Invoke-AIOUpdateDism -Arguments @("/Image:$MountPath", '/Get-Packages', '/Format:List') -Context 'Consultar inventario CBS' -SuccessCodes @(0) -Quiet
+        $records = @(ConvertFrom-AIOUpdateDismRecords -Lines $result.Output -StartKey 'Package Identity')
+        if (-not $records.Count) { throw 'La imagen no devolvio identidades CBS; no se aceptara un inventario vacio.' }
+        foreach ($record in $records) {
+            if (-not $record.State -or $record.'Package Identity' -notmatch '^[^~]+~[^~]+~[^~]+~[^~]*~\d+\.\d+\.\d+\.\d+$') { throw 'Registro CBS incompleto o no reconocido.' }
+            [pscustomobject]@{
+                PackageName = [string]$record.'Package Identity'
+                PackageState = ([string]$record.State -replace '\s','')
+                ReleaseType = ([string]$record.'Release Type' -replace '\s','')
+                InstallTime = [string]$record.'Install Time'
+            }
+        }
     }
     catch {
         $message = "No se pudo obtener inventario de paquetes en '$MountPath': $($_.Exception.Message)"
@@ -5210,52 +5382,29 @@ function Get-AIOUpdateMountedPackageInventory {
 
 function Initialize-AIOUpdateLcuMsuStaging {
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)] [object[]]$Inventory,
-        [Parameter(Mandatory = $true)] [string]$StagingRoot
-    )
-
+    param([Parameter(Mandatory = $true)] [object[]]$Inventory, [Parameter(Mandatory = $true)] [string]$StagingRoot)
+    Set-AIOUpdateLcuTargets -Inventory $Inventory
     $script:AIOUpdatePackagePathMap = @{}
-    $script:AIOUpdateLcuStageRoot = $null
-
-    $lcuMsus = @(
-        $Inventory |
-            Where-Object { $_.Category -eq 'LCU' -and $_.Extension -eq '.msu' -and $_.Installable } |
-            Sort-Object @{ Expression = { $_.Version }; Ascending = $true }, Name
-    )
-    if ($lcuMsus.Count -eq 0) { return }
-
-    $root = Join-Path $StagingRoot 'LCU_MSU'
-    Initialize-AIOUpdateDirectory -Path $root -Empty
-    $script:AIOUpdateLcuStageRoot = $root
-
-    foreach ($package in $lcuMsus) {
-        $version = [version]$package.Version
-        $build = if ($version.Build -ge 0) { $version.Build } else { 0 }
-        $revision = if ($version.Revision -ge 0) { $version.Revision } else { 0 }
-        $prefix = '{0:D5}_{1:D5}' -f $build, $revision
-        $commonPath = Join-Path $root ("${prefix}-$($package.Name)")
-        Copy-Item -LiteralPath $package.FullName -Destination $commonPath -Force -ErrorAction Stop
-
-        if ($package.IsCheckpoint) {
-            $identity = if ($package.KB) { $package.KB } else { [System.IO.Path]::GetFileNameWithoutExtension($package.Name) }
-            $identity = ($identity -replace '[^A-Za-z0-9_.-]', '_')
-            $checkpointRoot = Join-Path $StagingRoot ("LCU_Checkpoint_$identity")
-            Initialize-AIOUpdateDirectory -Path $checkpointRoot -Empty
-            $isolatedPath = Join-Path $checkpointRoot ("${prefix}-$($package.Name)")
-            Copy-Item -LiteralPath $package.FullName -Destination $isolatedPath -Force -ErrorAction Stop
-            $script:AIOUpdatePackagePathMap[$package.FullName] = $isolatedPath
-            Write-AIOUpdateLog -Level INFO -Message "Checkpoint LCU aislado: $($package.Name) -> $isolatedPath"
+    $script:AIOUpdateLcuStageRoot = Join-Path $StagingRoot 'LCU_MSU'
+    Initialize-AIOUpdateDirectory -Path $script:AIOUpdateLcuStageRoot -Empty
+    $groups = @($Inventory | Where-Object { $_.Category -eq 'LCU' -and $_.Extension -eq '.msu' -and $_.Installable } | Group-Object -Property {
+        Get-AIOUpdateLcuFamilyKey -Package $_
+    })
+    foreach ($group in $groups) {
+        $key = (Get-AIOUpdateTextSha256 -Text $group.Name).Substring(0,16)
+        $folder = Join-Path $script:AIOUpdateLcuStageRoot $key
+        Initialize-AIOUpdateDirectory -Path $folder
+        foreach ($package in $group.Group) {
+            # Retain the original filename. DISM resolves the chain from the target.
+            $path = Join-Path $folder $package.Name
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $package.FullName -Algorithm SHA256).Hash) { throw "MSU diferentes con el mismo nombre: $($package.Name)." }
+            }
+            else { Copy-Item -LiteralPath $package.FullName -Destination $path -ErrorAction Stop }
+            $script:AIOUpdatePackagePathMap[$package.FullName] = $path
         }
-        else {
-            # Los destinos LCU permanecen juntos para que DISM pueda descubrir
-            # automaticamente los checkpoints que necesite, sin mezclar SafeOS,
-            # SetupDU u otros MSU ajenos al mantenimiento acumulativo.
-            $script:AIOUpdatePackagePathMap[$package.FullName] = $commonPath
-        }
+        Write-AIOUpdateLog -Level INFO -Message "Cadena MSU aislada por familia/arquitectura/producto: $($group.Name); $($group.Count) archivo(s). DISM determina los requisitos aplicables."
     }
-
-    Write-AIOUpdateLog -Level INFO -Message "Staging LCU MSU preparado con $($lcuMsus.Count) paquete(s) en '$root'."
 }
 
 function Get-AIOUpdateEffectivePackagePath {
@@ -5362,7 +5511,38 @@ function Initialize-AIOUpdateEmbeddedSsuStaging {
             if ($knownHashes.ContainsKey($hash)) { continue }
             $knownHashes[$hash] = $true
 
+            # El SSU extraido debe tener los mismos datos de seleccion y
+            # evidencia que un paquete del repositorio. No heredar identidad,
+            # version ni arquitectura de la LCU que lo contiene.
+            $metadata = Expand-AIOUpdatePackageMetadata -File $cab -ScratchRoot $StagingRoot
+            $roots = @($metadata.CbsRootIdentities | Where-Object { $_ })
+            $ssuRoots = @($roots | Where-Object {
+                $parts = ([string]$_.Prefix) -split '~'
+                $parts.Count -eq 4 -and $parts[0] -match $script:AIOUpdateIdentityPatterns.SSU -and
+                    $parts[1] -ieq '31bf3856ad364e35' -and -not $parts[3]
+            })
+            if ($roots.Count -gt 0 -and $ssuRoots.Count -eq 0) {
+                Write-AIOUpdateLog -Level WARN -Message "SSU extraido omitido: $($cab.Name); su identidad CBS propia no corresponde a una pila de mantenimiento."
+                continue
+            }
             $version = Get-AIOUpdateServicingVersionFromName -Text $cab.Name
+            $versionSource = 'Nombre del CAB SSU'
+            $architectures = @(Get-AIOUpdatePackageArchitectureHints -File $cab -Metadata $null)
+            if ($ssuRoots.Count -gt 0) {
+                $version = @($ssuRoots | ForEach-Object {
+                    ConvertTo-AIOUpdateServicingVersion -Version ([version]$_.Version)
+                } | Sort-Object -Descending | Select-Object -First 1)[0]
+                $versionSource = 'Identidad raiz CBS del SSU'
+                $architectures = @($ssuRoots | ForEach-Object {
+                    Convert-AIOUpdateArchitectureName -Architecture (([string]$_.Prefix -split '~')[2])
+                } | Sort-Object -Unique)
+            }
+            $architectures = @($architectures | Where-Object { $_ -in @($script:AIOUpdateArchitectureCatalog.Name) })
+            if ($architectures.Count -eq 0 -or $version -eq [version]'0.0.0.0') {
+                Write-AIOUpdateLog -Level WARN -Message "SSU extraido omitido: $($cab.Name); no se pudo acreditar su arquitectura o version. Se conserva la alternativa LCU."
+                continue
+            }
+            $identityHints = @($ssuRoots | ForEach-Object { "$($_.Prefix)~$($_.Version)" })
             $safeSource = ([System.IO.Path]::GetFileNameWithoutExtension($package.Name) -replace '[^A-Za-z0-9_.-]', '_')
             $destination = Join-Path $root ("{0}_{1}" -f $safeSource, $cab.Name)
             Copy-Item -LiteralPath $cab.FullName -Destination $destination -Force -ErrorAction Stop
@@ -5376,9 +5556,20 @@ function Initialize-AIOUpdateEmbeddedSsuStaging {
                 Category      = 'SSU'
                 Reason        = "SSU integrado extraido de $($package.Name)"
                 Version       = $version
+                VersionBuild  = [int]$version.Build
+                VersionReliable = $true
+                VersionSource = $versionSource
                 KB            = $null
+                Size          = [long]$file.Length
                 IsCheckpoint  = $false
                 Auxiliary     = $false
+                Installable   = $true
+                Metadata      = $metadata
+                Architectures = [string[]]$architectures
+                Editions      = [string[]]@()
+                ExplicitEditions = [string[]]@()
+                ProductHint   = 'Any'
+                IdentityHints = [string[]]$identityHints
                 Embedded      = $true
                 SourcePackage = $package.Name
             })
@@ -5399,7 +5590,10 @@ function Initialize-AIOUpdateEmbeddedSsuStaging {
 function Get-AIOUpdateEffectiveSsuPackages {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)] [object[]]$Inventory
+        [Parameter(Mandatory = $true)] [object[]]$Inventory,
+        [string]$Architecture,
+        [int]$Build = 0,
+        [string]$ImageName = 'WinPE'
     )
 
     $all = New-Object System.Collections.Generic.List[object]
@@ -5409,196 +5603,41 @@ function Get-AIOUpdateEffectiveSsuPackages {
     foreach ($package in @($script:AIOUpdateEmbeddedSsuPackages)) {
         [void]$all.Add($package)
     }
-    if ($all.Count -eq 0) { return @() }
-
-    # instala solamente la pila de mantenimiento mas reciente. Esto
-    # evita aplicar varias revisiones equivalentes procedentes de checkpoints.
-    $selected = @(
-        [object[]]($all.ToArray()) |
-            Sort-Object @{ Expression = { [version]$_.Version }; Descending = $true },
-                        @{ Expression = { if ($_.Embedded) { 1 } else { 0 } }; Descending = $true },
-                        Name |
-            Select-Object -First 1
+    $eligible = @(
+        foreach ($package in $all) {
+            if ($null -eq $package) { continue }
+            if ($Architecture) {
+                $test = Test-AIOUpdatePackageCompatibility -Package $package -Architecture $Architecture -Build $Build -ImageName $ImageName
+                if (-not $test.Compatible) {
+                    Write-AIOUpdateLog -Level INFO -Message "SSU omitido para ${ImageName}: $($package.Name); $($test.Reason)."
+                    continue
+                }
+            }
+            $package
+        }
     )
+    if ($eligible.Count -eq 0) { return @() }
 
-    if ($selected.Count -gt 0) {
-        $source = if ($selected[0].Embedded) { "extraido de $($selected[0].SourcePackage)" } else { 'paquete independiente' }
-        Write-AIOUpdateLog -Level INFO -Message "SSU efectivo para WinRE/WinPE: $($selected[0].Name) ($source)."
+    # Mantener la revision mas reciente de CADA base CBS/arquitectura.
+    # Una build ajena mas alta no debe ocultar el SSU correcto del repositorio.
+    # La aplicabilidad final sigue siendo decision de CBS en el montaje.
+    $selected = @(
+        $eligible | Group-Object -Property {
+            $version = ConvertTo-AIOUpdateServicingVersion -Version ([version]$_.Version)
+            $arches = @($_.Architectures | Sort-Object -Unique) -join ','
+            if ($version.Build -gt 0) { "$arches|$($version.Build)" } else { "$arches|$($_.FullName)|$($_.Name)" }
+        } | ForEach-Object {
+            $_.Group | Sort-Object @{ Expression = { [version]$_.Version }; Descending = $true },
+                                  @{ Expression = { if ($_.Embedded) { 1 } else { 0 } }; Descending = $true }, Name | Select-Object -First 1
+        } | Sort-Object Version, Name
+    )
+    foreach ($candidate in $selected) {
+        Write-AIOUpdateLog -Level INFO -Message "SSU candidato para WinRE/WinPE: $($candidate.Name); la aplicabilidad se verifica en la imagen."
     }
     return [object[]]$selected
 }
 
-function Invoke-AIOUpdateCheckpointMsuFallback {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)] [string]$MountPath,
-        [Parameter(Mandatory = $true)] [psobject]$Package,
-        [Parameter(Mandatory = $true)] [string]$PackagePath,
-        [Parameter(Mandatory = $true)] [string]$ScratchPath,
-        [Parameter(Mandatory = $true)] [string]$Context,
-        [int]$TriggerExitCode = 552
-    )
 
-    $identity = if ($Package.KB) { $Package.KB } else { [System.IO.Path]::GetFileNameWithoutExtension($Package.Name) }
-    $identity = ($identity -replace '[^A-Za-z0-9_.-]', '_')
-    $expandRoot = Join-Path $script:AIOUpdateSessionRoot ("Expanded_Checkpoint_$identity")
-    $outerRoot = Join-Path $expandRoot 'Outer'
-    Initialize-AIOUpdateDirectory -Path $expandRoot -Empty
-    Initialize-AIOUpdateDirectory -Path $outerRoot
-
-    $triggerHex = '0x{0:X8}' -f (Convert-AIOUpdateExitCodeToUInt32 -ExitCode $TriggerExitCode)
-    Write-Host '      Reintentando mediante contenido interno del MSU...' -ForegroundColor Yellow
-    Write-AIOUpdateLog -Level WARN -Message "${Context}: reintento interno por error $triggerHex."
-
-    $packageIsWim = Test-AIOUpdateWimContainerSignature -Path $PackagePath
-    if (-not $packageIsWim) {
-        if (-not (Test-Path -LiteralPath $script:AIOUpdateExpandPath -PathType Leaf)) {
-            throw "No se encontro expand.exe para procesar el checkpoint clasico '$($Package.Name)'."
-        }
-        & $script:AIOUpdateExpandPath '-F:*' $PackagePath $outerRoot *> $null
-        if ($LASTEXITCODE -ne 0) {
-            throw "No fue posible expandir el checkpoint MSU clasico '$($Package.Name)'. Codigo expand.exe: $LASTEXITCODE."
-        }
-    }
-    else {
-        # Los MSU modernos pueden ser contenedores WIM aunque conserven .msu.
-        [void](
-            Expand-AIOUpdateWimContainerEntries `
-                -WimPath $PackagePath `
-                -DestinationRoot $outerRoot `
-                -Pattern $script:AIOUpdateModernMsuPayloadPatterns `
-                -ScratchRoot $expandRoot `
-                -AllowFullApplyFallback
-        )
-    }
-
-    $cabs = @(Get-ChildItem -LiteralPath $outerRoot -Recurse -Filter '*.cab' -File -ErrorAction SilentlyContinue)
-    $innerWims = @(Get-ChildItem -LiteralPath $outerRoot -Recurse -Filter '*.wim' -File -ErrorAction SilentlyContinue)
-
-    if ($cabs.Count -eq 0 -and $innerWims.Count -eq 0) {
-        throw "No fue posible obtener contenido instalable del checkpoint MSU '$($Package.Name)' (CAB ni WIM internos)."
-    }
-
-    $ssuCabs = @($cabs | Where-Object { $_.Name -match '(?i)^SSU-|Servicing(?:-|_)?Stack' } | Sort-Object Name)
-    foreach ($ssuCab in $ssuCabs) {
-        [void](Invoke-AIOUpdateDism -Arguments @(
-            "/Image:$MountPath",
-            '/Add-Package',
-            "/PackagePath:$($ssuCab.FullName)",
-            "/ScratchDir:$ScratchPath"
-        ) -Context "$Context - SSU interno $($ssuCab.Name)" -AllowNotApplicable)
-    }
-
-    $lastResult = $null
-
-    # Camino CAB clasico.
-    $mainCabs = @()
-    if ($Package.KB) {
-        $mainCabs = @($cabs | Where-Object {
-            $_.Name -match [regex]::Escape($Package.KB) -and
-            $_.Name -notmatch '(?i)^SSU-|Servicing(?:-|_)?Stack|WSUSSCAN|DesktopDeployment|AggregatedMetadata'
-        })
-    }
-    if ($mainCabs.Count -eq 0) {
-        $mainCabs = @(
-            $cabs |
-                Where-Object { $_.Name -notmatch '(?i)^SSU-|Servicing(?:-|_)?Stack|WSUSSCAN|DesktopDeployment|AggregatedMetadata' } |
-                Sort-Object Length -Descending |
-                Select-Object -First 1
-        )
-    }
-
-    $counter = 0
-    foreach ($mainCab in $mainCabs) {
-        $counter++
-        $payloadRoot = Join-Path $expandRoot ("Payload_CAB_$counter")
-        Initialize-AIOUpdateDirectory -Path $payloadRoot -Empty
-        & $script:AIOUpdateExpandPath '-F:*' $mainCab.FullName $payloadRoot *> $null
-
-        $updateMum = Get-ChildItem -LiteralPath $payloadRoot -Recurse -Filter 'update.mum' -File -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($LASTEXITCODE -eq 0 -and $updateMum) {
-            $lastResult = Invoke-AIOUpdateDism -Arguments @(
-                "/Image:$MountPath",
-                '/Add-Package',
-                "/PackagePath:$($updateMum.FullName)",
-                "/ScratchDir:$ScratchPath"
-            ) -Context "$Context - update.mum CAB expandido" -AllowNotApplicable
-        }
-        else {
-            $lastResult = Invoke-AIOUpdateDism -Arguments @(
-                "/Image:$MountPath",
-                '/Add-Package',
-                "/PackagePath:$($mainCab.FullName)",
-                "/ScratchDir:$ScratchPath"
-            ) -Context "$Context - CAB interno $($mainCab.Name)" -AllowNotApplicable
-        }
-    }
-
-    # Camino WIM moderno: extraer el contenido del Windows<familia>.0-KB*.wim y
-    # aplicar su update.mum. Se hace solo en el fallback, por lo que el costo
-    # de I/O no afecta el camino normal.
-    if ($innerWims.Count -gt 0) {
-        $mainWims = @(
-            $innerWims |
-                Where-Object { $_.Name -notmatch '(?i)^SSU-|Servicing(?:-|_)?Stack|AggregatedMetadata' } |
-                Sort-Object @{
-                    Expression = {
-                        if ($Package.KB -and $_.Name -match [regex]::Escape($Package.KB)) { 0 }
-                        elseif ($_.Name -match '(?i)Windows\d+(?:\.\d+)?[^\r\n]*KB|RCU-|Cumulative') { 1 }
-                        else { 2 }
-                    }
-                }, @{ Expression = { $_.Length }; Descending = $true } |
-                Select-Object -First 1
-        )
-
-        foreach ($mainWim in $mainWims) {
-            $payloadRoot = Join-Path $expandRoot 'Payload_WIM'
-            Initialize-AIOUpdateDirectory -Path $payloadRoot -Empty
-
-            $applyResult = Invoke-AIOUpdateDism -Arguments @(
-                '/Apply-Image',
-                "/ImageFile:$($mainWim.FullName)",
-                '/Index:1',
-                "/ApplyDir:$payloadRoot",
-                '/NoAcl:all'
-            ) -Context "$Context - expandiendo WIM interno $($mainWim.Name)" -SuccessCodes @(0) -NoThrow -Quiet
-
-            if (-not $applyResult.Success) {
-                Initialize-AIOUpdateDirectory -Path $payloadRoot -Empty
-                $applyResult = Invoke-AIOUpdateDism -Arguments @(
-                    '/Apply-Image',
-                    "/ImageFile:$($mainWim.FullName)",
-                    '/Index:1',
-                    "/ApplyDir:$payloadRoot"
-                ) -Context "$Context - expandiendo WIM interno sin /NoAcl $($mainWim.Name)" -SuccessCodes @(0) -NoThrow -Quiet
-            }
-
-            if (-not $applyResult.Success) {
-                throw "No se pudo aplicar el WIM interno '$($mainWim.Name)' del checkpoint '$($Package.Name)'."
-            }
-
-            $updateMum = Get-ChildItem -LiteralPath $payloadRoot -Recurse -Filter 'update.mum' -File -ErrorAction SilentlyContinue |
-                Select-Object -First 1
-            if (-not $updateMum) {
-                throw "El WIM interno '$($mainWim.Name)' no expuso update.mum."
-            }
-
-            $lastResult = Invoke-AIOUpdateDism -Arguments @(
-                "/Image:$MountPath",
-                '/Add-Package',
-                "/PackagePath:$($updateMum.FullName)",
-                "/ScratchDir:$ScratchPath"
-            ) -Context "$Context - update.mum de WIM interno" -AllowNotApplicable
-        }
-    }
-
-    if ($null -eq $lastResult) {
-        throw "No se identifico un payload acumulativo utilizable dentro de '$($Package.Name)'."
-    }
-
-    return $lastResult
-}
 
 function Normalize-AIOUpdateCbsIdentityName {
     [CmdletBinding()]
@@ -5862,6 +5901,17 @@ function Get-AIOUpdatePackageDisplayIdentity {
     )
 
     $metadata = $Package.Metadata
+    # Preferir la identidad propia ya analizada: no depende de que el texto
+    # completo de update.mum siga disponible o haya sido truncado.
+    $category = [string]$Package.Category
+    if ($metadata -and $metadata.PSObject.Properties['CbsRootIdentities'] -and $script:AIOUpdateIdentityPatterns.Contains($category)) {
+        $root = @($metadata.CbsRootIdentities | Where-Object {
+            $parts = ([string]$_.Prefix) -split '~'
+            $parts.Count -eq 4 -and $parts[0] -match $script:AIOUpdateIdentityPatterns[$category] -and
+                $parts[1] -ieq '31bf3856ad364e35' -and -not $parts[3]
+        } | Sort-Object @{ Expression = { [version]$_.Version }; Descending = $true }, Prefix | Select-Object -First 1)
+        if ($root.Count -gt 0) { return ("$($root[0].Prefix)~$($root[0].Version)") }
+    }
     $updateMumText = if ($metadata) { [string]$metadata.UpdateMumText } else { '' }
     if (-not [string]::IsNullOrWhiteSpace($updateMumText)) {
         $category = [string]$Package.Category
@@ -5935,43 +5985,25 @@ function Add-AIOUpdatePackageList {
         Write-Host ("`n   [{0}/{1}] {2}" -f $position, $Packages.Count, $package.Name) -ForegroundColor Yellow
 
         $alreadyPresent = Test-AIOUpdatePackageInstalled -Package $package -InstalledInventory $InstalledInventory
-        $reapplyAttempt = ($alreadyPresent -and -not ($package.IsCheckpoint -and $package.Extension -eq '.msu'))
+        $reapplyAttempt = $alreadyPresent
 
         if ($reapplyAttempt) {
             Write-Host '      [REAPLICAR] El paquete ya esta presente; se enviara nuevamente a DISM sin desinstalarlo.' -ForegroundColor Yellow
-            Write-AIOUpdateLog -Level WARN -Message "$Context - $($package.Name): reaplicacion solicitada para un paquete Installed/InstallPending/Superseded."
+            Write-AIOUpdateLog -Level WARN -Message "$Context - $($package.Name): reaplicacion automatica para un paquete Installed/InstallPending/Superseded."
         }
 
         $effectivePath = Get-AIOUpdateEffectivePackagePath -Package $package
         $effectiveContext = "$Context - $($package.Name)"
         if ($effectivePath -ne $package.FullName) {
-            $mode = if ($package.IsCheckpoint) { 'checkpoint MSU aislado' } else { 'repositorio LCU MSU aislado' }
+            $mode = 'objetivo de cadena LCU MSU'
             Write-Host "      Staging: $mode" -ForegroundColor DarkGray
             $effectiveContext = "$effectiveContext [$mode]"
         }
 
         if ($reapplyAttempt) {
-            $effectiveContext = "$effectiveContext [reaplicacion solicitada]"
+            $effectiveContext = "$effectiveContext [reaplicacion automatica]"
         }
 
-        $checkpointMsu = ($package.IsCheckpoint -and $package.Extension -eq '.msu')
-        # Un checkpoint solo puede omitirse con evidencia CBS de ESTE montaje.
-        # No se deduce su presencia por la build del host o de install.wim.
-        if ($checkpointMsu) {
-            $checkpointInventory = @(Get-AIOUpdateMountedPackageInventory -MountPath $MountPath -Strict)
-            Update-AIOUpdateServicingBuildRelationsFromInventory -Inventory $checkpointInventory
-            $checkpointEvidence = Get-AIOUpdatePackageCbsEvidence -Package $package -Inventory $checkpointInventory
-            if ($checkpointEvidence.Success) {
-                $result = [pscustomobject]@{
-                    Success = $true; State = 'CheckpointSatisfied'; ExitCode = 0; UnsignedCode = [uint32]0
-                    Context = $effectiveContext; CbsEvidence = $checkpointEvidence
-                }
-                Write-Host "      [YA SATISFECHO] $($checkpointEvidence.Reason)" -ForegroundColor DarkGray
-                Update-AIOUpdateDependencyPlanExecution -Context $DependencyContext -Package $package -Result $result
-                [void]$results.Add([pscustomobject]@{ Package = $package; Result = $result })
-                continue
-            }
-        }
         $displayIdentity = if ($package.Extension -eq '.msu') { Get-AIOUpdatePackageDisplayIdentity -Package $package } else { $null }
         try {
             $result = Invoke-AIOUpdateDism -Arguments @(
@@ -5979,7 +6011,7 @@ function Add-AIOUpdatePackageList {
                 '/Add-Package',
                 "/PackagePath:$effectivePath",
                 "/ScratchDir:$ScratchPath"
-            ) -Context $effectiveContext -AllowNotApplicable:($AllowNotApplicable -or $checkpointMsu -or $reapplyAttempt) -NoThrow:$checkpointMsu -DisplayIdentity $displayIdentity
+            ) -Context $effectiveContext -AllowNotApplicable:($AllowNotApplicable -or $reapplyAttempt) -NoThrow -DisplayIdentity $displayIdentity
         }
         catch {
             $failedResult = [pscustomobject]@{
@@ -5993,20 +6025,10 @@ function Add-AIOUpdatePackageList {
             throw
         }
 
-        if (-not $result.Success -and $checkpointMsu -and $result.ExitCode -in @(552, 87)) {
-            try {
-                $result = Invoke-AIOUpdateCheckpointMsuFallback -MountPath $MountPath -Package $package -PackagePath $effectivePath -ScratchPath $ScratchPath -Context $effectiveContext -TriggerExitCode $result.ExitCode
-            }
-            catch {
-                # Conservar el fallo real y detener el commit; un error de
-                # extraccion/permisos no demuestra que el requisito sea redundante.
-                Update-AIOUpdateDependencyPlanExecution -Context $DependencyContext -Package $package -Result $result
-                throw "$effectiveContext fallo con codigo $($result.ExitCode); tambien fallo el contenido interno: $($_.Exception.Message)"
-            }
-        }
         if (-not $result.Success) {
             Update-AIOUpdateDependencyPlanExecution -Context $DependencyContext -Package $package -Result $result
             $hexCode = '0x{0:X8}' -f $result.UnsignedCode
+            if ($result.PSObject.Properties['ErrorMessage'] -and $result.ErrorMessage) { throw $result.ErrorMessage }
             $description = Get-AIOUpdateExitCodeText -ExitCode $result.ExitCode
             throw "$effectiveContext fallo. Codigo DISM: $($result.ExitCode) ($hexCode). $description"
         }
@@ -6030,7 +6052,7 @@ function Add-AIOUpdatePackageList {
         if ($reapplyAttempt) {
             $dismState = [string]$result.State
             $result | Add-Member -NotePropertyName DismState -NotePropertyValue $dismState -Force
-            $result | Add-Member -NotePropertyName ReapplyRequested -NotePropertyValue $true -Force
+            $result | Add-Member -NotePropertyName ReapplyAutomatic -NotePropertyValue $true -Force
             $result.State = if ($dismState -eq 'NotApplicable') { 'ReapplyNotApplicable' } else { 'Reapplied' }
 
             if ($result.State -eq 'ReapplyNotApplicable') {
@@ -6048,6 +6070,37 @@ function Add-AIOUpdatePackageList {
     return [object[]]($results.ToArray())
 }
 
+function Get-AIOUpdatePendingServicingState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$MountPath)
+    try {
+        if (Test-Path -LiteralPath (Join-Path $MountPath 'Windows\WinSxS\pending.xml') -PathType Leaf -ErrorAction Stop) {
+            return [pscustomobject]@{ Known = $true; Pending = $true; Reason = 'pending.xml presente; la limpieza requiere completar las operaciones pendientes.' }
+        }
+        $packages = @(Get-AIOUpdateMountedPackageInventory -MountPath $MountPath -Strict)
+        $pending = @($packages | Where-Object { ([string]$_.PackageState -replace '\s', '') -in @('InstallPending', 'UninstallPending', 'PartiallyInstalled') })
+        return [pscustomobject]@{ Known = $true; Pending = ($pending.Count -gt 0); Reason = $(if ($pending.Count) { 'CBS tiene paquetes pendientes: ' + (($pending | ForEach-Object { $_.PackageName }) -join ', ') } else { 'Sin operaciones CBS pendientes.' }) }
+    }
+    catch {
+        return [pscustomobject]@{ Known = $false; Pending = $false; Reason = "No se pudo comprobar el estado CBS: $($_.Exception.Message)" }
+    }
+}
+
+function Add-AIOUpdateMaintenanceRecord {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$Context,
+        [Parameter(Mandatory = $true)] [string]$State,
+        [Parameter(Mandatory = $true)] [string]$Reason,
+        [bool]$Performed = $false
+    )
+    if ($null -eq $script:AIOUpdateMaintenanceResults) { $script:AIOUpdateMaintenanceResults = New-Object System.Collections.ArrayList }
+    [void]$script:AIOUpdateMaintenanceResults.Add([pscustomobject]@{
+        Context = $Context; State = $State; Performed = $Performed; Reason = $Reason
+    })
+    Write-AIOUpdateLog -Level INFO -Message "${Context}: $State; $Reason"
+}
+
 function Invoke-AIOUpdateCleanup {
     [CmdletBinding()]
     param(
@@ -6058,17 +6111,24 @@ function Invoke-AIOUpdateCleanup {
         [switch]$WarningOnly
     )
 
-    $arguments = @(
-        "/Image:$MountPath",
-        '/Cleanup-Image',
-        '/StartComponentCleanup',
-        "/ScratchDir:$ScratchPath"
-    )
+    $state = Get-AIOUpdatePendingServicingState -MountPath $MountPath
+    if (-not $state.Known -or $state.Pending) {
+        $status = if ($state.Pending) { 'SkippedPendingActions' } else { 'SkippedUnknownServicingState' }
+        Write-Host "   [APLAZADO] ${Context}: $($state.Reason)" -ForegroundColor Yellow
+        Add-AIOUpdateMaintenanceRecord -Context $Context -State $status -Reason $state.Reason
+        return [pscustomobject]@{ Success = $true; State = $status; Performed = $false; ExitCode = $null; Context = $Context; Reason = $state.Reason }
+    }
+    $arguments = @("/Image:$MountPath", '/Cleanup-Image', '/StartComponentCleanup', "/ScratchDir:$ScratchPath")
     if ($ResetBase) { $arguments += '/ResetBase' }
-
-    $result = Invoke-AIOUpdateDism -Arguments $arguments -Context $Context -NoThrow:$WarningOnly
-    if (-not $result.Success -and $WarningOnly) {
-        Write-Host "   [AVISO] La limpieza fallo, pero la integracion continuara." -ForegroundColor Yellow
+    $result = Invoke-AIOUpdateDism -Arguments $arguments -Context $Context -NoThrow
+    Add-AIOUpdateMaintenanceRecord -Context $Context -State $result.State -Performed ([bool]$result.Success) -Reason "DISM: $($result.ExitCode); ResetBase=$([bool]$ResetBase)."
+    if (-not $result.Success) {
+        $code = Convert-AIOUpdateExitCodeToUInt32 -ExitCode $result.ExitCode
+        if ($code -eq [uint32]2148468742) { # 0x800F0806 CBS_E_PENDING
+            Add-AIOUpdateMaintenanceRecord -Context $Context -State 'SkippedPendingActions' -Reason 'DISM confirmo operaciones pendientes; limpieza aplazada.'
+            return [pscustomobject]@{ Success = $true; State = 'SkippedPendingActions'; Performed = $false; ExitCode = $result.ExitCode; Context = $Context }
+        }
+        throw "$Context fallo con codigo $($result.ExitCode). No se guardara una imagen tras un fallo de limpieza no previsto."
     }
     return $result
 }
@@ -6726,61 +6786,74 @@ function Copy-AIOUpdateFileWithBackup {
     }
 }
 
+function Initialize-AIOUpdateWinRECombinedStack {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$MountPath,
+        [Parameter(Mandatory = $true)] [object[]]$Inventory,
+        [Parameter(Mandatory = $true)] [string]$Architecture,
+        [Parameter(Mandatory = $true)] [int]$Build,
+        [Parameter(Mandatory = $true)] [string]$ScratchPath,
+        [AllowEmptyCollection()] [object[]]$Before
+    )
+    $family = Get-AIOUpdateServicingBuildFamily -Build $Build
+    $targets = @(Get-AIOUpdateCompatiblePackages -Inventory $Inventory -Category @('LCU') -Architecture $Architecture -Build $Build -ImageName 'WinRE' | Where-Object {
+        $_.VersionReliable -and (Get-AIOUpdateServicingBuildFamily -Build ([version]$_.Version).Build) -eq $family
+    } | Sort-Object Version -Descending | Select-Object -First 1)
+    if (-not $targets.Count) { throw 'WinRE: falta un SSU utilizable o un MSU combinado de su familia de mantenimiento.' }
+    $package = $targets[0]
+    $path = Get-AIOUpdateEffectivePackagePath -Package $package
+    $result = Invoke-AIOUpdateDism -Arguments @("/Image:$MountPath", '/Add-Package', "/PackagePath:$path", "/ScratchDir:$ScratchPath") -Context "WinRE: preparar SOLO la pila desde $($package.Name)" -NoThrow -DisplayIdentity (Get-AIOUpdatePackageDisplayIdentity -Package $package)
+    $after = @(Get-AIOUpdateMountedPackageInventory -MountPath $MountPath -Strict)
+    $ssus = @($after | Where-Object {
+        $_.PackageState -eq 'Installed' -and $_.PackageName -match '^Package_for_ServicingStack[^~]*~31bf3856ad364e35~[^~]+~~'
+    })
+    $verified = $false
+    foreach ($root in @($package.Metadata.CbsRootIdentities | Where-Object { $_.Prefix -match '^Package_for_ServicingStack[^~]*~31bf3856ad364e35~[^~]+~$' })) {
+        $candidate = [pscustomobject]@{
+            Name = $package.Name; Category = 'SSU'; Version = [version]$root.Version; VersionReliable = $true
+            Architectures = @($Architecture); IdentityHints = @(); KB = $null
+            Metadata = [pscustomobject]@{ CbsRootIdentities = @($root); CbsOwnIdentities = @() }
+        }
+        if ((Get-AIOUpdatePackageCbsEvidence -Package $candidate -Inventory $ssus).Success) { $verified = $true }
+    }
+    # If no SSU root was available in metadata, require an observed native SSU change.
+    foreach ($ssu in $ssus) {
+        $parts = $ssu.PackageName -split '~'
+        $v = ConvertTo-AIOUpdateServicingVersion -Version ([version]$parts[4])
+        if ((Convert-AIOUpdateArchitectureName -Architecture $parts[2]) -eq $Architecture -and
+            (Get-AIOUpdateServicingBuildFamily -Build $v.Build) -eq $family -and
+            $ssu.PackageName -notin @($Before | Where-Object PackageState -eq 'Installed' | ForEach-Object PackageName)) { $verified = $true }
+    }
+    $code = Convert-AIOUpdateExitCodeToUInt32 -ExitCode $result.ExitCode
+    # Microsoft's combined-package exception is limited to 0x8007007e and
+    # must still leave demonstrable SSU evidence; never exempt other errors.
+    if (-not $result.Success -and -not ($code -eq [uint32]2147942526 -and $verified)) {
+        throw "WinRE: fallo al preparar la pila con el MSU combinado. Codigo $($result.ExitCode)."
+    }
+    Add-AIOUpdateMaintenanceRecord -Context 'WinRE SSU combinado' -State $(if ($verified) { 'ServicingStackVerified' } else { 'StackVersionUnconfirmed' }) -Performed $verified -Reason "MSU=$($package.Name); DISM=$($result.ExitCode); la actualizacion de recuperacion se acreditara exclusivamente con SafeOS Installed."
+    [pscustomobject]@{ Inventory = [object[]]$after; Verified = $verified }
+}
+
 function Get-AIOUpdateWinREPolicy {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)] [int]$Build,
-        [Parameter(Mandatory = $true)] [object[]]$Inventory
+        [Parameter(Mandatory = $true)] [object[]]$Inventory,
+        [string]$Architecture
     )
-
-    $safeOsPackages = @(Get-AIOUpdatePackages -Inventory $Inventory -Category @('SafeOS'))
-    $effectiveSsu = @(Get-AIOUpdateEffectiveSsuPackages -Inventory $Inventory)
-    $lcuPackages = @(Get-AIOUpdatePackages -Inventory $Inventory -Category @('LCU'))
-
-    $hasSafeOS = $safeOsPackages.Count -gt 0
-    $hasEffectiveSsu = $effectiveSsu.Count -gt 0
-    $hasLcu = $lcuPackages.Count -gt 0
-
-    # Politica basada en contenido, no en una build fija:
-    # - Si existe SSU efectivo (standalone o extraido de la LCU), se usa ese SSU
-    #   para preparar WinRE y no se inyecta la LCU completa solo para obtenerlo.
-    # - Si no se pudo obtener un SSU efectivo pero existe una LCU, la LCU se usa
-    #   como vehiculo de servicing stack, siguiendo el flujo de Microsoft.
-    # - SafeOS se aplica siempre por separado cuando esta disponible.
-    $includeLCU = (-not $hasEffectiveSsu -and $hasLcu)
-
-    if ($hasEffectiveSsu) {
-        $reason = if ($hasSafeOS) {
-            "Automatico por contenido: SSU efectivo y SafeOS detectados. La disponibilidad no implica aplicacion automatica de ambos; el plan CBS posterior mostrara exactamente los paquetes compatibles que se integraran en WinRE."
-        }
-        else {
-            "Automatico por contenido: SSU efectivo detectado; no se agrega la LCU completa solo para obtener la pila de mantenimiento. El plan CBS posterior mostrara si el SSU es compatible y se integra en WinRE. No se proporciono SafeOS."
-        }
-    }
-    elseif ($hasLcu) {
-        $reason = if ($hasSafeOS) {
-            "Automatico por contenido: no hay SSU extraible/standalone; se usa la LCU como vehiculo del servicing stack y despues SafeOS."
-        }
-        else {
-            "Automatico por contenido: no hay SSU extraible/standalone; se usa la LCU como vehiculo del servicing stack. No se proporciono SafeOS."
-        }
-    }
-    else {
-        $reason = if ($hasSafeOS) {
-            "Automatico por contenido: no hay LCU/SSU; se aplicara SafeOS disponible."
-        }
-        else {
-            "Automatico por contenido: no hay LCU, SSU ni SafeOS aplicables a WinRE."
-        }
-    }
-
-    return [pscustomobject]@{
-        IncludeLCU      = $includeLCU
-        HasSafeOS       = $hasSafeOS
-        HasEffectiveSsu = $hasEffectiveSsu
-        BuildObserved   = $Build
-        Mode            = 'AutoByContent'
-        Reason          = $reason
+    $safeOS = @(Get-AIOUpdatePackages -Inventory $Inventory -Category @('SafeOS') | Where-Object {
+        -not $Architecture -or (Test-AIOUpdatePackageCompatibility -Package $_ -Architecture $Architecture -Build $Build -ImageName 'WinRE').Compatible
+    })
+    $ssu = @(Get-AIOUpdateEffectiveSsuPackages -Inventory $Inventory -Architecture $Architecture -Build $Build -ImageName 'WinRE')
+    $lcu = @(Get-AIOUpdatePackages -Inventory $Inventory -Category @('LCU') | Where-Object {
+        -not $Architecture -or (Test-AIOUpdatePackageCompatibility -Package $_ -Architecture $Architecture -Build $Build -ImageName 'WinRE').Compatible
+    })
+    [pscustomobject]@{
+        IncludeLCU = $false; HasSafeOS = ($safeOS.Count -gt 0); HasEffectiveSsu = ($ssu.Count -gt 0); HasLCU = ($lcu.Count -gt 0)
+        PrepareStackFromCombined = ($safeOS.Count -gt 0 -and $ssu.Count -eq 0 -and $lcu.Count -gt 0)
+        BuildObserved = $Build; Architecture = $Architecture; Mode = 'ServicingStackThenSafeOS'
+        Reason = $(if ($safeOS.Count) { 'Preparar SSU y aplicar SafeOS; la LCU combinada solo puede aportar la pila, no sustituye SafeOS.' } else { 'Sin SafeOS compatible: solo se puede mantener la pila; WinRE no se declarara actualizado.' })
     }
 }
 
@@ -6794,9 +6867,15 @@ function Get-AIOUpdateWinREFromInstallWim {
         [Parameter(Mandatory = $true)] [string]$Destination
     )
 
+    Write-Host "   Extrayendo winre.wim del indice $Index sin montar install.wim..." -ForegroundColor DarkCyan
+    if (Invoke-AIOUpdateWimExtractPath -WimPath $InstallWim -Index $Index -ImagePath 'Windows\System32\Recovery\winre.wim' -DestinationPath $Destination -TemporaryPath $ScratchPath) {
+        if (Test-AIOUpdateWimContainerSignature -Path $Destination) { return $Destination }
+        Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+    }
+    Write-AIOUpdateLog -Level WARN -Message 'Extraccion directa de WinRE no disponible; se utiliza el montaje de respaldo.'
     $mounted = $false
     try {
-        Mount-AIOUpdateImage -ImagePath $InstallWim -Index $Index -MountPath $InstallMount -ScratchPath $ScratchPath -Context "Extrayendo winre.wim del indice $Index"
+        Mount-AIOUpdateImage -ImagePath $InstallWim -Index $Index -MountPath $InstallMount -ScratchPath $ScratchPath -Context "Extrayendo winre.wim del indice $Index" -ReadOnly
         $mounted = $true
         $source = Join-Path $InstallMount 'Windows\System32\Recovery\winre.wim'
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
@@ -6815,6 +6894,20 @@ function Get-AIOUpdateWinREFromInstallWim {
 }
 
 
+function Get-AIOUpdateWinRERecoveryEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [object[]]$Packages,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [object[]]$InstalledInventory
+    )
+    $evidence = New-Object System.Collections.Generic.List[object]
+    foreach ($package in @($Packages | Where-Object { $_.Category -eq 'SafeOS' })) {
+        $match = Get-AIOUpdatePackageCbsEvidence -Package $package -Inventory $InstalledInventory
+        if ($match.Success -and $match.PackageState -eq 'Installed') { [void]$evidence.Add([pscustomobject]@{ Package = $package.Name; Category = $package.Category; Evidence = $match }) }
+    }
+    return [object[]]$evidence.ToArray()
+}
+
 function Update-AIOUpdateWinRE {
     [CmdletBinding()]
     param(
@@ -6824,6 +6917,7 @@ function Update-AIOUpdateWinRE {
         [Parameter(Mandatory = $true)] [string]$ScratchPath,
         [Parameter(Mandatory = $true)] [object[]]$Inventory,
         [Parameter(Mandatory = $true)] [psobject]$Policy,
+        [bool]$OptimizeWim = $true,
         [bool]$VerifyPrePostCommit = $true,
         [Parameter(Mandatory = $true)] [System.Collections.IList]$VerificationReports
     )
@@ -6838,29 +6932,50 @@ function Update-AIOUpdateWinRE {
         Mount-AIOUpdateImage -ImagePath $DestinationWinRE -Index 1 -MountPath $WinREMount -ScratchPath $ScratchPath -Context 'Montando winre.wim para mantenimiento'
         $mounted = $true
         $baseline = @(Get-AIOUpdateMountedPackageInventory -MountPath $WinREMount -Strict)
+        Update-AIOUpdateServicingBuildRelationsFromInventory -Inventory $baseline
+        $Policy = Get-AIOUpdateWinREPolicy -Build $build -Inventory $Inventory -Architecture $architecture
         $operations = New-Object System.Collections.Generic.List[object]
 
-        $winrePackages = New-Object System.Collections.Generic.List[object]
-        foreach ($package in @(
-            Get-AIOUpdateEffectiveSsuPackages -Inventory $Inventory |
-                Where-Object { (Test-AIOUpdatePackageCompatibility -Package $_ -Architecture $architecture -Build $build -ImageName 'WinRE').Compatible }
-        )) { [void]$winrePackages.Add($package) }
-
-        if ($Policy.IncludeLCU) {
-            foreach ($package in @(Get-AIOUpdateCompatiblePackages -Inventory $Inventory -Category @('LCU') -Architecture $architecture -Build $build -ImageName 'WinRE')) {
-                [void]$winrePackages.Add($package)
+        # Preparar primero CBS y verificar si algun SSU candidato realmente
+        # quedo satisfecho. La existencia de un archivo SSU no es evidencia.
+        $ssuCandidates = @(Get-AIOUpdateEffectiveSsuPackages -Inventory $Inventory -Architecture $architecture -Build $build -ImageName 'WinRE')
+        $currentInventory = $baseline
+        $orderedSsu = @(Resolve-AIOUpdateCbsPackageOrder -Packages $ssuCandidates -Context 'WinRE SSU')
+        foreach ($package in $orderedSsu) {
+            foreach ($entry in @(Add-AIOUpdatePackageList -MountPath $WinREMount -Packages @($package) -ScratchPath $ScratchPath -Context 'WinRE: preparar pila de mantenimiento' -AllowNotApplicable -InstalledInventory $currentInventory -DependencyContext 'WinRE SSU')) {
+                [void]$operations.Add($entry)
             }
+            $currentInventory = @(Get-AIOUpdateMountedPackageInventory -MountPath $WinREMount -Strict)
         }
+        $verifiedSsu = @($ssuCandidates | Where-Object { (Get-AIOUpdatePackageCbsEvidence -Package $_ -Inventory $currentInventory).Success })
+        $Policy | Add-Member -NotePropertyName SsuVerified -NotePropertyValue ($verifiedSsu.Count -gt 0) -Force
+        if ($Policy.HasSafeOS -and $Policy.HasLCU -and $verifiedSsu.Count -eq 0) {
+            $stack = Initialize-AIOUpdateWinRECombinedStack -MountPath $WinREMount -Inventory $Inventory -Architecture $architecture -Build $build -ScratchPath $ScratchPath -Before $currentInventory
+            $currentInventory = @($stack.Inventory)
+            $Policy.SsuVerified = [bool]$stack.Verified
+        }
+        Write-AIOUpdateLog -Level INFO -Message "WinRE $architecture build ${build}: SSU acreditado=$($Policy.SsuVerified); SafeOS=$($Policy.HasSafeOS). $($Policy.Reason)"
+        $winrePackages = New-Object System.Collections.Generic.List[object]
         foreach ($package in @(Get-AIOUpdateCompatiblePackages -Inventory $Inventory -Category @('SafeOS') -Architecture $architecture -Build $build -ImageName 'WinRE')) {
             [void]$winrePackages.Add($package)
         }
 
         $orderedWinRE = Resolve-AIOUpdateCbsPackageOrder -Packages ([object[]]($winrePackages.ToArray())) -Context 'WinRE'
         foreach ($package in $orderedWinRE) {
-            foreach ($entry in @(Add-AIOUpdatePackageList -MountPath $WinREMount -Packages @($package) -ScratchPath $ScratchPath -Context "WinRE: integrando $($package.Category)" -AllowNotApplicable -InstalledInventory $baseline -DependencyContext 'WinRE')) {
+            foreach ($entry in @(Add-AIOUpdatePackageList -MountPath $WinREMount -Packages @($package) -ScratchPath $ScratchPath -Context "WinRE: integrando $($package.Category)" -AllowNotApplicable -InstalledInventory $currentInventory -DependencyContext 'WinRE')) {
                 [void]$operations.Add($entry)
             }
+            $currentInventory = @(Get-AIOUpdateMountedPackageInventory -MountPath $WinREMount -Strict)
         }
+        $recoveryCandidates = @($winrePackages.ToArray())
+        $recoveryEvidence = @(Get-AIOUpdateWinRERecoveryEvidence -Packages $recoveryCandidates -InstalledInventory $currentInventory)
+        if ($recoveryCandidates.Count -gt 0 -and $recoveryEvidence.Count -eq 0) {
+            throw 'WinRE: SafeOS no quedo Installed ni fue sustituido por un SafeOS instalado compatible; un SSU o una LCU no prueban la actualizacion de recuperacion.'
+        }
+        $recoveryUpdated = $recoveryEvidence.Count -gt 0
+        $recoveryState = if ($recoveryUpdated) { 'RecoveryVerified' } elseif ($Policy.SsuVerified) { 'ServicingStackOnly' } else { 'NoApplicableUpdates' }
+        $recoveryReason = if ($recoveryUpdated) { 'Paquetes de recuperacion acreditados: ' + (($recoveryEvidence | ForEach-Object { $_.Package }) -join ', ') } elseif ($Policy.SsuVerified) { 'Solo se acredito la pila de mantenimiento; no hay actualizacion de recuperacion.' } else { 'No se acredito ninguna actualizacion aplicable a WinRE.' }
+        Add-AIOUpdateMaintenanceRecord -Context 'WinRE' -State $recoveryState -Performed $recoveryUpdated -Reason $recoveryReason
 
         [void](Invoke-AIOUpdateCleanup -MountPath $WinREMount -ScratchPath $ScratchPath -Context 'WinRE: limpieza y ResetBase' -ResetBase -WarningOnly)
         if ($VerifyPrePostCommit) {
@@ -6877,24 +6992,30 @@ function Update-AIOUpdateWinRE {
         [void](Dismount-AIOUpdateImage -MountPath $WinREMount -Mode Commit -Context 'Guardando winre.wim actualizado')
         $mounted = $false
 
-        $optimized = [System.IO.Path]::ChangeExtension($DestinationWinRE, '.optimized.wim')
-        Remove-Item -LiteralPath $optimized -Force -ErrorAction SilentlyContinue
-        [void](Invoke-AIOUpdateDism -Arguments @(
-            '/Export-Image',
-            "/SourceImageFile:$DestinationWinRE",
-            '/SourceIndex:1',
-            "/DestinationImageFile:$optimized",
-            '/Compress:max',
-            '/CheckIntegrity',
-            '/Bootable',
-            "/ScratchDir:$ScratchPath"
-        ) -Context 'Optimizando winre.wim actualizado')
-        Move-Item -LiteralPath $optimized -Destination $DestinationWinRE -Force
+        if ($OptimizeWim) {
+            $optimized = [System.IO.Path]::ChangeExtension($DestinationWinRE, '.optimized.wim')
+            Remove-Item -LiteralPath $optimized -Force -ErrorAction SilentlyContinue
+            [void](Invoke-AIOUpdateDism -Arguments @(
+                '/Export-Image',
+                "/SourceImageFile:$DestinationWinRE",
+                '/SourceIndex:1',
+                "/DestinationImageFile:$optimized",
+                '/Compress:max',
+                '/CheckIntegrity',
+                '/Bootable',
+                "/ScratchDir:$ScratchPath"
+            ) -Context 'Optimizando winre.wim actualizado')
+            Move-Item -LiteralPath $optimized -Destination $DestinationWinRE -Force
+        }
+        else {
+            Write-AIOUpdateLog -Level INFO -Message 'WinRE: exportacion y optimizacion omitidas por configuracion.'
+        }
 
         if ($VerifyPrePostCommit) {
             Mount-AIOUpdateImage -ImagePath $DestinationWinRE -Index 1 -MountPath $WinREMount -ScratchPath $ScratchPath -Context 'Verificando winre.wim guardado' -ReadOnly
             $mounted = $true
             $post = @(Get-AIOUpdateMountedPackageInventory -MountPath $WinREMount -Strict)
+            if ($recoveryUpdated -and @(Get-AIOUpdateWinRERecoveryEvidence -Packages $recoveryCandidates -InstalledInventory $post).Count -eq 0) { throw 'El SafeOS verificado no se conservo en winre.wim tras commit/exportacion.' }
             $postReport = New-AIOUpdateVerificationReport -Target 'winre.wim' -Phase 'PostCommit' -Before $baseline -After $post -OperationResults ([object[]]($operations.ToArray()))
             [void]$VerificationReports.Add($postReport)
             Write-AIOUpdateVerificationReport -Report $postReport
@@ -6907,6 +7028,9 @@ function Update-AIOUpdateWinRE {
             Path   = $DestinationWinRE
             Hash   = (Get-FileHash -LiteralPath $DestinationWinRE -Algorithm SHA256).Hash
             Policy = $Policy
+            RecoveryUpdated = $recoveryUpdated
+            ServicingStackVerified = [bool]$Policy.SsuVerified
+            RecoveryEvidence = [object[]]$recoveryEvidence
         }
     }
     finally {
@@ -7190,10 +7314,332 @@ function Get-AIOUpdateBootSetupDependencies {
     return $captured
 }
 
+function Get-AIOUpdatePeDependencyInfo {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$Path)
+
+    # Leer tablas PE normales y diferidas; no cargar ni ejecutar el binario.
+    # Formato Microsoft PE/COFF, independiente de la build o del nombre de DLL.
+    if (-not ('AIOUpdate.PeDependencyReaderV1' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Collections.Generic;
+namespace AIOUpdate {
+    public sealed class PeDependencyInfoV1 {
+        public ushort Machine;
+        public string[] Imports;
+        public string[] DelayImports;
+    }
+    public sealed class PeDependencyReaderV1 {
+        private byte[] data;
+        private int sections, count, optional, optionalSize, directories, directoryCount;
+        private uint headersSize;
+        private ulong imageBase;
+        private void Range(long offset, long size) {
+            if (offset < 0 || size < 0 || offset > data.LongLength - size)
+                throw new InvalidDataException("PE truncado o desplazamiento fuera del archivo.");
+        }
+        private ushort U16(long p) { Range(p, 2); return BitConverter.ToUInt16(data, (int)p); }
+        private uint U32(long p) { Range(p, 4); return BitConverter.ToUInt32(data, (int)p); }
+        private ulong U64(long p) { Range(p, 8); return BitConverter.ToUInt64(data, (int)p); }
+        private int Rva(uint rva, int size) {
+            if (rva < headersSize) { Range(rva, size); return (int)rva; }
+            for (int i = 0; i < count; i++) {
+                int s = sections + i * 40;
+                uint start = U32(s + 12), rawSize = U32(s + 16), raw = U32(s + 20);
+                if (rva >= start && (ulong)rva - start < rawSize) {
+                    long delta = (long)rva - start;
+                    if (delta + size > rawSize) throw new InvalidDataException("RVA fuera de su seccion.");
+                    long offset = raw + delta; Range(offset, size); return (int)offset;
+                }
+            }
+            throw new InvalidDataException("RVA PE sin datos fisicos.");
+        }
+        private string Name(uint rva) {
+            var bytes = new List<byte>();
+            for (uint i = 0; i < 260; i++) {
+                if ((ulong)rva + i > UInt32.MaxValue) break;
+                byte c = data[Rva(rva + i, 1)];
+                if (c == 0) {
+                    string value = Encoding.ASCII.GetString(bytes.ToArray());
+                    if (value.Length == 0 || value.IndexOfAny(new char[] {'\\','/',':','*','?','"','<','>','|'}) >= 0 ||
+                        !value.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("Nombre de dependencia PE no admitido.");
+                    return value;
+                }
+                if (c < 32 || c > 126) throw new InvalidDataException("Nombre PE no ASCII.");
+                bytes.Add(c);
+            }
+            throw new InvalidDataException("Nombre PE sin terminador.");
+        }
+        private string[] ReadImports(int directory, bool delayed) {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (directory >= directoryCount) return new string[0];
+            uint start = U32(directories + directory * 8), size = U32(directories + directory * 8 + 4);
+            if (start == 0 && size == 0) return new string[0];
+            int stride = delayed ? 32 : 20;
+            if (start == 0 || size < stride || size > 1024 * 1024) throw new InvalidDataException("Tabla de importacion PE invalida.");
+            for (uint delta = 0; (ulong)delta + (uint)stride <= size; delta += (uint)stride) {
+                if ((ulong)start + delta > UInt32.MaxValue) throw new InvalidDataException("RVA PE desbordada.");
+                int p = Rva(start + delta, stride);
+                bool empty = true;
+                for (int j = 0; j < stride; j += 4) if (U32(p + j) != 0) empty = false;
+                if (empty) break;
+                uint name = U32(p + (delayed ? 4 : 12));
+                if (delayed && (U32(p) & 1) == 0) {
+                    if ((ulong)name < imageBase || (ulong)name - imageBase > UInt32.MaxValue)
+                        throw new InvalidDataException("Direccion diferida PE invalida.");
+                    name = (uint)((ulong)name - imageBase);
+                }
+                if (name == 0) throw new InvalidDataException("Descriptor PE sin nombre.");
+                result.Add(Name(name));
+                if (result.Count > 4096) throw new InvalidDataException("Demasiadas dependencias PE.");
+            }
+            var names = new string[result.Count]; result.CopyTo(names); Array.Sort(names, StringComparer.OrdinalIgnoreCase); return names;
+        }
+        public static PeDependencyInfoV1 Read(string path) {
+            var reader = new PeDependencyReaderV1();
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+                if (stream.Length < 64 || stream.Length > 128L * 1024 * 1024) throw new InvalidDataException("Tamano PE no admitido.");
+                reader.data = new byte[(int)stream.Length];
+                int offset = 0, read;
+                while (offset < reader.data.Length && (read = stream.Read(reader.data, offset, reader.data.Length - offset)) > 0) offset += read;
+                if (offset != reader.data.Length) throw new EndOfStreamException();
+            }
+            if (reader.U16(0) != 0x5a4d) throw new InvalidDataException("Falta cabecera MZ.");
+            uint peValue = reader.U32(0x3c);
+            reader.Range(peValue, 24); int pe = (int)peValue;
+            if (reader.U32(pe) != 0x4550) throw new InvalidDataException("Firma PE invalida.");
+            reader.count = reader.U16(pe + 6);
+            if (reader.count < 1 || reader.count > 96) throw new InvalidDataException("Numero de secciones PE invalido.");
+            reader.optionalSize = reader.U16(pe + 20); reader.optional = pe + 24;
+            reader.Range(reader.optional, reader.optionalSize);
+            ushort magic = reader.U16(reader.optional);
+            int prefix = magic == 0x20b ? 112 : magic == 0x10b ? 96 : 0;
+            if (prefix == 0 || reader.optionalSize < prefix) throw new InvalidDataException("Formato PE no admitido.");
+            reader.headersSize = reader.U32(reader.optional + 60);
+            reader.imageBase = magic == 0x20b ? reader.U64(reader.optional + 24) : reader.U32(reader.optional + 28);
+            uint num = reader.U32(reader.optional + prefix - 4);
+            if (num > (reader.optionalSize - prefix) / 8) throw new InvalidDataException("Directorios PE fuera de cabecera.");
+            reader.directoryCount = (int)num; reader.directories = reader.optional + prefix;
+            reader.sections = reader.optional + reader.optionalSize; reader.Range(reader.sections, reader.count * 40);
+            return new PeDependencyInfoV1 { Machine = reader.U16(pe + 4), Imports = reader.ReadImports(1, false), DelayImports = reader.ReadImports(13, true) };
+        }
+    }
+}
+'@ -ErrorAction Stop
+    }
+    return [AIOUpdate.PeDependencyReaderV1]::Read($Path)
+}
+
+function Test-AIOUpdatePeMachineMatch {
+    [CmdletBinding()]
+    param([int]$Expected, [int]$Actual)
+    # ARM64X contiene la vista nativa ARM64. No aceptar x86/x64 por emulacion
+    # para reparar un componente nativo de WinPE.
+    return ($Expected -eq $Actual -or ($Expected -in @(0xAA64, 0xA64E) -and $Actual -in @(0xAA64, 0xA64E)))
+}
+
+function Get-AIOUpdateRecoveryDependencyLocations {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$Name)
+    # Stable component locations, not rules per KB/build. Unknown imports are
+    # diagnostic evidence only; this is not a replacement for the Windows loader.
+    switch ($Name.ToLowerInvariant()) {
+        'unbcl.dll' { @('Windows\System32\migwiz\unbcl.dll', 'Windows\System32\unbcl.dll') }
+        'wlanapi.dll' { @('Windows\System32\wlanapi.dll') }
+        'mobilenetworking.dll' { @('Windows\System32\mobilenetworking.dll') }
+    }
+}
+
+function Get-AIOUpdateMissingRecoveryDependencies {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$MountPath, [AllowEmptyCollection()] [string[]]$AdditionalFiles = @())
+    $system32 = Join-Path $MountPath 'Windows\System32'
+    $files = @(
+        foreach ($relative in @('sources\recovery','Windows\System32\Recovery')) {
+            $root = Join-Path $MountPath $relative
+            if (Test-Path -LiteralPath $root -PathType Container) {
+                Get-ChildItem -LiteralPath $root -File -ErrorAction Stop | Where-Object Extension -in @('.exe','.dll') | ForEach-Object FullName
+            }
+        }
+        $AdditionalFiles
+    ) | Sort-Object -Unique
+    $missing = @{}
+    foreach ($file in $files) {
+        $info = Get-AIOUpdatePeDependencyInfo -Path $file
+        foreach ($name in @($info.Imports) + @($info.DelayImports)) {
+            if ($name -match '(?i)^(api|ext)-ms-') { continue }
+            if ($name -match '[\\/:*?"<>|\x00-\x1f]' -or $name -notmatch '(?i)\.dll$') { throw "Importacion PE invalida en '$file': '$name'." }
+            $found = $false; $wrongMachine = $false
+            foreach ($directory in @((Split-Path -Parent $file),$system32) | Select-Object -Unique) {
+                $candidate = Join-Path $directory $name
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                    $candidateInfo = Get-AIOUpdatePeDependencyInfo -Path $candidate
+                    if (Test-AIOUpdatePeMachineMatch -Expected $info.Machine -Actual $candidateInfo.Machine) { $found = $true }
+                    else { $wrongMachine = $true }
+                    # The first file in the effective local search must be correct.
+                    break
+                }
+            }
+            if ($found) { continue }
+            # A filename somewhere in WinSxS is not proof of manifest redirection.
+            # Do not traverse WinSxS or protected log directories to infer resolution.
+            $required = $name -in @($info.Imports)
+            if ($missing.ContainsKey($name)) {
+                if (-not (Test-AIOUpdatePeMachineMatch -Expected $missing[$name].Machine -Actual $info.Machine)) { throw "Dependencia '$name' solicitada por arquitecturas distintas." }
+                $missing[$name].Required = $missing[$name].Required -or $required
+                $missing[$name].WrongArchitecture = $missing[$name].WrongArchitecture -or $wrongMachine
+            }
+            else {
+                $missing[$name] = [pscustomobject]@{
+                    Name = $name; Machine = [int]$info.Machine; Required = $required; RequestedBy = $file
+                    WrongArchitecture = $wrongMachine; RepairSupported = (@(Get-AIOUpdateRecoveryDependencyLocations -Name $name).Count -gt 0)
+                }
+            }
+        }
+    }
+    [object[]]@($missing.Values | Sort-Object Name)
+}
+
+function Find-AIOUpdateRecoveryDependencySource {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$ImageRoot, [Parameter(Mandatory = $true)] [string]$Name, [Parameter(Mandatory = $true)] [int]$Machine)
+    if ($Name -match '[\\/:*?"<>|\x00-\x1f]' -or $Name -notmatch '(?i)\.dll$') { throw "Nombre de dependencia invalido: '$Name'." }
+    foreach ($relative in @(Get-AIOUpdateRecoveryDependencyLocations -Name $Name)) {
+        $candidate = Join-Path $ImageRoot $relative
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+        $info = Get-AIOUpdatePeDependencyInfo -Path $candidate
+        if (Test-AIOUpdatePeMachineMatch -Expected $Machine -Actual $info.Machine) { return $candidate }
+    }
+    return $null
+}
+
+function Repair-AIOUpdateRecoveryDependencies {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$MountPath,
+        [AllowNull()] [string]$InstallWim,
+        [AllowEmptyCollection()] [int[]]$InstallIndexes = @(),
+        [Parameter(Mandatory = $true)] [string]$Architecture,
+        [Parameter(Mandatory = $true)] [string]$ScratchPath,
+        [Parameter(Mandatory = $true)] [string]$StagingRoot
+    )
+    $missing = @(Get-AIOUpdateMissingRecoveryDependencies -MountPath $MountPath)
+    $copied = New-Object System.Collections.Generic.List[object]
+    $reported = @{}
+    $mounted = $false
+    $sourceRoot = $null
+    $donorMount = Join-Path $StagingRoot 'RecoveryDependencySource'
+    $system32 = Join-Path $MountPath 'Windows\System32'
+    try {
+        while ($missing.Count) {
+            $supported = @()
+            foreach ($dependency in $missing) {
+                if (-not $dependency.RepairSupported -or -not $dependency.Required) {
+                    if (-not $reported.ContainsKey($dependency.Name)) {
+                        $reported[$dependency.Name] = $true
+                        $state = if ($dependency.Required) { 'DependencyNeedsRuntimeValidation' } else { 'OptionalDependencyNotCopied' }
+                        Add-AIOUpdateMaintenanceRecord -Context 'Dependencias de recuperacion' -State $state -Reason "Importacion $($dependency.Name); requerido por $($dependency.RequestedBy). No se infiere resolucion SxS ni se copia automaticamente una dependencia no verificada."
+                        if ($dependency.Required) { Write-Host "   [AVISO] Dependencia para validar al arrancar WinPE: $($dependency.Name). Consulta el reporte." -ForegroundColor Yellow }
+                    }
+                    continue
+                }
+                if ($dependency.WrongArchitecture) { throw "Arquitectura incorrecta en una dependencia existente: $($dependency.Name). No se sustituira automaticamente." }
+                $supported += $dependency
+            }
+            if (-not $supported.Count) { break }
+            if (-not $sourceRoot) {
+                if (-not $InstallWim -or -not $InstallIndexes.Count) { throw 'Falta install.wim para las dependencias de recuperacion conocidas.' }
+                $targetVersion = Get-AIOUpdateExecutableVersion -Path (Join-Path $system32 'ntdll.dll')
+                if (-not $targetVersion) { throw 'No se pudo verificar la version binaria de WinPE.' }
+                foreach ($donor in @(Get-AIOUpdateImageMetadata -ImagePath $InstallWim | Where-Object {
+                    [int]$_.ImageIndex -in $InstallIndexes -and (Convert-AIOUpdateArchitectureName -Architecture $_.Architecture) -eq $Architecture
+                })) {
+                    $cachedNtdll = Get-AIOUpdateCachedWimFile -WimPath $InstallWim -Index $donor.ImageIndex -ImagePath 'Windows\System32\ntdll.dll' -ScratchPath $ScratchPath -StagingRoot $StagingRoot
+                    if ($cachedNtdll) {
+                        $sourceVersion = Get-AIOUpdateExecutableVersion -Path $cachedNtdll
+                        $nativeInfo = Get-AIOUpdatePeDependencyInfo -Path $cachedNtdll
+                        if ($sourceVersion -and $sourceVersion -eq $targetVersion -and
+                            (Test-AIOUpdatePeMachineMatch -Expected $supported[0].Machine -Actual $nativeInfo.Machine)) {
+                            $sourceRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $cachedNtdll))
+                            break
+                        }
+                        continue
+                    }
+                    Mount-AIOUpdateImage -ImagePath $InstallWim -Index $donor.ImageIndex -MountPath $donorMount -ScratchPath $ScratchPath -Context 'Leer fuente de dependencias de recuperacion' -ReadOnly
+                    $mounted = $true
+                    $sourceVersion = Get-AIOUpdateExecutableVersion -Path (Join-Path $donorMount 'Windows\System32\ntdll.dll')
+                    if ($sourceVersion -and $sourceVersion -eq $targetVersion) { $sourceRoot = $donorMount; break }
+                    [void](Dismount-AIOUpdateImage -MountPath $donorMount -Mode Discard -Context 'Cerrar fuente de distinta version binaria')
+                    $mounted = $false
+                }
+                if (-not $sourceRoot) { throw 'No hay fuente de dependencias con la misma arquitectura y version binaria que WinPE.' }
+            }
+            foreach ($dependency in $supported) {
+                if (@($copied | Where-Object Name -eq $dependency.Name).Count) { throw "La copia de $($dependency.Name) no resolvio su ubicacion; requiere revision." }
+                if (-not $mounted) {
+                    foreach ($location in @(Get-AIOUpdateRecoveryDependencyLocations -Name $dependency.Name)) {
+                        $cachedFile = Get-AIOUpdateCachedWimFile -WimPath $InstallWim -Index $donor.ImageIndex -ImagePath $location -ScratchPath $ScratchPath -StagingRoot $StagingRoot
+                        if ($cachedFile -and (Test-AIOUpdatePeMachineMatch -Expected $dependency.Machine -Actual (Get-AIOUpdatePeDependencyInfo -Path $cachedFile).Machine)) { break }
+                    }
+                }
+                $source = Find-AIOUpdateRecoveryDependencySource -ImageRoot $sourceRoot -Name $dependency.Name -Machine $dependency.Machine
+                if (-not $source -and -not $mounted) {
+                    Mount-AIOUpdateImage -ImagePath $InstallWim -Index $donor.ImageIndex -MountPath $donorMount -ScratchPath $ScratchPath -Context 'Leer fuente de dependencias de recuperacion (respaldo)' -ReadOnly
+                    $mounted = $true
+                    $sourceVersion = Get-AIOUpdateExecutableVersion -Path (Join-Path $donorMount 'Windows\System32\ntdll.dll')
+                    if (-not $sourceVersion -or $sourceVersion -ne $targetVersion) { throw 'La fuente de respaldo no coincide con la version binaria de WinPE.' }
+                    $sourceRoot = $donorMount
+                    $source = Find-AIOUpdateRecoveryDependencySource -ImageRoot $sourceRoot -Name $dependency.Name -Machine $dependency.Machine
+                }
+                if (-not $source) {
+                    $reason = "Dependencia requerida '$($dependency.Name)' no disponible en sus ubicaciones de componente conocidas. Solicitada por '$($dependency.RequestedBy)'."
+                    Add-AIOUpdateMaintenanceRecord -Context 'Dependencias de recuperacion' -State 'RequiredDependencyUnavailable' -Reason $reason
+                    throw $reason
+                }
+                $destination = Join-Path $system32 $dependency.Name
+                if (Test-Path -LiteralPath $destination) { throw "La dependencia $($dependency.Name) ya existe; no se sobrescribira." }
+                [void](Copy-AIOUpdateSetupDUFile -Source $source -Destination $destination)
+                $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256 -ErrorAction Stop).Hash
+                if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash -ne $hash) { throw "Fallo SHA-256 de $($dependency.Name)." }
+                $relative = $source.Substring($sourceRoot.Length).TrimStart('\','/')
+                [void]$copied.Add([pscustomobject]@{ Name = $dependency.Name; RelativePath = ('Windows\System32\'+$dependency.Name); SHA256 = $hash; SourceIndex = $donor.ImageIndex; SourceVersion = [string]$sourceVersion; SourceRelativePath = $relative; RequestedBy = $dependency.RequestedBy })
+                Add-AIOUpdateMaintenanceRecord -Context 'Dependencias de recuperacion' -State 'CopiedMissingDependency' -Performed $true -Reason "$($dependency.Name); origen=$relative; indice=$($donor.ImageIndex); SHA256=$hash; requerido por $($dependency.RequestedBy)."
+            }
+            $missing = @(Get-AIOUpdateMissingRecoveryDependencies -MountPath $MountPath -AdditionalFiles @($copied | ForEach-Object { Join-Path $MountPath $_.RelativePath }))
+        }
+        [object[]]$copied.ToArray()
+    }
+    finally {
+        if ($mounted) { [void](Dismount-AIOUpdateImage -MountPath $donorMount -Mode Discard -Context 'Cerrar lectura de dependencias de recuperacion') }
+    }
+}
+
+function Assert-AIOUpdateRecoveryDependencyCopies {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [string]$MountPath,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [object[]]$Copies
+    )
+    foreach ($copy in $Copies) {
+        $path = Join-Path $MountPath $copy.RelativePath
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash -ne $copy.SHA256) {
+            throw "La dependencia '$($copy.Name)' no se conservo correctamente tras guardar boot.wim."
+        }
+    }
+}
+
+
 function Update-AIOUpdateBootWim {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)] [string]$BootWim,
+        [string]$InstallWim,
+        [AllowEmptyCollection()] [int[]]$InstallIndexes = @(),
         [Parameter(Mandatory = $true)] [object[]]$Images,
         [Parameter(Mandatory = $true)] [object[]]$Inventory,
         [Parameter(Mandatory = $true)] [string]$BootMount,
@@ -7236,7 +7682,7 @@ function Update-AIOUpdateBootWim {
 
             $bootPackages = New-Object System.Collections.Generic.List[object]
             foreach ($package in @(
-                Get-AIOUpdateEffectiveSsuPackages -Inventory $Inventory |
+                Get-AIOUpdateEffectiveSsuPackages -Inventory $Inventory -Architecture $architecture -Build $build |
                     Where-Object { (Test-AIOUpdatePackageCompatibility -Package $_ -Architecture $architecture -Build $build -ImageName $image.ImageName).Compatible }
             )) { [void]$bootPackages.Add($package) }
 
@@ -7292,6 +7738,8 @@ function Update-AIOUpdateBootWim {
                 Write-AIOUpdateLog -Level INFO -Message "SetupDU integrado en boot.wim indice ${index}: $merged archivo(s)."
             }
 
+            $recoveryCopies = @(Repair-AIOUpdateRecoveryDependencies -MountPath $BootMount -InstallWim $InstallWim -InstallIndexes $InstallIndexes -Architecture $architecture -ScratchPath $ScratchPath -StagingRoot $StagingRoot)
+
             [void](Invoke-AIOUpdateCleanup -MountPath $BootMount -ScratchPath $ScratchPath -Context "Boot indice ${index}: limpieza WinPE" -ResetBase -WarningOnly)
 
             if ($index -eq $setupIndex) {
@@ -7328,6 +7776,7 @@ function Update-AIOUpdateBootWim {
             if ($VerifyPrePostCommit) {
                 Mount-AIOUpdateImage -ImagePath $BootWim -Index $index -MountPath $BootMount -ScratchPath $ScratchPath -Context "Verificando boot.wim indice $index" -ReadOnly
                 $mounted = $true
+                Assert-AIOUpdateRecoveryDependencyCopies -MountPath $BootMount -Copies $recoveryCopies
                 $post = @(Get-AIOUpdateMountedPackageInventory -MountPath $BootMount -Strict)
                 $postReport = New-AIOUpdateVerificationReport -Target "boot.wim indice $index" -Phase 'PostCommit' -Before $baseline -After $post -OperationResults ([object[]]($operations.ToArray()))
                 [void]$VerificationReports.Add($postReport)
@@ -7599,72 +8048,346 @@ function Apply-AIOUpdateSetupDU {
 }
 
 
-function Sync-AIOUpdateMediaBootFiles {
+function Initialize-AIOUpdateEmbeddedSignatureApi {
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)] [string]$MediaRoot,
-        [Parameter(Mandatory = $true)] [hashtable]$CapturedFiles,
-        [Parameter(Mandatory = $true)] [string]$Architecture
-    )
+    param()
+    if ('AIOUpdates.EmbeddedSignatureV1' -as [type]) { return }
+    # WTD_CHOICE_FILE checks the embedded PE signature. The catalog-first
+    # Get-AuthenticodeSignature cmdlet cannot identify the UEFI signing family.
+    # Keep the certificate tied to the same WinVerifyTrust state that was verified.
+    Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
 
-    if ($CapturedFiles.Count -eq 0) { return @() }
-    Write-Host "`nSincronizando Windows Setup y binarios de arranque..." -ForegroundColor Cyan
-    $results = New-Object System.Collections.Generic.List[object]
-    $architectureEntry = Get-AIOUpdateArchitectureCatalogEntry -Architecture $Architecture
-    $efiBootName = if ($architectureEntry -and $architectureEntry.EfiBootName) { [string]$architectureEntry.EfiBootName } else { 'bootx64.efi' }
-
-    # Sincronizacion selectiva: nunca mezclar recursivamente sources de WinPE
-    # con sources del medio. SetupDU aplica su propio contenido por separado.
-    # Estos dos ejecutables deben coincidir por contenido, incluso si la copia
-    # del medio tiene una fecha mas reciente; el respaldo y SHA-256 se verifican
-    # en Copy-AIOUpdateFileWithBackup. setup.exe de la raiz de WinPE no se exporta.
-    foreach ($entry in $script:AIOUpdateSetupMediaSyncSpecs) {
-        if (-not $CapturedFiles.ContainsKey($entry.Key)) { continue }
-        $result = Copy-AIOUpdateFileWithBackup -Source $CapturedFiles[$entry.Key] -Destination (Join-Path $MediaRoot $entry.RelativePath)
-        if ($result) { [void]$results.Add($result) }
+namespace AIOUpdates {
+    public sealed class EmbeddedSignatureResult {
+        public int Code;
+        public string Subject = "";
+        public string Issuer = "";
+        public string Thumbprint = "";
+        public string CertificateError = "";
     }
 
-    $useEx = $CapturedFiles.ContainsKey('BootMgfwExEfi')
-    $bootMgfwKey = if ($useEx) { 'BootMgfwExEfi' } else { 'BootMgfwEfi' }
-    $bootMgrKey = if ($CapturedFiles.ContainsKey('BootMgrExEfi')) { 'BootMgrExEfi' } else { 'BootMgrEfi' }
-    $efiSysKey = if ($CapturedFiles.ContainsKey('EfiSysEx')) { 'EfiSysEx' } else { 'EfiSys' }
-    $efiNoPromptKey = if ($CapturedFiles.ContainsKey('EfiSysNoPromptEx')) { 'EfiSysNoPromptEx' } else { 'EfiSysNoPrompt' }
+    public static class EmbeddedSignatureV1 {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileInfo {
+            public uint Size;
+            public IntPtr Path;
+            public IntPtr File;
+            public IntPtr KnownSubject;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct TrustData {
+            public uint Size;
+            public IntPtr PolicyCallback;
+            public IntPtr SipClient;
+            public uint UIChoice;
+            public uint RevocationChecks;
+            public uint UnionChoice;
+            public IntPtr File;
+            public uint StateAction;
+            public IntPtr State;
+            public IntPtr Url;
+            public uint ProviderFlags;
+            public uint UIContext;
+            public IntPtr SignatureSettings;
+        }
+        // Only the leading fields are read; the provider owns the full structure.
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ProviderCertificateHead {
+            public uint Size;
+            public IntPtr Certificate;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CertificateContext {
+            public uint Encoding;
+            public IntPtr Encoded;
+            public uint EncodedSize;
+            public IntPtr Info;
+            public IntPtr Store;
+        }
 
-    $map = @(
-        @{ Key = $bootMgrKey;      Destination = (Join-Path $MediaRoot 'bootmgr.efi') },
-        @{ Key = $bootMgfwKey;     Destination = (Join-Path $MediaRoot ("efi\boot\$efiBootName")) },
-        @{ Key = $efiSysKey;       Destination = (Join-Path $MediaRoot 'efi\microsoft\boot\efisys.bin') },
-        @{ Key = $efiNoPromptKey;  Destination = (Join-Path $MediaRoot 'efi\microsoft\boot\efisys_noprompt.bin') }
-    )
-    foreach ($spec in $script:AIOUpdateBootMediaStaticSyncSpecs) {
-        $map += @{ Key = $spec.Key; Destination = (Join-Path $MediaRoot $spec.RelativePath) }
-    }
+        [DllImport("wintrust.dll", ExactSpelling = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        private static extern int WinVerifyTrust(IntPtr window, ref Guid action, ref TrustData data);
+        [DllImport("wintrust.dll", ExactSpelling = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        private static extern IntPtr WTHelperProvDataFromStateData(IntPtr state);
+        [DllImport("wintrust.dll", ExactSpelling = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        private static extern IntPtr WTHelperGetProvSignerFromChain(IntPtr provider, uint index,
+            [MarshalAs(UnmanagedType.Bool)] bool counterSigner, uint counterIndex);
+        [DllImport("wintrust.dll", ExactSpelling = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        private static extern IntPtr WTHelperGetProvCertFromChain(IntPtr signer, uint index);
 
-    if (Test-Path -LiteralPath (Join-Path $MediaRoot 'efi\boot\bootmgfw.efi')) {
-        $map += @{ Key = $bootMgfwKey; Destination = (Join-Path $MediaRoot 'efi\boot\bootmgfw.efi') }
-    }
-
-    foreach ($entry in $map) {
-        if (-not $entry.Key -or -not $CapturedFiles.ContainsKey($entry.Key)) { continue }
-        $result = Copy-AIOUpdateFileWithBackup -Source $CapturedFiles[$entry.Key] -Destination $entry.Destination -OnlyIfNewer
-        if ($result) { [void]$results.Add($result) }
-    }
-
-    if ($CapturedFiles.ContainsKey('FontsExDirectory')) {
-        $fontDestination = Join-Path $MediaRoot 'efi\microsoft\boot\fonts'
-        Initialize-AIOUpdateDirectory -Path $fontDestination
-        foreach ($file in @(Get-ChildItem -LiteralPath $CapturedFiles['FontsExDirectory'] -Recurse -File -ErrorAction SilentlyContinue)) {
-            $name = $file.Name -replace '(?i)_EX(?=\.ttf$)', ''
-            $destination = Join-Path $fontDestination $name
-            $result = Copy-AIOUpdateFileWithBackup -Source $file.FullName -Destination $destination -OnlyIfNewer
-            if ($result) { [void]$results.Add($result) }
+        public static EmbeddedSignatureResult Verify(string path) {
+            var result = new EmbeddedSignatureResult();
+            var action = new Guid("00AAC56B-CD44-11D0-8CC2-00C04FC295EE");
+            var data = new TrustData();
+            IntPtr pathBuffer = IntPtr.Zero;
+            IntPtr fileBuffer = IntPtr.Zero;
+            bool verifyCalled = false;
+            try {
+                pathBuffer = Marshal.StringToCoTaskMemUni(System.IO.Path.GetFullPath(path));
+                var file = new FileInfo();
+                file.Size = (uint)Marshal.SizeOf(typeof(FileInfo));
+                file.Path = pathBuffer;
+                fileBuffer = Marshal.AllocHGlobal((int)file.Size);
+                Marshal.StructureToPtr(file, fileBuffer, false);
+                data.Size = (uint)Marshal.SizeOf(typeof(TrustData));
+                data.UIChoice = 2; // WTD_UI_NONE
+                data.UnionChoice = 1; // WTD_CHOICE_FILE, never WTD_CHOICE_CATALOG
+                data.File = fileBuffer;
+                data.StateAction = 1; // WTD_STATEACTION_VERIFY
+                // Default Authenticode policy; no custom roots, hash-only mode,
+                // ignored trust errors or changes to the certificate store.
+                verifyCalled = true;
+                result.Code = WinVerifyTrust(new IntPtr(-1), ref action, ref data);
+                try {
+                    IntPtr provider = data.State == IntPtr.Zero ? IntPtr.Zero : WTHelperProvDataFromStateData(data.State);
+                    IntPtr signer = provider == IntPtr.Zero ? IntPtr.Zero : WTHelperGetProvSignerFromChain(provider, 0, false, 0);
+                    IntPtr certPointer = signer == IntPtr.Zero ? IntPtr.Zero : WTHelperGetProvCertFromChain(signer, 0);
+                    if (certPointer == IntPtr.Zero) {
+                        result.CertificateError = "El proveedor no devolvio el certificado del firmante incorporado.";
+                    } else {
+                        var head = (ProviderCertificateHead)Marshal.PtrToStructure(certPointer, typeof(ProviderCertificateHead));
+                        if (head.Size < Marshal.SizeOf(typeof(ProviderCertificateHead)) || head.Certificate == IntPtr.Zero)
+                            throw new InvalidDataException("Contexto del certificado incorporado incompleto.");
+                        var cert = (CertificateContext)Marshal.PtrToStructure(head.Certificate, typeof(CertificateContext));
+                        if (cert.Encoded == IntPtr.Zero || cert.EncodedSize == 0 || cert.EncodedSize > 1048576)
+                            throw new InvalidDataException("Longitud del certificado incorporado no valida.");
+                        var bytes = new byte[(int)cert.EncodedSize];
+                        Marshal.Copy(cert.Encoded, bytes, 0, bytes.Length);
+                        using (var certificate = new X509Certificate2(bytes)) {
+                            result.Subject = certificate.Subject;
+                            result.Issuer = certificate.Issuer;
+                            result.Thumbprint = certificate.Thumbprint;
+                        }
+                    }
+                } catch (Exception ex) {
+                    result.CertificateError = ex.Message;
+                }
+                return result;
+            } finally {
+                try {
+                    if (verifyCalled) {
+                        data.StateAction = 2; // WTD_STATEACTION_CLOSE, also after failure
+                        WinVerifyTrust(new IntPtr(-1), ref action, ref data);
+                    }
+                } finally {
+                    if (fileBuffer != IntPtr.Zero) Marshal.FreeHGlobal(fileBuffer);
+                    if (pathBuffer != IntPtr.Zero) Marshal.FreeCoTaskMem(pathBuffer);
+                }
+            }
         }
     }
+}
+'@ -Language CSharp -ErrorAction Stop
+}
 
-    return [object[]]($results.ToArray())
+function Invoke-AIOUpdateEmbeddedSignatureVerification {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$Path)
+    Initialize-AIOUpdateEmbeddedSignatureApi
+    return [AIOUpdates.EmbeddedSignatureV1]::Verify($Path)
+}
+
+function Get-AIOUpdateBootSignature {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$Path)
+    $result = [pscustomobject]@{
+        Path = $Path
+        Source = 'Embedded/WinVerifyTrust'
+        Status = 'Missing'
+        NativeCode = $null
+        NativeCodeHex = ''
+        Signer = 'Missing'
+        Subject = ''
+        Issuer = ''
+        Thumbprint = ''
+        Message = 'El archivo no existe.'
+    }
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        $result.Signer = 'Unknown'
+        try {
+            $native = Invoke-AIOUpdateEmbeddedSignatureVerification -Path $Path
+            $result.NativeCode = [int]$native.Code
+            $result.NativeCodeHex = '0x{0:X8}' -f (Convert-AIOUpdateExitCodeToUInt32 -ExitCode $native.Code)
+            $result.Subject = [string]$native.Subject
+            $result.Issuer = [string]$native.Issuer
+            $result.Thumbprint = [string]$native.Thumbprint
+            $result.Status = 'VerificationFailed'
+            $result.Message = 'Windows no pudo validar la firma incorporada.'
+            switch ($result.NativeCodeHex) {
+                '0x00000000' { $result.Status = 'Valid'; $result.Message = 'Firma incorporada validada por Windows.' }
+                '0x80096010' { $result.Status = 'HashMismatch'; $result.Message = 'El contenido no coincide con la firma incorporada.' }
+                '0x800B0100' { $result.Status = 'NotSigned'; $result.Message = 'No hay una firma incorporada verificable.' }
+                '0x800B0109' { $result.Status = 'UntrustedRoot'; $result.Message = 'El equipo anfitrion no confia en la raiz del certificado.' }
+                '0x800B010A' { $result.Status = 'IncompleteChain'; $result.Message = 'Windows no pudo construir la cadena de confianza.' }
+                '0x800B0101' { $result.Status = 'Expired'; $result.Message = 'Windows rechazo la vigencia de la firma o de su certificado.' }
+                '0x800B010C' { $result.Status = 'Revoked'; $result.Message = 'Windows rechazo un certificado revocado.' }
+                '0x800B0111' { $result.Status = 'ExplicitDistrust'; $result.Message = 'Windows rechaza explicitamente esta firma.' }
+            }
+            if ($native.CertificateError) {
+                $result.Message += ' ' + [string]$native.CertificateError
+                if ($result.Status -eq 'Valid') { $result.Status = 'MissingSignerCertificate' }
+            }
+            if ($result.Status -eq 'Valid' -and -not [string]::IsNullOrWhiteSpace($result.Thumbprint)) {
+                if ($result.Issuer -match '(?i)(?:^|,\s*)CN=Windows UEFI CA 2023(?:,|$)') { $result.Signer = 'CA2023' }
+                elseif ($result.Issuer -match '(?i)(?:^|,\s*)CN=Microsoft Windows Production PCA 2011(?:,|$)') { $result.Signer = 'CA2011' }
+            }
+        }
+        catch {
+            $result.Status = 'VerifierError'
+            $result.Signer = 'Unknown'
+            $result.Message = $_.Exception.Message
+        }
+    }
+    if ($null -eq $script:AIOUpdateBootSignatureResults) { $script:AIOUpdateBootSignatureResults = New-Object System.Collections.ArrayList }
+    [void]$script:AIOUpdateBootSignatureResults.Add($result)
+    $detail = Format-AIOUpdateBootSignature -Signature $result
+    Write-AIOUpdateLog -Level INFO -Message "Firma de arranque: $detail"
+    return $result
+}
+
+function Format-AIOUpdateBootSignature {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [object]$Signature)
+    return "Archivo='$($Signature.Path)'; origen=$($Signature.Source); estado=$($Signature.Status); codigo=$($Signature.NativeCodeHex); familia=$($Signature.Signer); emisor='$($Signature.Issuer)'; sujeto='$($Signature.Subject)'; huella=$($Signature.Thumbprint); $($Signature.Message)"
+}
+
+function Get-AIOUpdateBootSigner {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$Path)
+    return [string](Get-AIOUpdateBootSignature -Path $Path).Signer
+}
+
+function Assert-AIOUpdateBootSignature {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$Path,
+        [Parameter(Mandatory = $true)] [ValidateSet('CA2011','CA2023')] [string]$Policy)
+    $signature = Get-AIOUpdateBootSignature -Path $Path
+    if ($signature.Signer -ne $Policy) {
+        throw "No se pudo acreditar la firma incorporada $Policy. $(Format-AIOUpdateBootSignature -Signature $signature)"
+    }
 }
 
 
+function Assert-AIOUpdateMicrosoftBootSignature {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$Path)
+    # El bootmgr_EX.efi opcional no requiere Windows UEFI CA 2023.
+    # Exigir una firma incorporada valida de Microsoft, sin equiparar roles.
+    $signature = Get-AIOUpdateBootSignature -Path $Path
+    if ($signature.Status -ne 'Valid' -or [string]::IsNullOrWhiteSpace($signature.Thumbprint) -or
+        $signature.Subject -notmatch '(?i)(?:^|,\s*)O="?Microsoft Corporation"?(?:,|$)') {
+        throw "No se pudo acreditar la firma Microsoft del archivo de arranque. $(Format-AIOUpdateBootSignature -Signature $signature)"
+    }
+}
+
+function Resolve-AIOUpdateBootSigningPolicy {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$MediaRoot, [Parameter(Mandatory = $true)] [string]$EfiBootName,
+        [ValidateSet('Preserve','CA2023','CA2011')] [string]$Policy = 'Preserve')
+    if ($Policy -ne 'Preserve') { return $Policy }
+    $signers = @()
+    # bootmgr.efi en la raiz no determina la familia del cargador UEFI.
+    foreach ($relative in @("efi\boot\$EfiBootName",'efi\boot\bootmgfw.efi')) {
+        $path = Join-Path $MediaRoot $relative
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $signature = Get-AIOUpdateBootSignature -Path $path
+        if ($signature.Signer -notin @('CA2011','CA2023')) {
+            throw "No se pudo verificar la firma incorporada de '$relative'. $(Format-AIOUpdateBootSignature -Signature $signature)"
+        }
+        $signers += $signature.Signer
+    }
+    $unique = @($signers | Sort-Object -Unique)
+    if ($unique.Count -ne 1) { throw 'El medio no tiene una familia UEFI unica verificable. Revisa sus cargadores EFI antes de continuar.' }
+    return [string]$unique[0]
+}
+
+function Sync-AIOUpdateMediaBootFiles {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)] [string]$MediaRoot,
+        [Parameter(Mandatory = $true)] [hashtable]$CapturedFiles,
+        [Parameter(Mandatory = $true)] [string]$Architecture,
+        [ValidateSet('Preserve','CA2023','CA2011')] [string]$BootSigningPolicy = 'Preserve')
+    if (-not $CapturedFiles.Count) { return @() }
+    $architectureEntry = Get-AIOUpdateArchitectureCatalogEntry -Architecture $Architecture
+    if (-not $architectureEntry -or -not $architectureEntry.EfiBootName) { throw 'Arquitectura sin nombre de arranque EFI definido.' }
+    $efiBootName = [string]$architectureEntry.EfiBootName
+    $policy = Resolve-AIOUpdateBootSigningPolicy -MediaRoot $MediaRoot -EfiBootName $efiBootName -Policy $BootSigningPolicy
+    $is2023 = $policy -eq 'CA2023'
+    $mgfw = if ($is2023) { 'BootMgfwExEfi' } else { 'BootMgfwEfi' }
+    $mgr = if ($is2023) { 'BootMgrExEfi' } else { 'BootMgrEfi' }
+    $efi = if ($is2023) { 'EfiSysEx' } else { 'EfiSys' }
+    $noPrompt = if ($is2023) { 'EfiSysNoPromptEx' } else { 'EfiSysNoPrompt' }
+    # El cargador UEFI y las imagenes de arranque optico mantienen la familia
+    # elegida. Microsoft Make2023BootableMedia trata bootmgr_EX.efi como opcional
+    # y aclara que no exige esa CA; nunca sustituirlo por bootmgfw_EX.efi.
+    $map = @(
+        [pscustomobject]@{ Key = $mgfw; Relative = "efi\boot\$efiBootName"; Signed = $true; MicrosoftSigned = $false }
+    )
+    if ($CapturedFiles.ContainsKey($mgr)) {
+        $map += [pscustomobject]@{ Key = $mgr; Relative = 'bootmgr.efi'; Signed = $false; MicrosoftSigned = $true }
+    }
+    else {
+        Add-AIOUpdateMaintenanceRecord -Context 'Arranque UEFI' -State 'OptionalBootFilePreserved' -Reason "$mgr no esta presente; se conserva bootmgr.efi conforme al tratamiento opcional de Microsoft."
+    }
+    foreach ($pair in @(
+        [pscustomobject]@{ Key = $efi; Relative = 'efi\microsoft\boot\efisys.bin'; Signed = $false },
+        [pscustomobject]@{ Key = $noPrompt; Relative = 'efi\microsoft\boot\efisys_noprompt.bin'; Signed = $false },
+        [pscustomobject]@{ Key = $mgfw; Relative = 'efi\boot\bootmgfw.efi'; Signed = $true }
+    )) { if (Test-Path -LiteralPath (Join-Path $MediaRoot $pair.Relative) -PathType Leaf) { $map += $pair } }
+    foreach ($entry in $map) {
+        if (-not $CapturedFiles.ContainsKey($entry.Key) -or -not (Test-Path -LiteralPath $CapturedFiles[$entry.Key] -PathType Leaf)) { throw "Falta $($entry.Key) para sincronizar el conjunto de arranque $policy." }
+        if ($entry.Signed) { Assert-AIOUpdateBootSignature -Path $CapturedFiles[$entry.Key] -Policy $policy }
+        elseif ($entry.MicrosoftSigned) { Assert-AIOUpdateMicrosoftBootSignature -Path $CapturedFiles[$entry.Key] }
+        if ($entry.Signed -or $entry.MicrosoftSigned) {
+            $sourceVersion = Get-AIOUpdateExecutableVersion -Path $CapturedFiles[$entry.Key]
+            $destination = Join-Path $MediaRoot $entry.Relative
+            $targetVersion = Get-AIOUpdateExecutableVersion -Path $destination
+            if (-not $sourceVersion -or ($targetVersion -and $sourceVersion -lt $targetVersion)) { throw "El conjunto de arranque $policy tiene version desconocida o anterior al medio: $($entry.Key)." }
+        }
+    }
+    # All checks above happen before the first replacement. Preflight covers
+    # rollback if a later write fails. Force the coherent set, regardless of dates.
+    $results = New-Object System.Collections.Generic.List[object]
+    foreach ($spec in $script:AIOUpdateSetupMediaSyncSpecs) {
+        if ($CapturedFiles.ContainsKey($spec.Key)) {
+            $result = Copy-AIOUpdateFileWithBackup -Source $CapturedFiles[$spec.Key] -Destination (Join-Path $MediaRoot $spec.RelativePath)
+            if ($result) { [void]$results.Add($result) }
+        }
+    }
+    foreach ($entry in $map) {
+        $destination = Join-Path $MediaRoot $entry.Relative
+        $result = Copy-AIOUpdateFileWithBackup -Source $CapturedFiles[$entry.Key] -Destination $destination
+        if ($result) { [void]$results.Add($result) }
+        if ($entry.Signed) { Assert-AIOUpdateBootSignature -Path $destination -Policy $policy }
+        elseif ($entry.MicrosoftSigned) { Assert-AIOUpdateMicrosoftBootSignature -Path $destination }
+    }
+    foreach ($spec in $script:AIOUpdateBootMediaStaticSyncSpecs) {
+        if (-not $CapturedFiles.ContainsKey($spec.Key)) { continue }
+        if ($spec.Key -eq 'MemtestEfi' -and (Get-AIOUpdateBootSigner -Path $CapturedFiles[$spec.Key]) -ne $policy) {
+            Add-AIOUpdateMaintenanceRecord -Context 'Arranque UEFI' -State 'OptionalBootFilePreserved' -Reason 'memtest.efi no tiene la firma elegida; se conserva el existente.'
+            continue
+        }
+        $result = Copy-AIOUpdateFileWithBackup -Source $CapturedFiles[$spec.Key] -Destination (Join-Path $MediaRoot $spec.RelativePath)
+        if ($result) { [void]$results.Add($result) }
+    }
+    if ($is2023 -and $CapturedFiles.ContainsKey('FontsExDirectory')) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $CapturedFiles['FontsExDirectory'] -File -Filter '*.ttf' -ErrorAction Stop)) {
+            $name = $file.Name -replace '(?i)_EX(?=\.ttf$)', ''
+            $result = Copy-AIOUpdateFileWithBackup -Source $file.FullName -Destination (Join-Path $MediaRoot "efi\microsoft\boot\fonts\$name")
+            if ($result) { [void]$results.Add($result) }
+        }
+    }
+    Add-AIOUpdateMaintenanceRecord -Context 'Arranque UEFI' -State 'BootSigningVerified' -Performed $true -Reason "Politica solicitada=$BootSigningPolicy; firmante del cargador UEFI=$policy; archivos aplicables sincronizados y SHA-256 verificado. La confianza del firmware del equipo de destino requiere validacion en ese equipo."
+    [object[]]$results.ToArray()
+}
 
 function ConvertTo-AIOUpdateCompactPackage {
     [CmdletBinding()]
@@ -7708,9 +8431,18 @@ function ConvertTo-AIOUpdateCompactPackage {
         Category         = [string]$Package.Category
         KB               = [string]$Package.KB
         Version          = [string]$Package.Version
+        VersionSource    = [string]$Package.VersionSource
+        Embedded         = [bool]$Package.Embedded
+        SourcePackage    = [string]$Package.SourcePackage
         Size             = [int64]$Package.Size
         IsCheckpoint     = [bool]$Package.IsCheckpoint
+        IsLcuTarget      = $(if ($Package.PSObject.Properties['IsLcuTarget']) { [bool]$Package.IsLcuTarget } else { $null })
+        IsLcuPrerequisiteCandidate = $(if ($Package.PSObject.Properties['IsLcuPrerequisiteCandidate']) { [bool]$Package.IsLcuPrerequisiteCandidate } else { $false })
         Architectures    = [string[]]$architectures
+        ArchitectureSource = [string]$Package.ArchitectureSource
+        LcuFamily        = [string]$Package.LcuFamily
+        LcuTargetName    = [string]$Package.LcuTargetName
+        CbsRootIdentities = $(if ($Package.Metadata -and $Package.Metadata.PSObject.Properties['CbsRootIdentities']) { [object[]]@($Package.Metadata.CbsRootIdentities) } else { [object[]]@() })
         Editions         = [string[]]$editions
         CbsOwnIdentities = [string[]]$cbsOwn
         CbsDependencies  = [string[]]$cbsDependencies
@@ -7885,7 +8617,9 @@ function Export-AIOUpdateStructuredReport {
     }
 
     $report = [pscustomobject]@{
-        SchemaVersion      = 2
+        SchemaVersion      = 3
+        OfflineValidationOnly = $true
+        RuntimeValidationRequired = @($script:AIOUpdateMaintenanceResults | Where-Object State -eq 'DependencyNeedsRuntimeValidation').Count -gt 0
         Status             = $Status
         MediaRoot          = [string]$MediaRoot
         Phase              = [string]$Phase
@@ -7910,7 +8644,10 @@ function Export-AIOUpdateStructuredReport {
         PreflightBackup    = $PreflightBackup
         CompletedTargets   = [object[]]@($CompletedTargets)
         Packages           = [object[]]$packages
+        EmbeddedSsuPackages = [object[]]@($script:AIOUpdateEmbeddedSsuPackages | Where-Object { $_ } | ForEach-Object { ConvertTo-AIOUpdateCompactPackage -Package $_ })
         DependencyPlans    = [object[]]$dependencyPlanReports
+        Maintenance        = [object[]]@($script:AIOUpdateMaintenanceResults)
+        BootSignatures     = [object[]]@($script:AIOUpdateBootSignatureResults | Where-Object { $null -ne $_ })
         Verification       = [object[]]$verification
         FinalImages        = [object[]]$images
         Error              = $errorInfo
@@ -7980,6 +8717,8 @@ function Export-AIOUpdateStructuredReport {
     }
     else { '<h2>Orden CBS</h2><p>No se resolvieron planes.</p>' }
 
+    $maintenanceHtml = if (@($script:AIOUpdateMaintenanceResults).Count -gt 0) { (@($script:AIOUpdateMaintenanceResults) | ConvertTo-Html -Fragment -PreContent '<h2>Mantenimiento y dependencias</h2>') -join "`n" } else { '' }
+    $bootSignaturesHtml = if ($report.BootSignatures.Count -gt 0) { ($report.BootSignatures | ConvertTo-Html -Fragment -PreContent '<h2>Firmas incorporadas de arranque</h2>') -join "`n" } else { '' }
     $errorHtml = ''
     if ($errorInfo) {
         $encodedMessage = [System.Net.WebUtility]::HtmlEncode([string]$errorInfo.Message)
@@ -8011,6 +8750,8 @@ $errorHtml
 $imagesHtml
 $packagesHtml
 $dependenciesHtml
+$maintenanceHtml
+$bootSignaturesHtml
 $verificationHtml
 </main></body></html>
 "@
@@ -8078,8 +8819,10 @@ function New-AIOUpdateDiagnosticBundle {
     if ($SessionRoot -and (Test-Path -LiteralPath $SessionRoot -PathType Container)) {
         $counter = 0
         foreach ($file in @(
-            Get-ChildItem -LiteralPath $SessionRoot -Recurse -File -ErrorAction SilentlyContinue |
-                Where-Object { $_.Extension.ToLowerInvariant() -in @('.log', '.txt', '.xml') -and $_.Length -le 50MB }
+            # Native DISM logs live at session root. Include them regardless
+            # of size; do not recurse into mounted images/protected OS folders.
+            Get-ChildItem -LiteralPath $SessionRoot -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension.ToLowerInvariant() -in @('.log', '.txt', '.json') }
         )) {
             $counter++
             $safeName = ('{0:D4}_{1}' -f $counter, $file.Name)
@@ -8147,6 +8890,7 @@ function Invoke-AIOUpdateMediaIntegration {
         [switch]$ResetBase,
         [switch]$OptimizeWims,
         [switch]$UpdateWimCreationTime,
+        [ValidateSet('Preserve','CA2023','CA2011')] [string]$BootSigningPolicy = 'Preserve',
         [bool]$VerifyPrePostCommit = $true
     )
 
@@ -8171,6 +8915,8 @@ function Invoke-AIOUpdateMediaIntegration {
         throw 'Ningun paquete instalable del repositorio es compatible con los indices seleccionados.'
     }
 
+    $script:AIOUpdateMaintenanceResults = New-Object System.Collections.ArrayList
+    $script:AIOUpdateBootSignatureResults = New-Object System.Collections.ArrayList
     $baseWork = if ($Script:Scratch_DIR -and (Test-Path -LiteralPath $Script:Scratch_DIR)) { $Script:Scratch_DIR } else { $env:TEMP }
     $script:AIOUpdateSessionRoot = Join-Path $baseWork ('AIOU_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
     Initialize-AIOUpdateDirectory -Path $script:AIOUpdateSessionRoot -Empty
@@ -8213,6 +8959,11 @@ function Invoke-AIOUpdateMediaIntegration {
         UpdateWimCreationTime = [bool]$UpdateWimCreationTime
         VerifyPrePostCommit   = [bool]$VerifyPrePostCommit
         ReapplyPresent        = $true
+        ReapplyMode           = 'Automatic'
+        SingleIndexExportRequired = ($InstallIndexes.Count -eq 1 -and $initialInstallImages.Count -gt 1)
+        BootSigningPolicy     = $BootSigningPolicy
+        RecoveryCleanup       = 'WinRE/WinPE: StartComponentCleanup + ResetBase; aplazar solo si hay operaciones pendientes'
+        RuntimeValidation     = 'El analisis offline no sustituye pruebas de arranque, Setup y recuperacion' 
     }
     $script:AIOUpdateDependencyPlans = New-Object System.Collections.ArrayList
     $script:AIOUpdateExecutionPositionByContext = @{}
@@ -8252,7 +9003,13 @@ function Invoke-AIOUpdateMediaIntegration {
         $script:AIOUpdateLastTerminalState.BackupRoot = $preflightBackup.Root
         [void]$completed.Add("respaldo previo verificado: $($preflightBackup.FileCount) archivo(s)")
 
-        $script:AIOUpdateCurrentPhase = 'Staging de paquetes'
+        if ($UpdateBootWim) {
+            $entry = Get-AIOUpdateArchitectureCatalogEntry -Architecture $Compatibility.Architecture
+            $effectiveBootPolicy = Resolve-AIOUpdateBootSigningPolicy -MediaRoot $media -EfiBootName $entry.EfiBootName -Policy $BootSigningPolicy
+            $integrationOptions | Add-Member -NotePropertyName EffectiveBootSigningPolicy -NotePropertyValue $effectiveBootPolicy -Force
+            Write-AIOUpdateLog -Level INFO -Message "Politica UEFI efectiva: $effectiveBootPolicy. No se infiere la confianza del firmware del destino."
+        }
+        $script:AIOUpdateCurrentPhase = 'Staging de paquetes' 
         Initialize-AIOUpdateLcuMsuStaging -Inventory $effectiveInventory -StagingRoot $stagingRoot
         if ($UpdateWinRE -or $UpdateBootWim) {
             [void](Initialize-AIOUpdateEmbeddedSsuStaging -Inventory $effectiveInventory -StagingRoot $stagingRoot)
@@ -8272,12 +9029,16 @@ function Invoke-AIOUpdateMediaIntegration {
                     if ($winreMetadata.Count -ne 1) { throw "WinRE del indice $winreIndex no contiene una unica imagen." }
                     $policy = Get-AIOUpdateWinREPolicy -Build ([version]$winreMetadata[0].Version).Build -Inventory $effectiveInventory
                     Write-Host "`nPolitica WinRE indice ${winreIndex}: $($policy.Reason)" -ForegroundColor Gray
-                    $updated = Update-AIOUpdateWinRE -SourceWinRE $sourceWinRE -DestinationWinRE $updatedWinRE -WinREMount $winreMount -ScratchPath $dismScratch -Inventory $effectiveInventory -Policy $policy -VerifyPrePostCommit $VerifyPrePostCommit -VerificationReports $verificationReports
+                    $updated = Update-AIOUpdateWinRE -SourceWinRE $sourceWinRE -DestinationWinRE $updatedWinRE -WinREMount $winreMount -ScratchPath $dismScratch -Inventory $effectiveInventory -Policy $policy -OptimizeWim ([bool]$OptimizeWims) -VerifyPrePostCommit $VerifyPrePostCommit -VerificationReports $verificationReports
                     $updated | Add-Member -NotePropertyName SourceHash -NotePropertyValue $originalHash -Force
                     $winreCache[$originalHash] = $updated
                 }
                 $servicedWinREByIndex[[string]$winreIndex] = $winreCache[$originalHash]
-                if ($VerifyPrePostCommit) {
+                if (-not $servicedWinREByIndex[[string]$winreIndex].RecoveryUpdated) {
+                    $stackStatus = if ($servicedWinREByIndex[[string]$winreIndex].ServicingStackVerified) { 'solo pila de mantenimiento verificada' } else { 'sin actualizaciones aplicables acreditadas' }
+                    [void]$completed.Add("winre.wim del indice ${winreIndex}: $stackStatus; sin actualizacion de recuperacion")
+                }
+                elseif ($VerifyPrePostCommit) {
                     [void]$completed.Add("winre.wim del indice $winreIndex actualizado y verificado")
                 }
                 else {
@@ -8305,7 +9066,7 @@ function Invoke-AIOUpdateMediaIntegration {
                 throw 'Se solicito actualizar boot.wim, pero no existe sources\boot.wim.'
             }
             $bootImages = @(Get-AIOUpdateImageMetadata -ImagePath $bootWim)
-            $captured = Update-AIOUpdateBootWim -BootWim $bootWim -Images $bootImages -Inventory $effectiveInventory -BootMount $bootMount -ScratchPath $dismScratch -CaptureRoot $captureRoot -StagingRoot $stagingRoot -SetupDUPackages $setupPackages -IntegrateSetupDU:$ApplySetupDU -VerifyPrePostCommit $VerifyPrePostCommit -VerificationReports $verificationReports
+            $captured = Update-AIOUpdateBootWim -BootWim $bootWim -InstallWim $installWim -InstallIndexes $InstallIndexes -Images $bootImages -Inventory $effectiveInventory -BootMount $bootMount -ScratchPath $dismScratch -CaptureRoot $captureRoot -StagingRoot $stagingRoot -SetupDUPackages $setupPackages -IntegrateSetupDU:$ApplySetupDU -VerifyPrePostCommit $VerifyPrePostCommit -VerificationReports $verificationReports
             foreach ($spec in $script:AIOUpdateSetupDependencySpecs) {
                 if ($captured.ContainsKey($spec.Key)) { $setupDependencyFiles[$spec.Key] = $captured[$spec.Key] }
             }
@@ -8345,7 +9106,7 @@ function Invoke-AIOUpdateMediaIntegration {
 
         if ($UpdateBootWim) {
             $script:AIOUpdateCurrentPhase = 'Sincronizacion de archivos de arranque'
-            $bootSync = @(Sync-AIOUpdateMediaBootFiles -MediaRoot $media -CapturedFiles $captured -Architecture $Compatibility.Architecture)
+            $bootSync = @(Sync-AIOUpdateMediaBootFiles -MediaRoot $media -CapturedFiles $captured -Architecture $Compatibility.Architecture -BootSigningPolicy $effectiveBootPolicy)
             if ($bootSync.Count -gt 0) { [void]$completed.Add('Windows Setup, sources y binarios de arranque sincronizados') }
 
             $removedAfterSync = @(Remove-AIOUpdateUnexpectedMediaLocaleDirectories -MediaRoot $media)
@@ -8365,7 +9126,9 @@ function Invoke-AIOUpdateMediaIntegration {
 
         $script:AIOUpdateCurrentPhase = 'Exportacion y optimizacion final de WIM'
         $singleIndexExport = $null
-        if ($InstallIndexes.Count -eq 1) {
+        if ($InstallIndexes.Count -eq 1 -and $initialInstallImages.Count -gt 1) {
+            # Exportar es necesario para entregar solo la edicion seleccionada,
+            # aunque la optimizacion opcional este desactivada.
             $singleIndexExport = Export-AIOUpdateSingleInstallIndex -InstallWim $installWim -SourceIndex $InstallIndexes[0] -StagingRoot $stagingRoot -ScratchPath $dismScratch
             [void]$completed.Add("install.wim exportado con una sola edicion: $($singleIndexExport.ImageName) (indice final 1)")
         }
@@ -8733,7 +9496,7 @@ function Show-UpdatesIntegrator-Menu {
     if ($operationMode -eq '2') {
         try {
             $adkInfo = Initialize-AIOUpdateServicingEnvironment
-            Import-Module Dism -ErrorAction Stop
+
             Assert-AIOUpdateNoMountedImages
             Show-AIOUpdateAdkStatus -AdkInfo $adkInfo
             Show-AIOUpdatePreflightRestoreMenu
@@ -8755,7 +9518,7 @@ function Show-UpdatesIntegrator-Menu {
 
     try {
         $adkInfo = Initialize-AIOUpdateServicingEnvironment
-        Import-Module Dism -ErrorAction Stop
+
         Assert-AIOUpdateNoMountedImages
 
         $mediaRoot = Select-AIOUpdateFolder -Title 'Selecciona la carpeta RAIZ del medio de Windows extraido'
@@ -8872,7 +9635,7 @@ function Show-UpdatesIntegrator-Menu {
         Write-Host "`n Configuracion:" -ForegroundColor Yellow
         $updateWinRE = Read-AIOUpdateYesNo -Prompt 'Actualizar y reinyectar winre.wim' -Default $true
         if ($updateWinRE) {
-            Write-Host ' LCU en WinRE: Automatico por contenido (SSU efectivo/LCU/SafeOS), sin umbral de build.' -ForegroundColor DarkGray
+            Write-Host ' WinRE: SSU + SafeOS; la LCU combinada solo prepara la pila de mantenimiento.' -ForegroundColor DarkGray
         }
 
         $updateBootWim = $false
@@ -8896,13 +9659,18 @@ function Show-UpdatesIntegrator-Menu {
         Write-Host ' Los paquetes Installed, InstallPending o Superseded se enviaran nuevamente a DISM sin desinstalarlos.' -ForegroundColor DarkGray
         Write-Host ' CBS puede aceptar el paquete o indicar que la reaplicacion no es necesaria/aplicable.' -ForegroundColor DarkGray
 
-        $cleanup = Read-AIOUpdateYesNo -Prompt 'Ejecutar StartComponentCleanup en install.wim' -Default $true
+        $bootSigningPolicy = 'Preserve'
+        if ($updateBootWim) {
+            Write-Host ' Arranque UEFI: automatico; se conserva el firmante verificado del medio.' -ForegroundColor Yellow
+        }
+        $cleanup = Read-AIOUpdateYesNo -Prompt 'Ejecutar StartComponentCleanup en install.wim'  -Default $true
         $resetBase = $false
         if ($cleanup) {
             $resetBase = Read-AIOUpdateYesNo -Prompt 'Usar ResetBase (impide desinstalar actualizaciones)' -Default $false
         }
 
         $verifyPrePostCommit = Read-AIOUpdateYesNo -Prompt 'Ejecutar verificaciones completas Pre/Post-Commit' -Default $true
+        Write-Host ' Las consultas CBS durante la integracion y las comprobaciones de copia e integridad se mantienen.' -ForegroundColor DarkGray
 
         $optimizeWims = Read-AIOUpdateYesNo -Prompt 'Reconstruir y optimizar los WIM al terminar' -Default $true
         $wimlib = Find-AIOUpdateWimlib
@@ -8920,8 +9688,10 @@ function Show-UpdatesIntegrator-Menu {
         Write-Host " Indices install.wim : $($indexes -join ', ')" -ForegroundColor White
         $installOutput = if ($indexes.Count -eq 1) { "solo la edicion seleccionada; indice final 1 (original: $($indexes[0]))" } else { 'se conservan todos los indices del WIM' }
         Write-Host " Salida install.wim  : $installOutput" -ForegroundColor White
-        Write-Host " WinRE               : $updateWinRE | LCU: Automatico" -ForegroundColor White
-        Write-Host " Limpieza            : $cleanup | ResetBase: $resetBase" -ForegroundColor White
+        Write-Host " WinRE               : $updateWinRE | SSU + SafeOS; MSU combinado solo para SSU" -ForegroundColor White
+        Write-Host " Limpieza install.wim : $cleanup | ResetBase: $resetBase" -ForegroundColor White
+        if ($updateWinRE -or $updateBootWim) { Write-Host ' Limpieza WinRE/Boot  : Automatica + ResetBase (se aplaza con operaciones pendientes)' -ForegroundColor White }
+        if ($updateBootWim) { Write-Host " Firma UEFI           : $bootSigningPolicy" -ForegroundColor White }
         $bootPlan = if ($updateBootWim) { 'Si, todos los indices' } else { 'No' }
         $setupPlan = if (-not $applySetupDU) {
             'No'
@@ -8936,7 +9706,8 @@ function Show-UpdatesIntegrator-Menu {
         Write-Host " SetupDU             : $setupPlan" -ForegroundColor White
         Write-Host " Reaplicar presentes : Automatico (sin desinstalar)" -ForegroundColor White
         Write-Host " Verif. Pre/Post     : $verifyPrePostCommit" -ForegroundColor White
-        Write-Host " Optimizar WIM       : $optimizeWims" -ForegroundColor White
+        Write-Host " Optimizar WIM       : $optimizeWims (incluye WinRE si se actualiza)" -ForegroundColor White
+        if ($indexes.Count -eq 1 -and $installImages.Count -gt 1) { Write-Host ' Exportar edicion unica: requerido por la seleccion de indice, independiente de la optimizacion.' -ForegroundColor DarkGray }
         Write-Host " Fecha CREATIONTIME  : $updateWimCreationTime" -ForegroundColor White
         Write-Host " Respaldo previo     : Obligatorio, antes del primer montaje" -ForegroundColor White
         Write-Host ''
@@ -8951,7 +9722,7 @@ function Show-UpdatesIntegrator-Menu {
             return
         }
 
-        $result = Invoke-AIOUpdateMediaIntegration -MediaRoot $mediaRoot -Inventory $inventory -InstallIndexes $indexes -Compatibility $compatibility -UpdateWinRE:$updateWinRE -UpdateBootWim:$updateBootWim -ApplySetupDU:$applySetupDU -Cleanup:$cleanup -ResetBase:$resetBase -OptimizeWims:$optimizeWims -UpdateWimCreationTime:$updateWimCreationTime -VerifyPrePostCommit $verifyPrePostCommit
+        $result = Invoke-AIOUpdateMediaIntegration -MediaRoot $mediaRoot -Inventory $inventory -InstallIndexes $indexes -Compatibility $compatibility -UpdateWinRE:$updateWinRE -UpdateBootWim:$updateBootWim -ApplySetupDU:$applySetupDU -Cleanup:$cleanup -ResetBase:$resetBase -OptimizeWims:$optimizeWims -UpdateWimCreationTime:$updateWimCreationTime -BootSigningPolicy $bootSigningPolicy -VerifyPrePostCommit $verifyPrePostCommit
 
         Show-AIOUpdateTerminalSummary -Status Success -Message 'La integracion de actualizaciones termino correctamente.'
         Wait-AIOUpdateUser
