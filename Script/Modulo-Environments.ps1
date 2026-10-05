@@ -1,7 +1,7 @@
 ﻿# =================================================================
 #  Modulo-Entornos
 #
-#  CONTENIDO   : Manage-WinRE-Menu, Manage-BootWim-Menu
+#  CONTENIDO   : Manage-WinRE-Menu, Manage-BootWim-Menu, Setup clasico reversible
 #  DEPENDENCIAS DEL NUCLEO (heredadas via dot-source):
 #    - Write-Log              : registro de eventos
 #    - $Script:IMAGE_MOUNTED  : estado de montaje (0 = sin imagen, 1 = WIM, 2 = VHD)
@@ -247,6 +247,225 @@ function Manage-WinRE-Menu {
     Pause
 }
 
+# =================================================================
+# Setup clasico de Windows 11 (WinPE de instalacion 24H2 o posterior).
+# El respaldo vive en el mismo indice: sobrevive a Commit y desaparece
+# junto con la modificacion si el usuario elige Discard.
+# =================================================================
+function Get-AIOBootSetupHash {
+    param([AllowEmptyCollection()][byte[]]$Bytes)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-', '') }
+    finally { $sha.Dispose() }
+}
+
+function Get-AIOBootSetupFileState {
+    param([Parameter(Mandatory=$true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [pscustomobject]@{ Exists = $false; Base64 = ''; Hash = ''; Attributes = 0; Sddl = '' }
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Se esperaba un archivo: $Path" }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $sections = [Security.AccessControl.AccessControlSections]::Access -bor
+                [Security.AccessControl.AccessControlSections]::Owner -bor
+                [Security.AccessControl.AccessControlSections]::Group
+    return [pscustomobject]@{
+        Exists = $true
+        Base64 = [Convert]::ToBase64String($bytes)
+        Hash = Get-AIOBootSetupHash -Bytes $bytes
+        Attributes = [int][IO.File]::GetAttributes($Path)
+        Sddl = $acl.GetSecurityDescriptorSddlForm($sections)
+    }
+}
+
+function Set-AIOBootSetupFileState {
+    param([Parameter(Mandatory=$true)][string]$Path, [Parameter(Mandatory=$true)]$State)
+    $before = Get-AIOBootSetupFileState -Path $Path
+    $unlocked = $false
+    # Preparar bytes antes de tocar permisos o contenido.
+    $bytes = if ($State.Exists) { [Convert]::FromBase64String($State.Base64) } else { $null }
+    try {
+        try {
+            if ($before.Exists) {
+                [IO.File]::SetAttributes($Path, ([IO.FileAttributes]$before.Attributes -band
+                    (-bnot [IO.FileAttributes]::ReadOnly)))
+            }
+            if ($State.Exists) { [IO.File]::WriteAllBytes($Path, [byte[]]$bytes) }
+            elseif ($before.Exists) { Remove-Item -LiteralPath $Path -Force -ErrorAction Stop }
+        } catch [System.UnauthorizedAccessException] {
+            if (-not $before.Exists) { throw }
+            $unlocked = $true
+            Unlock-Single-File -FilePath $Path | Out-Null
+            if ($State.Exists) { [IO.File]::WriteAllBytes($Path, [byte[]]$bytes) }
+            else { Remove-Item -LiteralPath $Path -Force -ErrorAction Stop }
+        }
+    } finally {
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            # Restaurar descriptor exacto; no depender del fallback del nucleo.
+            $metadata = if ($State.Exists -and $State.Sddl) { $State } else { $before }
+            # Atributos antes del ACL: el descriptor original puede quitar
+            # al administrador el permiso de volver a escribir atributos.
+            if ($metadata.Exists) { [IO.File]::SetAttributes($Path, [IO.FileAttributes]$metadata.Attributes) }
+            if ($metadata.Sddl) {
+                Enable-Privileges | Out-Null
+                $acl = New-Object System.Security.AccessControl.FileSecurity
+                $acl.SetSecurityDescriptorSddlForm($metadata.Sddl)
+                Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
+            }
+        }
+        if ($unlocked -and $null -ne $Script:FileSDDL_Backups) {
+            [void]$Script:FileSDDL_Backups.Remove([IO.Path]::GetFullPath($Path).ToLowerInvariant())
+        }
+    }
+    $after = Get-AIOBootSetupFileState -Path $Path
+    if ($after.Exists -ne $State.Exists -or ($State.Exists -and $after.Hash -ne $State.Hash)) {
+        throw "Fallo la verificacion de contenido de $Path."
+    }
+    if ($State.Exists -and $State.Sddl -and
+        ($after.Sddl -ne $State.Sddl -or $after.Attributes -ne $State.Attributes)) {
+        throw "Fallo la restauracion de permisos o atributos de $Path."
+    }
+}
+
+function Assert-AIOBootClassicSetupAvailable {
+    param([Parameter(Mandatory=$true)][string]$MountPath)
+    # Un WinPE de herramientas o un install.wim no deben recibir este cambio.
+    foreach ($relative in @('setup.exe', 'sources\setup.exe', 'Windows\System32\winpeshl.exe')) {
+        $file = Join-Path $MountPath $relative
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or
+            (Get-Item -LiteralPath $file -Force -ErrorAction Stop).Length -eq 0) {
+            throw "Este indice no contiene el entorno Setup requerido ($relative). Selecciona el indice de instalacion de boot.wim."
+        }
+    }
+    $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $MountPath 'setup.exe'))
+    if ($version.FileMajorPart -ne 10 -or $version.FileBuildPart -lt 26100) {
+        throw 'Esta opcion requiere Setup de Windows 11 24H2 o posterior (build 26100+). No se reconocio esa version en setup.exe.'
+    }
+}
+
+function Test-AIOBootStandardShell {
+    param([Parameter(Mandatory=$true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+    # Solo reemplazar un INI estandar de un unico lanzador, sin argumentos.
+    # Conservar scripts/DaRT y otros arranques personalizados sin alterarlos.
+    $lines = @([IO.File]::ReadAllLines($Path) | ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -and -not $_.StartsWith(';') -and -not $_.StartsWith('#') })
+    if ($lines.Count -ne 2) { return $false }
+    $launcher = '(?:%SYSTEMDRIVE%|X:)\\(?:sources\\)?setup\.exe'
+    if ($lines[0] -ieq '[LaunchApp]') { return $lines[1] -match ('(?i)^AppPath\s*=\s*"?' + $launcher + '"?\s*$') }
+    if ($lines[0] -ieq '[LaunchApps]') { return $lines[1] -match ('(?i)^"?' + $launcher + '"?\s*$') }
+    return $false
+}
+
+function Get-AIOBootSetupBackup {
+    param([Parameter(Mandatory=$true)][string]$Path)
+    $backup = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if ($backup.Schema -ne 1 -or $backup.Owner -cne 'AdminImagenOffline.SetupClassic' -or
+        $null -eq $backup.Original -or $backup.Original.Exists -isnot [bool]) {
+        throw 'Respaldo de Setup no reconocido. No se modificara la imagen.'
+    }
+    if ($backup.Original.Exists) {
+        $bytes = [Convert]::FromBase64String($backup.Original.Base64)
+        if ((Get-AIOBootSetupHash -Bytes $bytes) -cne $backup.Original.Hash -or
+            [string]::IsNullOrWhiteSpace($backup.Original.Sddl) -or
+            $null -eq $backup.Original.Attributes) {
+            throw 'El respaldo original de winpeshl.ini esta incompleto o no coincide con su SHA-256.'
+        }
+    } elseif ($backup.Original.Base64 -ne '' -or $backup.Original.Hash -ne '' -or $backup.Original.Sddl -ne '') {
+        throw 'El respaldo de la ausencia original de winpeshl.ini no es valido.'
+    }
+    return $backup
+}
+
+function Assert-AIOBootSetupConfiguration {
+    param([Parameter(Mandatory=$true)][string]$MountPath, [Parameter(Mandatory=$true)]$Expected)
+    $ini = Join-Path $MountPath 'Windows\System32\winpeshl.ini'
+    $backupPath = Join-Path $MountPath 'Windows\System32\AdminImagenOffline.SetupClassic.json'
+    $current = Get-AIOBootSetupFileState -Path $ini
+    if ($current.Exists -ne $Expected.Ini.Exists -or
+        ($current.Exists -and ($current.Hash -ne $Expected.Ini.Hash -or
+            $current.Attributes -ne $Expected.Ini.Attributes -or $current.Sddl -ne $Expected.Ini.Sddl))) {
+        throw 'winpeshl.ini cambio despues de configurar Setup. No se guardara automaticamente.'
+    }
+    if ($Expected.Mode -eq 'Classic') {
+        Assert-AIOBootClassicSetupAvailable -MountPath $MountPath
+        $backup = Get-AIOBootSetupBackup -Path $backupPath
+        if ((Get-FileHash -LiteralPath $backupPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne $Expected.BackupHash) {
+            throw 'El respaldo de Setup cambio durante la sesion.'
+        }
+    } elseif (Test-Path -LiteralPath $backupPath) {
+        throw 'La restauracion no termino: todavia existe el respaldo de Setup.'
+    }
+}
+
+function Set-AIOBootSetupMode {
+    param(
+        [Parameter(Mandatory=$true)][string]$MountPath,
+        [Parameter(Mandatory=$true)][ValidateSet('Classic', 'Original')][string]$Mode
+    )
+    $ini = Join-Path $MountPath 'Windows\System32\winpeshl.ini'
+    $backupPath = Join-Path $MountPath 'Windows\System32\AdminImagenOffline.SetupClassic.json'
+    $classicBytes = [Text.Encoding]::ASCII.GetBytes("[LaunchApps]`r`n%SYSTEMDRIVE%\setup.exe, /legacy`r`n")
+    $classicHash = Get-AIOBootSetupHash -Bytes $classicBytes
+    $current = Get-AIOBootSetupFileState -Path $ini
+    $backup = $null
+    if (Test-Path -LiteralPath $backupPath) { $backup = Get-AIOBootSetupBackup -Path $backupPath }
+    if ($Mode -eq 'Classic') {
+        Assert-AIOBootClassicSetupAvailable -MountPath $MountPath
+        if ($null -ne $backup) {
+            if (-not $current.Exists -or $current.Hash -ne $classicHash) {
+                throw 'Existe un respaldo, pero el inicio actual no coincide con el Setup clasico administrado. Restaura primero la configuracion original.'
+            }
+            Write-Host '[INFO] Setup clasico ya esta configurado. Se conserva el respaldo original.' -ForegroundColor Cyan
+        } else {
+            if (-not (Test-AIOBootStandardShell -Path $ini)) {
+                throw 'winpeshl.ini contiene un inicio personalizado o no reconocido. Se conserva sin cambios para proteger sus scripts y herramientas.'
+            }
+            $backup = [pscustomobject]@{ Schema = 1; Owner = 'AdminImagenOffline.SetupClassic'; Original = $current }
+            $jsonBytes = [Text.Encoding]::UTF8.GetBytes(($backup | ConvertTo-Json -Depth 4))
+            # CreateNew evita sobrescribir un respaldo anterior, incluso ante carreras.
+            $stream = [IO.File]::Open($backupPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            try { $stream.Write($jsonBytes, 0, $jsonBytes.Length) } finally { $stream.Dispose() }
+            try {
+                $backup = Get-AIOBootSetupBackup -Path $backupPath
+                $classic = [pscustomobject]@{
+                    Exists = $true; Base64 = [Convert]::ToBase64String($classicBytes); Hash = $classicHash
+                    Attributes = $current.Attributes; Sddl = $current.Sddl
+                }
+                Set-AIOBootSetupFileState -Path $ini -State $classic
+            } catch {
+                $failure = $_.Exception.Message
+                try {
+                    Set-AIOBootSetupFileState -Path $ini -State $current
+                    Remove-Item -LiteralPath $backupPath -Force -ErrorAction Stop
+                } catch {
+                    throw "Fallo la activacion ($failure) y la reversion ($($_.Exception.Message)). Descarta este montaje; se conserva el respaldo disponible."
+                }
+                throw "No se activo Setup clasico; se restauro el estado anterior. $failure"
+            }
+        }
+    } else {
+        if ($null -eq $backup) { throw 'No hay un respaldo creado por esta opcion. No se eliminara ni modificara winpeshl.ini.' }
+        # Acepta el estado original para reintentar una limpieza interrumpida.
+        $isOriginal = $current.Exists -eq $backup.Original.Exists -and
+            (-not $current.Exists -or $current.Hash -eq $backup.Original.Hash)
+        if (-not $isOriginal -and (-not $current.Exists -or $current.Hash -ne $classicHash)) {
+            throw 'winpeshl.ini fue modificado por otra herramienta. Se conservan el archivo y el respaldo; no se sobrescribiran esos cambios.'
+        }
+        Set-AIOBootSetupFileState -Path $ini -State $backup.Original
+        Remove-Item -LiteralPath $backupPath -Force -ErrorAction Stop
+    }
+    $expected = [pscustomobject]@{
+        Mode = $Mode; Ini = Get-AIOBootSetupFileState -Path $ini
+        BackupHash = if ($Mode -eq 'Classic') { (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256 -ErrorAction Stop).Hash } else { '' }
+    }
+    Assert-AIOBootSetupConfiguration -MountPath $MountPath -Expected $expected
+    Write-Log -LogLevel INFO -Message "BootWimManager: Configuracion Setup verificada en el montaje. Modo: $Mode."
+    Write-Host '[OK] Configuracion preparada y verificada. Elige T y luego S para guardarla en boot.wim.' -ForegroundColor Green
+    return $expected
+}
+
 function Manage-BootWim-Menu {
     Clear-Host
     Write-Host "=======================================================" -ForegroundColor Cyan
@@ -276,7 +495,7 @@ function Manage-BootWim-Menu {
     # 3. Analizar Indices
     Write-Host "Analizando estructura del boot.wim..." -ForegroundColor DarkGray
     try {
-        $images = Get-WindowsImage -ImagePath $bootPath
+        $images = @(Get-WindowsImage -ImagePath $bootPath -ErrorAction Stop)
     } catch {
         Write-Log -LogLevel ERROR -Message "BootWimManager: Fallo al leer la estructura de indices del WIM. Probable corrupcion. - $($_.Exception.Message)"
         Write-Warning "Error leyendo el WIM. Esta corrupto?"
@@ -286,11 +505,12 @@ function Manage-BootWim-Menu {
     Write-Host "`nIndices detectados:" -ForegroundColor Cyan
     $idxSetup = $null
     $idxPE = $null
+    $setupNamePattern = "Setup|(?<!Pre)Installation|Instalar|Instalaci[oó]n"
 
     foreach ($img in $images) {
         $desc = "Generico"
         # Heuristica para identificar que es cada indice
-        if ($img.ImageName -match "Setup|Installation|Instalar") { 
+        if ($img.ImageName -match $setupNamePattern) { 
             $desc = "Instalador de Windows (Setup)"; $idxSetup = $img.ImageIndex 
         }
         elseif ($img.ImageName -match "PE|Preinstallation") { 
@@ -305,37 +525,46 @@ function Manage-BootWim-Menu {
 
     # 4. Seleccion Inteligente
     Write-Host "======================================================="
-    Write-Host "Donde quieres inyectar DaRT/Addons?"
+    Write-Host "Que indice de boot.wim quieres editar?"
     Write-Host "   [1] En Windows PE (Indice $idxPE)" -ForegroundColor White
     Write-Host "       (Para crear un USB booteable exclusivo de diagnostico)" -ForegroundColor Gray
     Write-Host ""
 	Write-Host "   [2] En el Instalador (Indice $idxSetup)" -ForegroundColor White
-    Write-Host "       (Aparecera al pulsar 'Reparar el equipo' durante la instalacion)" -ForegroundColor Gray
+    Write-Host "       (Configurar Setup clasico, inyectar DaRT o controladores)" -ForegroundColor Gray
     Write-Host ""
     Write-Host "   [M] Seleccion Manual (Si la deteccion fallo)" -ForegroundColor DarkGray
     
     $sel = Read-Host "Selecciona una opcion"
     $targetIndex = $null
 
-    switch ($sel) {
+    switch (([string]$sel).Trim().ToUpperInvariant()) {
         "1" { $targetIndex = $idxPE }
         "2" { $targetIndex = $idxSetup }
         "M" { $targetIndex = Read-Host "Introduce el numero de Indice manualmente" }
     }
 
-    if (-not $targetIndex -or $targetIndex -eq "") { 
+    $parsedIndex = 0
+    if (-not [int]::TryParse([string]$targetIndex, [ref]$parsedIndex) -or
+        $parsedIndex -lt 1 -or $parsedIndex -notin @($images | ForEach-Object { [int]$_.ImageIndex })) { 
         Write-Log -LogLevel WARN -Message "BootWimManager: Seleccion de indice invalida o vacia."
         Write-Warning "Seleccion invalida."; Pause; return 
     }
 
+    $targetIndex = $parsedIndex
+    # Clasificar el indice elegido, tambien cuando se selecciono manualmente.
+    # No asumir que Windows Setup siempre ocupa el indice numerico 2.
+    $selectedImage = $images | Where-Object { [int]$_.ImageIndex -eq $targetIndex } | Select-Object -First 1
+    $isSetupIndex = ([string]$selectedImage.ImageName -match $setupNamePattern)
+
     Write-Log -LogLevel INFO -Message "BootWimManager: Indice objetivo fijado en -> [$targetIndex]"
 
     # 5. Proceso de Montaje y Edicion
+    $bootMountActive = $false
     try {
-        # Configuramos las variables globales para engañar al resto del script
+        # Contexto compartido para los modulos de addons, drivers y desmontaje.
         $Script:WIM_FILE_PATH = $bootPath
         $Script:MOUNTED_INDEX = $targetIndex
-        $Script:IMAGE_MOUNTED = 1 # Flag virtual activado
+        # Marcar como montada solo despues del exito real de DISM.
         
         # Limpieza previa
         Initialize-ScratchSpace
@@ -346,6 +575,10 @@ function Manage-BootWim-Menu {
         dism /mount-wim /wimfile:"$Script:WIM_FILE_PATH" /index:$Script:MOUNTED_INDEX /mountdir:"$Script:MOUNT_DIR"
 
         if ($LASTEXITCODE -eq 0) {
+            $bootMountActive = $true
+            $Script:IMAGE_MOUNTED = 1
+            $setupExpected = $null
+            $setupEditFailed = $false
             Write-Log -LogLevel INFO -Message "BootWimManager: Montaje exitoso. Desplegando menu de edicion en vivo."
             # --- MINI-MENU DE EDICION BOOT.WIM ---
             $doneEditingBoot = $false
@@ -358,6 +591,15 @@ function Manage-BootWim-Menu {
                 Write-Host ""
                 Write-Host "   [1] Inyectar Addons y Paquetes (Ej. DaRT)"
                 Write-Host "   [2] Inyectar Drivers (.inf) -> Vital para detectar discos" -ForegroundColor Cyan
+                if ($isSetupIndex) {
+                    Write-Host "   [3] Establecer Setup clasico como predeterminado" -ForegroundColor Yellow
+                    Write-Host "   [4] Restaurar la configuracion original de Setup" -ForegroundColor Yellow
+                    Write-Host "       (Arranque desde USB/ISO)" -ForegroundColor Gray
+                    if ($null -ne $setupExpected) {
+                        $setupLabel = if ($setupExpected.Mode -eq 'Classic') { 'Clasico' } else { 'Original' }
+                        Write-Host "       Setup preparado: $setupLabel (pendiente de guardar)" -ForegroundColor Cyan
+                    }
+                }
                 Write-Host ""
                 Write-Host "   [T] Terminar edicion y proceder a Guardar" -ForegroundColor Green
                 Write-Host ""
@@ -366,24 +608,48 @@ function Manage-BootWim-Menu {
                 switch ($opcionBoot.ToUpper()) {
                     "1" { Write-Log -LogLevel INFO -Message "BootWimManager: Lanzando inyector de Addons."; Show-Addons-GUI }
                     "2" { Write-Log -LogLevel INFO -Message "BootWimManager: Lanzando inyector de Drivers."; Show-Drivers-GUI }
-                    "T" { 
-                        Write-Log -LogLevel INFO -Message "BootWimManager: El usuario termino la edicion interactiva."
-                        $doneEditingBoot = $true 
+                    { $isSetupIndex -and $_ -in @('3', '4') } {
+                        try {
+                            $setupMode = if ($_ -eq '3') { 'Classic' } else { 'Original' }
+                            $setupExpected = Set-AIOBootSetupMode -MountPath $Script:MOUNT_DIR -Mode $setupMode
+                            $setupEditFailed = $false
+                        } catch {
+                            $setupEditFailed = $true
+                            Write-Log -LogLevel ERROR -Message "BootWimManager: Setup: $($_.Exception.Message)"
+                            Write-Warning $_.Exception.Message
+                            Write-Host 'Corrige y repite la opcion, o termina con T y N para descartar.' -ForegroundColor Yellow
+                        }
+                        Pause
+                    }
+                    "T" {
+                        $saveBoot = ([string](Read-Host "Deseas GUARDAR los cambios en el boot.wim? (S/N)")).Trim().ToUpperInvariant()
+                        if ($saveBoot -notin @('S', 'N')) { Write-Warning 'Responde S o N.'; break }
+                        try {
+                            if ($saveBoot -eq 'S') {
+                                if ($setupEditFailed) { throw 'Hay una operacion Setup fallida. Repite la opcion correctamente o elige N para descartar.' }
+                                if ($null -ne $setupExpected) {
+                                    Assert-AIOBootSetupConfiguration -MountPath $Script:MOUNT_DIR -Expected $setupExpected
+                                }
+                                Write-Log -LogLevel ACTION -Message 'BootWimManager: Guardando boot.wim; configuracion Setup comprobada antes del Commit.'
+                                Unmount-Image -Commit
+                            } else {
+                                Write-Log -LogLevel INFO -Message 'BootWimManager: Descartando todos los cambios del montaje.'
+                                Unmount-Image
+                            }
+                            if ($Script:IMAGE_MOUNTED -eq 0) {
+                                $bootMountActive = $false
+                                $doneEditingBoot = $true
+                            }
+                        } catch {
+                            Write-Log -LogLevel ERROR -Message "BootWimManager: No se completo el cierre: $($_.Exception.Message)"
+                            Write-Warning $_.Exception.Message
+                            Pause
+                        }
                     }
                     default { Write-Warning "Opcion invalida."; Start-Sleep 1 }
                 }
             }
 
-            # Pregunta final
-            Clear-Host
-            Write-Host "======================================================="
-            if ((Read-Host "Deseas GUARDAR los cambios en el boot.wim? (S/N)").ToUpper() -eq 'S') {
-                Write-Log -LogLevel ACTION -Message "BootWimManager: Iniciando guardado de cambios (Commit) en boot.wim."
-                Unmount-Image -Commit
-            } else {
-                Write-Log -LogLevel INFO -Message "BootWimManager: Descartando cambios (Discard) en boot.wim."
-                Unmount-Image # Discard por defecto
-            }
 
         } else {
             Write-Log -LogLevel ERROR -Message "BootWimManager: Fallo critico al montar el boot.wim. Codigo DISM: $LASTEXITCODE"
@@ -397,9 +663,14 @@ function Manage-BootWim-Menu {
     } catch {
         Write-Log -LogLevel ERROR -Message "BootWimManager: Excepcion no controlada en el gestor de arranque - $($_.Exception.Message)"
         Write-Error "Error critico en el gestor de arranque: $_"
-        $Script:IMAGE_MOUNTED = 0
-        $Script:WIM_FILE_PATH = $null
-        $Script:MOUNTED_INDEX = $null
+        # No perder el seguimiento de un montaje real si falla una operacion.
+        if (-not $bootMountActive) {
+            $Script:IMAGE_MOUNTED = 0
+            $Script:WIM_FILE_PATH = $null
+            $Script:MOUNTED_INDEX = $null
+        } else {
+            Write-Warning 'boot.wim sigue montado. Usa Gestion de Imagen para recuperarlo o descartar los cambios.'
+        }
         Pause
     }
 }
