@@ -13,6 +13,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 * **Diagnóstico de Idiomas Alineado con Actualizaciones**: Ante un error, el ZIP de diagnóstico se genera en `Reportes\Diagnosticos\Idiomas` (`Diagnostico_AIOL_AAAAMMDD_HHMMSS`) e incluye `Error.txt`, la configuración y las operaciones de la sesión, un informe de fallo JSON/HTML, el estado de las imágenes DISM montadas, los logs DISM de la sesión, la transcripción DISM, el manifiesto *Preflight* y el registro de AdminImagenOffline. Si no es posible crear el ZIP, se conserva la carpeta de diagnóstico.
 * **Log DISM Persistente en Idiomas**: El registro DISM de cada ejecución se guarda en la carpeta `Logs` (`Idiomas_AAAAMMDD_HHMMSS.log`) y su ruta se muestra al finalizar la integración, igual que ya ocurría en Actualizaciones.
+* **Setup Clásico como Predeterminado en Windows 11**: En *Editar boot.wim*, el índice de instalación (Setup) de Windows 11 24H2 o posterior ofrece dos opciones nuevas: establecer el Setup clásico como predeterminado y restaurar la configuración original. Se aplica mediante `winpeshl.ini`, guarda un respaldo con verificación SHA-256 dentro de la propia imagen, no sobrescribe arranques personalizados (DaRT, scripts), verifica el resultado antes del *Commit* y revierte automáticamente si algo falla.
 
 ## Características Principales
 
@@ -124,7 +125,7 @@ Herramientas de conversión e ingesta de imágenes.
 ### [ 3 ] Herramientas de Arranque y Medios (Boot Tools)
 Diseñado para preparar la distribución y el despliegue final de tu sistema personalizado:
 
-* **Editar boot.wim:** Accede al entorno de preinstalación para inyectar controladores de almacenamiento y garantizar que equipos modernos (con tecnologías Intel RST o VMD) reconozcan los discos duros durante la instalación.
+* **Editar boot.wim:** Accede al entorno de preinstalación para inyectar controladores de almacenamiento y garantizar que equipos modernos (con tecnologías Intel RST o VMD) reconozcan los discos duros durante la instalación. En el índice de instalación de Windows 11 24H2 o posterior también puedes **establecer el Setup clásico como predeterminado** o **restaurar la configuración original**: usa `winpeshl.ini`, crea un respaldo reversible dentro de la imagen y conserva sin cambios cualquier `winpeshl.ini` personalizado. Los cambios solo se escriben en `boot.wim` si eliges guardar.
 * **Gestionar WinRE (Entorno de Recuperación):** Va a `Windows\System32\Recovery`, extrae el `winre.wim`, lo monta en el *Scratch*, permite inyectar DaRT o Drivers, y al guardar, utiliza `/Export-Image /Bootable` para destruir los diccionarios viejos y recomprimir el entorno, ahorrando cientos de megabytes de "peso muerto".
 * **Crear ISO Booteable:** Genera de manera eficiente un archivo ISO listo para ser empleado en herramientas como Rufus o Ventoy, asegurando compatibilidad integral con sistemas UEFI y BIOS Legacy.
 * **Despliegue a VHD / Disco Físico:** Aplica directamente tu imagen de Windows a una unidad de almacenamiento externa o a un disco virtual, particionando y configurando los sectores de arranque de manera totalmente automatizada.

@@ -2,6 +2,7 @@
 ====================================================
 - Idiomas: diagnostico alineado con el de Actualizaciones. Ante un error, el ZIP se genera en Reportes\Diagnosticos\Idiomas (Diagnostico_AIOL_AAAAMMDD_HHMMSS) e incluye Error.txt, configuracion, operaciones, informe de fallo JSON/HTML, estado de imagenes DISM montadas, logs DISM de la sesion, transcripcion DISM, manifiesto Preflight y el registro de AdminImagenOffline. Si no se puede crear el ZIP, se conserva la carpeta de diagnostico.
 - Idiomas: el log DISM de cada ejecucion se guarda de forma persistente en la carpeta Logs (Idiomas_AAAAMMDD_HHMMSS.log) y su ruta se muestra al terminar la integracion.
+- Boot Tools: nueva opcion en Editar boot.wim (solo indice Setup de Windows 11 24H2 o posterior) para establecer el Setup clasico como predeterminado mediante winpeshl.ini y restaurar la configuracion original. Crea un respaldo con SHA-256 dentro de la propia imagen, conserva archivos winpeshl.ini personalizados (DaRT, scripts) sin modificarlos, verifica el resultado antes de guardar y revierte si falla.
 ====================================================
 
 1.5.7
