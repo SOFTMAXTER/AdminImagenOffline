@@ -358,6 +358,34 @@ function Test-AIOBootStandardShell {
     return $false
 }
 
+function Get-AIOBootClassicSetupStatus {
+    param([Parameter(Mandatory=$true)][string]$MountPath)
+    try {
+        $ini = Join-Path $MountPath 'Windows\System32\winpeshl.ini' -ErrorAction Stop
+        if (-not (Test-Path -LiteralPath $ini -ErrorAction Stop)) {
+            return [pscustomobject]@{ State = 'NotConfigured'; Label = '[NO CONFIGURADO]'; Color = 'DarkGray' }
+        }
+        # Leer el contenido del montaje cada vez que se dibuja el menu.
+        # No depender del respaldo JSON ni de variables de la sesion anterior.
+        $lines = @([IO.File]::ReadAllLines($ini) | ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -and -not $_.StartsWith(';') -and -not $_.StartsWith('#') })
+        # Reconocer el lanzador documentado, tolerando comentarios, BOM,
+        # mayusculas, espacios y comillas. Una mera mencion de /legacy no basta.
+        $classicLauncher = '(?i)^(?:"(?:%SYSTEMDRIVE%|X:)\\setup\.exe"|(?:%SYSTEMDRIVE%|X:)\\setup\.exe)\s*,\s*(?:/legacy|"/legacy")\s*$'
+        if ($lines.Count -eq 2 -and $lines[0] -ieq '[LaunchApps]' -and $lines[1] -match $classicLauncher) {
+            return [pscustomobject]@{ State = 'Configured'; Label = '[CONFIGURADO]'; Color = 'Green' }
+        }
+        if (Test-AIOBootStandardShell -Path $ini) {
+            return [pscustomobject]@{ State = 'NotConfigured'; Label = '[NO CONFIGURADO]'; Color = 'DarkGray' }
+        }
+        return [pscustomobject]@{ State = 'Custom'; Label = '[OTRA CONFIGURACION]'; Color = 'Yellow' }
+    } catch {
+        # Un error de lectura no equivale a que el archivo no exista.
+        return [pscustomobject]@{ State = 'Unreadable'; Label = '[NO SE PUDO LEER]'; Color = 'Red' }
+    }
+}
+
+
 function Get-AIOBootSetupBackup {
     param([Parameter(Mandatory=$true)][string]$Path)
     $backup = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -592,7 +620,9 @@ function Manage-BootWim-Menu {
                 Write-Host "   [1] Inyectar Addons y Paquetes (Ej. DaRT)"
                 Write-Host "   [2] Inyectar Drivers (.inf) -> Vital para detectar discos" -ForegroundColor Cyan
                 if ($isSetupIndex) {
-                    Write-Host "   [3] Establecer Setup clasico como predeterminado" -ForegroundColor Yellow
+                    $setupStatus = Get-AIOBootClassicSetupStatus -MountPath $Script:MOUNT_DIR
+                    Write-Host "   [3] Establecer Setup clasico como predeterminado " -ForegroundColor Yellow -NoNewline
+                    Write-Host $setupStatus.Label -ForegroundColor $setupStatus.Color
                     Write-Host "   [4] Restaurar la configuracion original de Setup" -ForegroundColor Yellow
                     Write-Host "       (Arranque desde USB/ISO)" -ForegroundColor Gray
                     if ($null -ne $setupExpected) {
