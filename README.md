@@ -1,5 +1,5 @@
 
-# AdminImagenOffline V1.5.8 by SOFTMAXTER
+# AdminImagenOffline V1.5.9 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -9,11 +9,16 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.8 (Changelog)
+## 🆕 Novedades en la Versión 1.5.9 (Changelog)
 
-* **Diagnóstico de Idiomas Alineado con Actualizaciones**: Ante un error, el ZIP de diagnóstico se genera en `Reportes\Diagnosticos\Idiomas` (`Diagnostico_AIOL_AAAAMMDD_HHMMSS`) e incluye `Error.txt`, la configuración y las operaciones de la sesión, un informe de fallo JSON/HTML, el estado de las imágenes DISM montadas, los logs DISM de la sesión, la transcripción DISM, el manifiesto *Preflight* y el registro de AdminImagenOffline. Si no es posible crear el ZIP, se conserva la carpeta de diagnóstico.
-* **Log DISM Persistente en Idiomas**: El registro DISM de cada ejecución se guarda en la carpeta `Logs` (`Idiomas_AAAAMMDD_HHMMSS.log`) y su ruta se muestra al finalizar la integración, igual que ya ocurría en Actualizaciones.
-* **Setup Clásico como Predeterminado en Windows 11**: En *Editar boot.wim*, el índice de instalación (Setup) de Windows 11 24H2 o posterior ofrece dos opciones nuevas: establecer el Setup clásico como predeterminado y restaurar la configuración original. Se aplica mediante `winpeshl.ini`, guarda un respaldo con verificación SHA-256 dentro de la propia imagen, no sobrescribe arranques personalizados (DaRT, scripts), verifica el resultado antes del *Commit* y revierte automáticamente si algo falla.
+* **Nuevo Módulo BootSetup (GUI de Setup y Fondos)**: En *Editar boot.wim*, el índice de instalación (Setup) abre una ventana con dos pestañas, *Inicio y requisitos* y *Fondo de instalación*:
+  * **Setup Legacy**: configura `winpeshl.ini` para iniciar el instalador con `/legacy` y permite restaurar el inicio original.
+  * **Estilo Windows 10**: renombra `setupprep.exe` a `setupprep.exe.aio.bak` en `sources` del índice y del medio (requiere abrir el `boot.wim` del medio completo) y permite restaurarlo.
+  * **Bypass de Windows 11**: integra los valores `LabConfig` de TPM, Secure Boot y RAM en el `SYSTEM` offline del índice, sin tocar el registro del equipo anfitrión. *Restaurar requisitos* devuelve los valores previos o los elimina si no existían.
+  * **Fondo de instalación**: acepta imágenes PNG, JPG o BMP de hasta 64 megapixeles (recomendado 1024 x 768), con vista previa y silueta orientativa del asistente. Actualiza los fondos internos del índice y los externos del medio, y permite restaurar los originales.
+* **Guardado Seguro de boot.wim**: Al salir con `T` se elige guardar (`S`) o descartar (`N`). Al guardar, se verifican Setup, bypass y fondos antes del *Commit* y los cambios externos al `boot.wim` se aplican después de guardar. Al descartar, también se deshacen los cambios externos.
+* **Selección del Índice de boot.wim**: *Editar boot.wim* pregunta qué índice editar, detecta el de instalación por su nombre en lugar de asumir el índice 2 y valida el índice elegido.
+* **Convertir ESD a WIM con Varios Índices**: Permite exportar un índice, una lista (`1,3,5`) o todos (`T`) a un mismo `.wim`. Los índices se identifican con `DISM /English`, independientemente del idioma de Windows. Impide usar el ESD como destino y, si la conversión falla, no cambia la ruta del WIM activo.
 
 ## Características Principales
 
@@ -61,6 +66,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
         ├── Modulo-Addons.ps1
         ├── Modulo-Appx.ps1
         ├── Modulo-Bloatware.ps1
+        ├── Modulo-BootSetup.ps1
         ├── Modulo-Conversion.ps1
         ├── Modulo-Dashboard.ps1
         ├── Modulo-DeployVHD.ps1
@@ -119,13 +125,13 @@ Este es el núcleo de la herramienta. Controla el ciclo de vida del montaje de l
 ### [ 2 ] Convertir Formatos
 Herramientas de conversión e ingesta de imágenes.
 
-* **Convertir ESD a WIM:** Los archivos `.esd` tienen compresión sólida y no pueden ser modificados directamente. Esta opción extrae un índice del ESD y lo convierte a formato `.wim` estándar para su posterior montaje y edición.
+* **Convertir ESD a WIM:** Los archivos `.esd` tienen compresión sólida y no pueden ser modificados directamente. Esta opción extrae uno o varios índices del ESD (uno, una lista como `1,3,5` o todos) y los convierte a un único `.wim` estándar para su posterior montaje y edición.
 * **Convertir VHD/VHDX a WIM:** Monta un disco virtual silenciosamente, detecta la partición del sistema operativo, le aplica un *Trim* (Optimización) si es posible, y captura todo el volumen hacia un archivo `.wim` usando compresión máxima.
 
 ### [ 3 ] Herramientas de Arranque y Medios (Boot Tools)
 Diseñado para preparar la distribución y el despliegue final de tu sistema personalizado:
 
-* **Editar boot.wim:** Accede al entorno de preinstalación para inyectar controladores de almacenamiento y garantizar que equipos modernos (con tecnologías Intel RST o VMD) reconozcan los discos duros durante la instalación. En el índice de instalación de Windows 11 24H2 o posterior también puedes **establecer el Setup clásico como predeterminado** o **restaurar la configuración original**: usa `winpeshl.ini`, crea un respaldo reversible dentro de la imagen y conserva sin cambios cualquier `winpeshl.ini` personalizado. Los cambios solo se escriben en `boot.wim` si eliges guardar.
+* **Editar boot.wim:** Pregunta qué índice editar (detecta el de instalación por su nombre) y permite inyectar controladores de almacenamiento para que equipos modernos (con tecnologías Intel RST o VMD) reconozcan los discos duros durante la instalación, o inyectar DaRT. En el índice de instalación (Setup) abre además una **GUI de Setup y fondos** con Setup Legacy (`/legacy` en `winpeshl.ini`), estilo Windows 10 (renombra `setupprep.exe` en el índice y en el medio completo), bypass de TPM, Secure Boot y RAM (`LabConfig` offline) y fondo de instalación personalizado con vista previa. Cada cambio conserva un respaldo reversible y se verifica antes del *Commit*: al volver, `T` y `S` guardan y `T` y `N` descartan todo, incluidos los cambios externos al `boot.wim`.
 * **Gestionar WinRE (Entorno de Recuperación):** Va a `Windows\System32\Recovery`, extrae el `winre.wim`, lo monta en el *Scratch*, permite inyectar DaRT o Drivers, y al guardar, utiliza `/Export-Image /Bootable` para destruir los diccionarios viejos y recomprimir el entorno, ahorrando cientos de megabytes de "peso muerto".
 * **Crear ISO Booteable:** Genera de manera eficiente un archivo ISO listo para ser empleado en herramientas como Rufus o Ventoy, asegurando compatibilidad integral con sistemas UEFI y BIOS Legacy.
 * **Despliegue a VHD / Disco Físico:** Aplica directamente tu imagen de Windows a una unidad de almacenamiento externa o a un disco virtual, particionando y configurando los sectores de arranque de manera totalmente automatizada.

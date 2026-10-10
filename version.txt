@@ -1,3 +1,11 @@
+1.5.9
+====================================================
+- Boot Tools: nuevo modulo Modulo-BootSetup.ps1 con una GUI para el indice de instalacion (Setup) de boot.wim, accesible desde Editar boot.wim > opcion [3]. Incluye Setup Legacy (/legacy en winpeshl.ini), estilo Windows 10 (renombra setupprep.exe a setupprep.exe.aio.bak en sources del indice y del medio completo), bypass de TPM, Secure Boot y RAM (LabConfig en el SYSTEM offline del indice) y fondo de instalacion personalizado (PNG, JPG o BMP de hasta 64 megapixeles, con vista previa). Cada opcion tiene su restauracion y conserva respaldos reversibles.
+- Boot Tools: al guardar boot.wim (T y S) se verifican Setup, bypass y fondos antes del Commit y los cambios externos al boot.wim (fondo y setupprep.exe del medio) se aplican despues de guardar. Con T y N se descartan tambien los cambios externos.
+- Boot Tools: Editar boot.wim pregunta que indice editar, detecta el indice de instalacion por su nombre en lugar de asumir el indice 2 y valida el indice elegido.
+- Conversion: Convertir ESD a WIM permite exportar varios indices a un mismo WIM (un indice, una lista como 1,3,5 o todos), identifica los indices con DISM /English sin depender del idioma de Windows, evita usar el ESD como destino y no cambia la ruta del WIM activo si la conversion falla.
+====================================================
+
 1.5.8
 ====================================================
 - Idiomas: diagnostico alineado con el de Actualizaciones. Ante un error, el ZIP se genera en Reportes\Diagnosticos\Idiomas (Diagnostico_AIOL_AAAAMMDD_HHMMSS) e incluye Error.txt, configuracion, operaciones, informe de fallo JSON/HTML, estado de imagenes DISM montadas, logs DISM de la sesion, transcripcion DISM, manifiesto Preflight y el registro de AdminImagenOffline. Si no se puede crear el ZIP, se conserva la carpeta de diagnostico.
