@@ -44,52 +44,170 @@
 # =============================================
 function Convert-ESD {
     Clear-Host; Write-Host "--- Convertir ESD a WIM ---" -ForegroundColor Yellow
-    
+
     Write-Log -LogLevel INFO -Message "ConvertESD: Iniciando modulo de conversion y descompresion (ESD -> WIM)."
 
     $path = Select-PathDialog -DialogType File -Title "Seleccione el archivo ESD a convertir" -Filter "Archivos ESD (*.esd)|*.esd|Todos (*.*)|*.*"
-    if (-not $path) { 
+    if (-not $path) {
         Write-Log -LogLevel INFO -Message "ConvertESD: El usuario cancelo la seleccion del archivo de origen."
-        Write-Warning "Operacion cancelada."; Pause; return 
+        Write-Warning "Operacion cancelada."; Pause; return
     }
     $ESD_FILE_PATH = $path
     Write-Log -LogLevel INFO -Message "ConvertESD: Archivo origen seleccionado -> $ESD_FILE_PATH"
 
     Write-Host "[+] Obteniendo informacion de los indices del ESD..." -ForegroundColor Yellow
     Write-Log -LogLevel INFO -Message "ConvertESD: Consultando a DISM la estructura de indices del archivo."
-    
     Write-Host "   > Inicializando motor DISM, por favor espere..." -ForegroundColor Cyan
-    dism /get-wiminfo /wimfile:"$ESD_FILE_PATH"
-    
-    $INDEX_TO_CONVERT = Read-Host "`nIngrese el numero de indice que desea convertir"
-    # Validar INDEX_TO_CONVERT
-    Write-Log -LogLevel INFO -Message "ConvertESD: Indice objetivo ingresado por el usuario -> [$INDEX_TO_CONVERT]"
 
-    $esdFileObject = Get-Item -Path $ESD_FILE_PATH
-    $DEFAULT_DEST_PATH = Join-Path $esdFileObject.DirectoryName "$($esdFileObject.BaseName)_indice_$($INDEX_TO_CONVERT).wim"
+    # /English permite identificar los indices independientemente del idioma de Windows.
+    try {
+        $imageInfo = @(dism /English /get-wiminfo /wimfile:"$ESD_FILE_PATH" | ForEach-Object {
+            Write-Host $_
+            $_
+        })
+        $infoExitCode = $LASTEXITCODE
+        if ($infoExitCode -ne 0) {
+            throw "DISM no pudo consultar el ESD (Codigo: $infoExitCode)."
+        }
+
+        $availableIndices = @($imageInfo | ForEach-Object {
+            if ($_ -match '^\s*Index\s*:\s*([0-9]+)\s*$') {
+                [int]$Matches[1]
+            }
+        } | Sort-Object -Unique)
+        if ($availableIndices.Count -eq 0) {
+            throw "No se encontraron indices validos en el archivo ESD."
+        }
+    } catch {
+        Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
+        Write-Log -LogLevel ERROR -Message "ConvertESD: Error al consultar indices - $($_.Exception.Message)"
+        Pause; return
+    }
+
+    Write-Host "`n--- Seleccion de indices ---" -ForegroundColor Yellow
+    Write-Host "Un indice: 2 | Varios: 1,3,5 | Todos: T o TODOS | Cancelar: 0" -ForegroundColor Cyan
+    Write-Host "Los indices seleccionados se exportaran a un mismo archivo WIM." -ForegroundColor Gray
+
+    while ($true) {
+        $selection = (Read-Host "Ingrese los indices separados por comas, T para todos o 0 para cancelar").Trim()
+        if ($selection -eq '0') {
+            Write-Log -LogLevel INFO -Message "ConvertESD: El usuario cancelo la seleccion de indices."
+            Write-Warning "Operacion cancelada."; Pause; return
+        }
+
+        $selectAll = $selection -match '^(T|TODO|TODOS|ALL|\*)$'
+        if ($selectAll) {
+            $INDICES_TO_CONVERT = @($availableIndices)
+            break
+        }
+        if ($selection -notmatch '^[0-9]+(?:\s*,\s*[0-9]+)*$') {
+            Write-Warning "Entrada no valida. Use un indice, una lista como 1,3,5 o T para todos."
+            continue
+        }
+
+        $selectedIndices = New-Object 'System.Collections.Generic.List[int]'
+        $invalidTokens = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($token in ($selection -split ',')) {
+            $index = 0
+            if (-not [int]::TryParse($token.Trim(), [ref]$index) -or $availableIndices -notcontains $index) {
+                $invalidTokens.Add($token.Trim())
+                continue
+            }
+            # Evitar exportaciones repetidas y conservar el orden ingresado.
+            if (-not $selectedIndices.Contains($index)) { $selectedIndices.Add($index) }
+        }
+        if ($invalidTokens.Count -gt 0) {
+            Write-Warning "Indices no disponibles: $($invalidTokens -join ', '). Disponibles: $($availableIndices -join ', ')."
+            continue
+        }
+
+        $INDICES_TO_CONVERT = @($selectedIndices.ToArray())
+        break
+    }
+
+    $indicesText = $INDICES_TO_CONVERT -join ', '
+    Write-Host "`nIndices seleccionados: $indicesText (Total: $($INDICES_TO_CONVERT.Count))" -ForegroundColor Cyan
+    Write-Log -LogLevel INFO -Message "ConvertESD: Indices seleccionados -> [$indicesText]"
+
+    $esdFileObject = Get-Item -LiteralPath $ESD_FILE_PATH
+    if ($selectAll) {
+        $destinationSuffix = 'todos'
+    } elseif ($INDICES_TO_CONVERT.Count -eq 1) {
+        $destinationSuffix = "indice_$($INDICES_TO_CONVERT[0])"
+    } else {
+        $destinationSuffix = "indices_$($INDICES_TO_CONVERT -join '_')"
+    }
+    $DEFAULT_DEST_PATH = Join-Path $esdFileObject.DirectoryName "$($esdFileObject.BaseName)_$destinationSuffix.wim"
 
     $DEST_WIM_PATH = Select-SavePathDialog -Title "Convertir ESD a WIM..." -Filter "Archivos WIM (*.wim)|*.wim" -DefaultFileName $DEFAULT_DEST_PATH
-    if (-not $DEST_WIM_PATH) { 
+    if (-not $DEST_WIM_PATH) {
         Write-Log -LogLevel INFO -Message "ConvertESD: El usuario cancelo la seleccion de la ruta de destino."
-        Write-Warning "Operacion cancelada."; Pause; return 
+        Write-Warning "Operacion cancelada."; Pause; return
+    }
+    if ([System.IO.Path]::GetFullPath($DEST_WIM_PATH) -eq [System.IO.Path]::GetFullPath($ESD_FILE_PATH)) {
+        Write-Warning "El archivo de destino debe ser diferente del archivo de origen."
+        Write-Log -LogLevel WARN -Message "ConvertESD: La ruta de destino coincide con el origen. Operacion cancelada."
+        Pause; return
     }
     Write-Log -LogLevel INFO -Message "ConvertESD: Ruta de destino establecida -> $DEST_WIM_PATH"
 
-    Write-Host "[+] Convirtiendo... Esto puede tardar varios minutos." -ForegroundColor Yellow
-    Write-Log -LogLevel ACTION -Message "ConvertESD: Ejecutando DISM /Export-Image del archivo '$ESD_FILE_PATH' (Indice: $INDEX_TO_CONVERT) hacia '$DEST_WIM_PATH'."
-    
-    Write-Host "   > Inicializando motor DISM, por favor espere..." -ForegroundColor Cyan
-    dism /export-image /SourceImageFile:"$ESD_FILE_PATH" /SourceIndex:$INDEX_TO_CONVERT /DestinationImageFile:"$DEST_WIM_PATH" /Compress:max /CheckIntegrity /ScratchDir:"$Script:Scratch_DIR"
-
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[OK] Conversion completada exitosamente." -ForegroundColor Green
-        Write-Host "Nuevo archivo WIM creado en: `"$DEST_WIM_PATH`"" -ForegroundColor Gray
-        $Script:WIM_FILE_PATH = $DEST_WIM_PATH
-        Write-Host "La ruta del nuevo WIM ha sido cargada en el script." -ForegroundColor Cyan
-        Write-Log -LogLevel INFO -Message "ConvertESD: Conversion completada exitosamente. Variable global del WIM actualizada a la nueva ruta."
+    if (Test-Path -LiteralPath $DEST_WIM_PATH) {
+        Write-Warning "El WIM de destino ya existe. Los indices seleccionados se agregaran a los que ya contiene."
     } else {
-        Write-Host "[ERROR] Error durante la conversion (Codigo: $LASTEXITCODE)."
-        Write-Log -LogLevel ERROR -Message "ConvertESD: Fallo la conversion en DISM. Codigo LASTEXITCODE: $LASTEXITCODE"
+        Write-Host "Los indices del nuevo WIM se numeraran desde 1, en el orden seleccionado." -ForegroundColor Gray
+    }
+
+    Write-Host "[+] Convirtiendo... Esto puede tardar varios minutos." -ForegroundColor Yellow
+    $completedIndices = New-Object 'System.Collections.Generic.List[int]'
+    $conversionError = $null
+
+    foreach ($INDEX_TO_CONVERT in $INDICES_TO_CONVERT) {
+        $position = $completedIndices.Count + 1
+        Write-Host "`n[ $position / $($INDICES_TO_CONVERT.Count) ] Exportando indice $INDEX_TO_CONVERT..." -ForegroundColor Cyan
+        Write-Log -LogLevel ACTION -Message "ConvertESD: Exportando indice $INDEX_TO_CONVERT ($position de $($INDICES_TO_CONVERT.Count)) de '$ESD_FILE_PATH' hacia '$DEST_WIM_PATH'."
+
+        try {
+            # La primera exportacion crea el WIM; las siguientes agregan imagenes al mismo archivo.
+            $dismArguments = @(
+                '/export-image'
+                "/SourceImageFile:$ESD_FILE_PATH"
+                "/SourceIndex:$INDEX_TO_CONVERT"
+                "/DestinationImageFile:$DEST_WIM_PATH"
+                '/CheckIntegrity'
+                "/ScratchDir:$Script:Scratch_DIR"
+            )
+            # DISM solo permite elegir la compresion al crear el WIM de destino.
+            if (-not (Test-Path -LiteralPath $DEST_WIM_PATH)) { $dismArguments += '/Compress:max' }
+            dism @dismArguments
+            $exportExitCode = $LASTEXITCODE
+            if ($exportExitCode -ne 0) {
+                throw "Fallo la conversion del indice $INDEX_TO_CONVERT (Codigo: $exportExitCode)."
+            }
+            $completedIndices.Add($INDEX_TO_CONVERT)
+            Write-Log -LogLevel INFO -Message "ConvertESD: Indice $INDEX_TO_CONVERT exportado correctamente."
+        } catch {
+            $conversionError = $_.Exception.Message
+            Write-Log -LogLevel ERROR -Message "ConvertESD: $conversionError Completados: $($completedIndices.Count) de $($INDICES_TO_CONVERT.Count)."
+            break
+        }
+    }
+
+    if (-not $conversionError) {
+        Write-Host "`n[OK] Conversion completada: $($completedIndices.Count) indice(s) exportado(s)." -ForegroundColor Green
+        Write-Host "Archivo WIM de destino: `"$DEST_WIM_PATH`"" -ForegroundColor Gray
+        $Script:WIM_FILE_PATH = $DEST_WIM_PATH
+        Write-Host "La ruta del WIM ha sido cargada en el script." -ForegroundColor Cyan
+        Write-Log -LogLevel INFO -Message "ConvertESD: Conversion completa de los indices [$indicesText]. Variable global del WIM actualizada a la nueva ruta."
+    } else {
+        Write-Host "`n[ERROR] $conversionError" -ForegroundColor Red
+        Write-Host "Conversion detenida. Completados: $($completedIndices.Count) de $($INDICES_TO_CONVERT.Count)." -ForegroundColor Yellow
+        if ($completedIndices.Count -gt 0) {
+            Write-Host "Indices de origen exportados: $($completedIndices -join ', ')." -ForegroundColor Gray
+        }
+        if (Test-Path -LiteralPath $DEST_WIM_PATH) {
+            Write-Warning "El archivo '$DEST_WIM_PATH' puede contener una conversion parcial. Reviselo antes de reutilizarlo."
+        }
+        Write-Host "La ruta del WIM activo no se ha cambiado." -ForegroundColor Gray
     }
     Pause
 }

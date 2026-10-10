@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.8
+    1.5.9
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.8"
+$script:Version = "1.5.9"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1094,7 +1094,7 @@ function Convert-Image-Menu {
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
         Write-Host "   [1] Convertir ESD a WIM"
-        Write-Host "       (Extrae un indice de un .esd a .wim)" -ForegroundColor Gray
+        Write-Host "       (Extrae indices de un .esd a .wim)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "   [2] Convertir VHD/VHDX a WIM"
         Write-Host "       (Captura un disco virtual a .wim)" -ForegroundColor Gray
