@@ -89,7 +89,7 @@ function Show-Bloatware-GUI {
 
     $lv               = New-Object System.Windows.Forms.ListView
     $lv.Location      = "20, 80"
-    $lv.Size          = "740, 500"
+    $lv.Size          = "740, 470"
     $lv.View          = "Details"
     $lv.CheckBoxes    = $true
     $lv.FullRowSelect = $true
@@ -103,17 +103,25 @@ function Show-Bloatware-GUI {
 
     $lblStatus           = New-Object System.Windows.Forms.Label
     $lblStatus.Text      = "Cargando catalogo..."
-    $lblStatus.Location  = "20, 590"
+    $lblStatus.Location  = "20, 560"
     $lblStatus.AutoSize  = $true
     $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
     $form.Controls.Add($lblStatus)
 
     $progressBar          = New-Object System.Windows.Forms.ProgressBar
-    $progressBar.Location = "20, 613"
+    $progressBar.Location = "20, 583"
     $progressBar.Size     = "740, 12"
     $progressBar.Style    = "Continuous"
     $progressBar.Visible  = $false
     $form.Controls.Add($progressBar)
+
+    # Opt-in: la limpieza de apps no reemplaza el Menu Inicio sin esta seleccion.
+    $chkStartMenu          = New-Object System.Windows.Forms.CheckBox
+    $chkStartMenu.Text     = "Aplicar plantilla del menú Inicio"
+    $chkStartMenu.Location = "20, 610"
+    $chkStartMenu.AutoSize = $true
+    $chkStartMenu.Checked  = $false
+    $form.Controls.Add($chkStartMenu)
 
     $btnSelectRec           = New-Object System.Windows.Forms.Button
     $btnSelectRec.Text      = "Marcar Recomendados (Bloat)"
@@ -133,6 +141,32 @@ function Show-Bloatware-GUI {
     $btnRemove.FlatStyle = "Flat"
     $btnRemove.Font      = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
     $form.Controls.Add($btnRemove)
+
+    # Ayudas compartidas para los controles del gestor.
+    $bloatwareTips = New-Object System.Windows.Forms.ToolTip
+    $bloatwareTips.InitialDelay = 400
+    $bloatwareTips.ReshowDelay  = 100
+    $bloatwareTips.AutoPopDelay = 15000
+    $bloatwareTips.ShowAlways   = $true
+    $bloatwareTips.SetToolTip($txtSearch,
+        "Filtra por nombre de aplicación o identificador del paquete.`n" +
+        "Al cambiar el filtro se desmarcan las aplicaciones.")
+    $bloatwareTips.SetToolTip($chkShowSystem,
+        "Muestra aplicaciones esenciales de Windows. Eliminarlas puede afectar al sistema.`n" +
+        "Al cambiar esta opción se desmarcan las aplicaciones.")
+    $bloatwareTips.SetToolTip($lv,
+        "Marca las casillas de las aplicaciones que deseas eliminar.`n" +
+        "Naranja: bloatware. Verde: sistema vital. Blanco: otras aplicaciones.")
+    $bloatwareTips.SetToolTip($chkStartMenu,
+        "Aplica las plantillas minimalistas incluidas para Windows 10/11 al eliminar aplicaciones.`n" +
+        "Se usan para nuevos perfiles de usuario. Sin marcar, conserva las plantillas actuales.`n" +
+        "Desmarcarla no restaura una plantilla aplicada anteriormente.")
+    $bloatwareTips.SetToolTip($btnSelectRec,
+        "Marca el bloatware de la lista visible y desmarca las demás aplicaciones.`n" +
+        "Revisa la selección antes de eliminar.")
+    $bloatwareTips.SetToolTip($btnRemove,
+        "Elimina las aplicaciones marcadas de la imagen montada y aplica las medidas antirreinstalación.`n" +
+        "La plantilla del menú Inicio se aplica únicamente si su casilla está marcada.")
 
     # ------------------------------------------------------------------
     # 3. Estado compartido entre eventos
@@ -256,6 +290,8 @@ function Show-Bloatware-GUI {
             return
         }
 
+        # Capturar la eleccion para que coincida con lo confirmado durante toda la operacion.
+        $applyStartMenu = $chkStartMenu.Checked
         $hasSystemApps = $selectedApps | Where-Object { $_.Category -eq "Sistema (Vital)" } | Select-Object -First 1
 
         # Advertencia reforzada cuando la seleccion incluye apps "Sistema (Vital)":
@@ -269,6 +305,12 @@ function Show-Bloatware-GUI {
             "Eliminar $($selectedApps.Count) apps permanentemente?`n`nSe aplicaran las vacunas Anti-Fantasmas."
         }
 
+        if ($applyStartMenu) {
+            $confirmMsg += "`n`nMenu Inicio: se reemplazara la plantilla del perfil Default por la minimalista incluida (W10/W11)."
+        } else {
+            $confirmMsg += "`n`nMenu Inicio: se conservaran los archivos de plantilla actuales."
+        }
+
         if ([System.Windows.Forms.MessageBox]::Show(
                 $confirmMsg, "Confirmar", 'YesNo', 'Warning') -ne 'Yes') {
             Write-Log -LogLevel INFO -Message "AppxManager: El usuario cancelo la eliminacion en el cuadro de confirmacion."
@@ -276,6 +318,7 @@ function Show-Bloatware-GUI {
         }
 
         $btnRemove.Enabled = $false
+        $chkStartMenu.Enabled = $false
         $form.Cursor       = [System.Windows.Forms.Cursors]::WaitCursor
         $errs    = 0
         $success = 0
@@ -404,23 +447,24 @@ function Show-Bloatware-GUI {
         }
 
         # ==============================================================
-        # FASE 2.5: Clean Room del Menu de Inicio (estrategia de reemplazo)
+        # FASE 2.5: Plantilla del Menu Inicio (opcional, solo con seleccion explicita)
         # ==============================================================
-        $lblStatus.Text = "Inyectando Menu de Inicio Minimalista..."; $form.Refresh()
-        Write-Log -LogLevel ACTION -Message "StartMenu: Inyectando plantillas minimalistas W10/W11."
+        if ($applyStartMenu) {
+            $lblStatus.Text = "Inyectando Menu de Inicio Minimalista..."; $form.Refresh()
+            Write-Log -LogLevel ACTION -Message "StartMenu: Inyectando plantillas minimalistas W10/W11."
 
-        try {
-            $shellPath = Join-Path $Script:MOUNT_DIR "Users\Default\AppData\Local\Microsoft\Windows\Shell"
-            if (-not (Test-Path $shellPath)) { New-Item -Path $shellPath -ItemType Directory -Force | Out-Null }
+            try {
+                $shellPath = Join-Path $Script:MOUNT_DIR "Users\Default\AppData\Local\Microsoft\Windows\Shell"
+                if (-not (Test-Path $shellPath)) { New-Item -Path $shellPath -ItemType Directory -Force | Out-Null }
 
-            # Respaldar y neutralizar la plantilla base de Microsoft si existe
-            $defaultLayoutPath = Join-Path $shellPath "DefaultLayouts.xml"
-            if (Test-Path $defaultLayoutPath) {
-                Rename-Item -Path $defaultLayoutPath -NewName "DefaultLayouts.xml.bak" -Force -ErrorAction SilentlyContinue
-            }
+                # Respaldar y neutralizar la plantilla base de Microsoft si existe
+                $defaultLayoutPath = Join-Path $shellPath "DefaultLayouts.xml"
+                if (Test-Path $defaultLayoutPath) {
+                    Rename-Item -Path $defaultLayoutPath -NewName "DefaultLayouts.xml.bak" -Force -ErrorAction SilentlyContinue
+                }
 
-            # Plantilla W10 (XML): panel derecho colapsado, sin tiles
-            $xmlContent = @"
+                # Plantilla W10 (XML): panel derecho colapsado, sin tiles
+                $xmlContent = @"
 <LayoutModificationTemplate xmlns="http://schemas.microsoft.com/Start/2014/LayoutModification" xmlns:defaultlayout="http://schemas.microsoft.com/Start/2014/FullDefaultLayout" xmlns:start="http://schemas.microsoft.com/Start/2014/StartLayout" Version="1">
   <LayoutOptions StartTileGroupCellWidth="6" />
   <DefaultLayoutOverride>
@@ -430,10 +474,10 @@ function Show-Bloatware-GUI {
   </DefaultLayoutOverride>
 </LayoutModificationTemplate>
 "@
-            [System.IO.File]::WriteAllText((Join-Path $shellPath "LayoutModification.xml"), $xmlContent, [System.Text.Encoding]::UTF8)
+                [System.IO.File]::WriteAllText((Join-Path $shellPath "LayoutModification.xml"), $xmlContent, [System.Text.Encoding]::UTF8)
 
-            # Plantilla W11 (JSON): solo Edge y Configuracion como pines
-            $jsonContent = @"
+                # Plantilla W11 (JSON): solo Edge y Configuracion como pines
+                $jsonContent = @"
 {
   "primaryOEMPins": [
     { "desktopAppLink": "%ALLUSERSPROFILE%\\Microsoft\\Windows\\Start Menu\\Programs\\Microsoft Edge.lnk" },
@@ -447,11 +491,14 @@ function Show-Bloatware-GUI {
   ]
 }
 "@
-            [System.IO.File]::WriteAllText((Join-Path $shellPath "LayoutModification.json"), $jsonContent, [System.Text.Encoding]::UTF8)
+                [System.IO.File]::WriteAllText((Join-Path $shellPath "LayoutModification.json"), $jsonContent, [System.Text.Encoding]::UTF8)
 
-            Write-Log -LogLevel INFO -Message "StartMenu: Plantillas minimalistas inyectadas con exito."
-        } catch {
-            Write-Log -LogLevel WARN -Message "StartMenu: Falla al inyectar plantillas - $($_.Exception.Message)"
+                Write-Log -LogLevel INFO -Message "StartMenu: Plantillas minimalistas inyectadas con exito."
+            } catch {
+                Write-Log -LogLevel WARN -Message "StartMenu: Falla al inyectar plantillas - $($_.Exception.Message)"
+            }
+        } else {
+            Write-Log -LogLevel INFO -Message "StartMenu: Plantillas conservadas; la opcion de aplicar plantilla esta desmarcada."
         }
 
         # ==============================================================
@@ -557,6 +604,7 @@ function Show-Bloatware-GUI {
             # ==============================================================
             $progressBar.Visible = $false
             $btnRemove.Enabled   = $true
+            $chkStartMenu.Enabled = $true
             $form.Cursor         = [System.Windows.Forms.Cursors]::Default
             $lblStatus.Text      = "Listo. Exitos: $success | Errores: $errs"
 
@@ -597,6 +645,7 @@ function Show-Bloatware-GUI {
 
     $form.ShowDialog() | Out-Null
     if ($null -ne $lv) { $lv.Dispose() }
+    $bloatwareTips.Dispose()
     $form.Dispose()
     [GC]::Collect()
     $script:cachedApps = $null
