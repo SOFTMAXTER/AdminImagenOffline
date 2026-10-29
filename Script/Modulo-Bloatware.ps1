@@ -117,7 +117,7 @@ function Show-Bloatware-GUI {
 
     # Opt-in: la limpieza de apps no reemplaza el Menu Inicio sin esta seleccion.
     $chkStartMenu          = New-Object System.Windows.Forms.CheckBox
-    $chkStartMenu.Text     = "Aplicar plantilla del menú Inicio"
+    $chkStartMenu.Text     = "Plantilla de Inicio minimalista"
     $chkStartMenu.Location = "20, 610"
     $chkStartMenu.AutoSize = $true
     $chkStartMenu.Checked  = $false
