@@ -83,7 +83,7 @@
     https://learn.microsoft.com/windows/win32/seccrypto/example-c-program--verifying-the-signature-of-a-pe-file
     https://learn.microsoft.com/powershell/module/microsoft.powershell.security/get-authenticodesignature
     El examen PE es diagnostico; no reproduce los contextos de carga/SxS de Windows.
-    Preparacion ESU opcional (metodo offline experimental) para install.wim de Windows 10 cliente no LTSC.
+    Preparacion ESU opcional (metodo no Oficial) para install.wim de Windows 10 cliente no LTSC.
     Modifica el componente de comprobacion ESU; no instala ni activa licencias ESU.
     Diagnostica el estado antes de escribir y registra el perfil por arquitectura.
     Un estado parcial, distinto o mas reciente bloquea la preparacion automatica.
