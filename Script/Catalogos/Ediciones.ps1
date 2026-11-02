@@ -203,6 +203,100 @@ $script:EditionCatalog = @(
         EditionID   = "ServerAzureCor"
         Name        = "Windows Server Datacenter: Azure Edition (Core)"
         Description = "Edición exclusiva para la nube de Azure y Azure Stack HCI. Soporta Hotpatching (aplicación de actualizaciones de seguridad sin reiniciar la máquina) y protocolo SMB sobre QUIC."
+    },
+    [PSCustomObject]@{
+        EditionID   = "ServerTurbine"
+        Name        = "Windows Server Datacenter: Azure Edition"
+        Description = "Edición con Experiencia de Escritorio exclusiva para Azure y Azure Local (Azure Stack HCI), con soporte para SMB sobre QUIC y redes virtuales avanzadas."
+    },
+    [PSCustomObject]@{
+        EditionID   = "ServerTurbineCor"
+        Name        = "Windows Server Datacenter: Azure Edition (Core)"
+        Description = "Variante Server Core de Windows Server Datacenter: Azure Edition optimizada para cargas de trabajo en la nube y Hotpatching."
+    },
+    [PSCustomObject]@{
+        EditionID   = "ServerStandardACor"
+        Name        = "Windows Server Standard (Server Core)"
+        Description = "Canal de servicio anual/ACor de Windows Server Standard en instalación Server Core."
+    },
+    [PSCustomObject]@{
+        EditionID   = "ServerDatacenterACor"
+        Name        = "Windows Server Datacenter (Server Core)"
+        Description = "Canal de servicio anual/ACor de Windows Server Datacenter en instalación Server Core."
+    },
+    [PSCustomObject]@{
+        EditionID   = "ServerStandardEval"
+        Name        = "Windows Server Standard Evaluation"
+        Description = "Edición de evaluación de Windows Server Standard con Experiencia de Escritorio (180 días)."
+    },
+    [PSCustomObject]@{
+        EditionID   = "ServerStandardCoreEval"
+        Name        = "Windows Server Standard (Server Core) Evaluation"
+        Description = "Edición de evaluación de Windows Server Standard en modo Server Core (180 días)."
+    },
+    [PSCustomObject]@{
+        EditionID   = "ServerDatacenterEval"
+        Name        = "Windows Server Datacenter Evaluation"
+        Description = "Edición de evaluación de Windows Server Datacenter con Experiencia de Escritorio (180 días)."
+    },
+    [PSCustomObject]@{
+        EditionID   = "ServerDatacenterCoreEval"
+        Name        = "Windows Server Datacenter (Server Core) Evaluation"
+        Description = "Edición de evaluación de Windows Server Datacenter en modo Server Core (180 días)."
+    },
+    [PSCustomObject]@{
+        EditionID   = "ServerSolution"
+        Name        = "Windows Server Essentials"
+        Description = "Edición orientada a pequeñas empresas con hasta 25 usuarios y 50 dispositivos."
+    },
+
+    # =========================================================
+    # EDICIONES DE EVALUACIÓN Y ESPECIALIZADAS (CLIENT / OEM)
+    # =========================================================
+    [PSCustomObject]@{
+        EditionID   = "EnterpriseEval"
+        Name        = "Windows Enterprise Evaluation"
+        Description = "Versión de evaluación corporativa de Windows Enterprise (90 días) destinada a pruebas de compatibilidad y despliegue empresarial."
+    },
+    [PSCustomObject]@{
+        EditionID   = "EnterpriseNEval"
+        Name        = "Windows Enterprise N Evaluation"
+        Description = "Versión de evaluación de Windows Enterprise N para el mercado europeo (sin tecnologías multimedia preinstaladas)."
+    },
+    [PSCustomObject]@{
+        EditionID   = "EnterpriseSEval"
+        Name        = "Windows Enterprise LTSC Evaluation"
+        Description = "Versión de evaluación del canal de mantenimiento a largo plazo (LTSC) de Windows Enterprise."
+    },
+    [PSCustomObject]@{
+        EditionID   = "EnterpriseSNEval"
+        Name        = "Windows Enterprise LTSC N Evaluation"
+        Description = "Versión de evaluación europea del canal de mantenimiento a largo plazo (LTSC N) sin componentes multimedia."
+    },
+    [PSCustomObject]@{
+        EditionID   = "IoTEnterpriseSEval"
+        Name        = "Windows IoT Enterprise LTSC Evaluation"
+        Description = "Versión de evaluación de Windows IoT Enterprise LTSC para validación de dispositivos embebidos y sistemas industriales."
+    },
+    [PSCustomObject]@{
+        EditionID   = "PPIPro"
+        Name        = "Windows Team"
+        Description = "Edición especializada de Windows diseñada para dispositivos colaborativos Surface Hub y salas de reuniones."
+    },
+    [PSCustomObject]@{
+        EditionID   = "WNC"
+        Name        = "Windows Cloud PC"
+        Description = "Edición optimizada para entornos de escritorio en la nube Windows 365 / Cloud PC."
+    },
+    [PSCustomObject]@{
+        EditionID   = "Starter"
+        Name        = "Windows Starter"
+        Description = "Edición básica de entrada con requerimientos mínimos de sistema."
+    },
+    [PSCustomObject]@{
+        EditionID   = "StarterN"
+        Name        = "Windows Starter N"
+        Description = "Edición básica de entrada para el mercado europeo sin componentes multimedia preinstalados."
     }
 )
 
@@ -215,10 +309,16 @@ function Get-WindowsEditionMetadata {
         [string]$QueryString
     )
     
-    $match = $script:EditionCatalog | Where-Object { 
-        $_.EditionID -eq $QueryString -or 
-        $_.Name -match [regex]::Escape($QueryString) 
+    # Priorizar coincidencia exacta de EditionID o Name antes de buscar por subcadena
+    $match = $script:EditionCatalog | Where-Object {
+        $_.EditionID -ieq $QueryString -or $_.Name -ieq $QueryString
     } | Select-Object -First 1
+
+    if (-not $match -and -not [string]::IsNullOrWhiteSpace($QueryString)) {
+        $match = $script:EditionCatalog | Where-Object {
+            $_.Name -match [regex]::Escape($QueryString)
+        } | Select-Object -First 1
+    }
 
     if ($match) {
         return $match
