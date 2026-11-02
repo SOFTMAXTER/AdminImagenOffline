@@ -217,8 +217,9 @@ function Save-Changes {
     }
 
     # Bloque comun para Commit/Append exitoso
+    # Nota: Commit/Append vuelca el montaje actual al archivo .wim sin alterar
+    # los metadatos del SO montado en MOUNT_DIR, por lo que se conserva la cache del Dashboard.
     if ($LASTEXITCODE -eq 0) {
-        $Script:ForceMenuRefresh = $true
         Write-Host "[OK] Cambios guardados." -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "SaveManager: Cambios ($Mode) guardados exitosamente en la imagen original."
     } else {

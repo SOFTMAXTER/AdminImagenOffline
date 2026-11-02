@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.9
+    1.5.10
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.9"
+$script:Version = "1.5.10"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1235,42 +1235,33 @@ function Cambio-Edicion-Menu {
     $WIN_CURRENT_BUILD = $null
     $WIN_VERSION_FRIENDLY = "Desconocida"
     $CURRENT_EDITION_DETECTED = "Desconocida"
-    $hiveLoaded = $false
 
-    try {
-        reg load HKLM\OfflineImage "$($Script:MOUNT_DIR)\Windows\System32\config\SOFTWARE" 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { $hiveLoaded = $true } else { throw "No se pudo cargar HIVE" }
-        $regPath = "Registry::HKLM\OfflineImage\Microsoft\Windows NT\CurrentVersion"
-        $regProps = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
-        if ($regProps) { $WIN_PRODUCT_NAME = $regProps.ProductName; $WIN_CURRENT_BUILD = $regProps.CurrentBuildNumber }
-    } catch {
-        Write-Warning "WARN: No se pudo cargar el hive del registro. Se intentara obtener informacion basica."
-        Write-Log -LogLevel WARN -Message "CAMBIO_EDICION: Fallo carga HIVE: $($_.Exception.Message)"
-    } finally {
-        if ($hiveLoaded) { reg unload HKLM\OfflineImage 2>$null | Out-Null }
+    # Reutilizar los metadatos ya verificados por el Dashboard para evitar otro reg load + DISM /Get-CurrentEdition
+    $dashMeta = if ($null -ne $Script:AIODashboardCache -and $null -ne $Script:AIODashboardCache.Data) {
+        $Script:AIODashboardCache.Data
+    } elseif (Get-Command Get-AIOCachedDashboardMetadata -ErrorAction SilentlyContinue) {
+        Get-AIOCachedDashboardMetadata -MountState $Script:IMAGE_MOUNTED -MountPath $Script:MOUNT_DIR `
+            -ImagePath $Script:WIM_FILE_PATH -Index $Script:MOUNTED_INDEX
+    } else { $null }
+
+    if ($null -ne $dashMeta) {
+        if ($dashMeta.Edition -and $dashMeta.Edition -ne 'No disponible') {
+            $CURRENT_EDITION_DETECTED = [string]$dashMeta.Edition
+        }
+        if ($dashMeta.Name -match '^(Windows (?:11|10|8\.1|8|7|Server(?:\s+\d{4}(?:\s+R2)?)?))\b') {
+            $WIN_VERSION_FRIENDLY = $matches[1]
+        } elseif ($dashMeta.Name -and $dashMeta.Name -ne 'No disponible') {
+            $WIN_VERSION_FRIENDLY = [string]$dashMeta.Name
+        }
     }
 
-    # Determinar version amigable
-    if ($WIN_CURRENT_BUILD) {
-        $buildNum = 0; [int]::TryParse($WIN_CURRENT_BUILD, [ref]$buildNum) | Out-Null
-        if ($buildNum -ge 22000) { $WIN_VERSION_FRIENDLY = "Windows 11" }
-        elseif ($buildNum -ge 10240) { $WIN_VERSION_FRIENDLY = "Windows 10" }
-        elseif ($buildNum -eq 9600) { $WIN_VERSION_FRIENDLY = "Windows 8.1" } 
-        elseif ($buildNum -in (7601, 7600)) { $WIN_VERSION_FRIENDLY = "Windows 7" }
+    if ($CURRENT_EDITION_DETECTED -eq "Desconocida") {
+        try {
+            $dismEdition = dism /Image:$Script:MOUNT_DIR /Get-CurrentEdition /English 2>$null
+            $currentEditionLine = $dismEdition | Select-String -Pattern "(Current Edition|Edici.n actual)\s*:"
+            if ($currentEditionLine) { $CURRENT_EDITION_DETECTED = ($currentEditionLine.Line -split ':', 2)[1].Trim() }
+        } catch { Write-Warning "No se pudo obtener la edicion actual via DISM." }
     }
-    if ($WIN_VERSION_FRIENDLY -eq "Desconocida" -and $WIN_PRODUCT_NAME) {
-        if ($WIN_PRODUCT_NAME -match "Windows 11") { $WIN_VERSION_FRIENDLY = "Windows 11" }
-        elseif ($WIN_PRODUCT_NAME -match "Windows 10") { $WIN_VERSION_FRIENDLY = "Windows 10" }
-        elseif ($WIN_PRODUCT_NAME -match "Windows 8\.1|Server 2012 R2") { $WIN_VERSION_FRIENDLY = "Windows 8.1" } 
-        elseif ($WIN_PRODUCT_NAME -match "Windows 7|Server 2008 R2") { $WIN_VERSION_FRIENDLY = "Windows 7" }
-    }
-
-    # Obtener edicion actual con DISM
-    try {
-        $dismEdition = dism /Image:$Script:MOUNT_DIR /Get-CurrentEdition 2>$null
-        $currentEditionLine = $dismEdition | Select-String -Pattern "(Current Edition|Edici.n actual)\s*:"
-        if ($currentEditionLine) { $CURRENT_EDITION_DETECTED = ($currentEditionLine.Line -split ':', 2)[1].Trim() }
-    } catch { Write-Warning "No se pudo obtener la edicion actual via DISM." }
 
     # Traducir nombre de la edición actual usando el catálogo
     $DISPLAY_EDITION = $CURRENT_EDITION_DETECTED
@@ -1375,7 +1366,9 @@ function Cambio-Edicion-Menu {
 
     dism /Image:$Script:MOUNT_DIR /Set-Edition:$selectedEdition
     if ($LASTEXITCODE -in @(0, 3010)) {
-        $Script:ForceMenuRefresh = $true
+        if (-not [string]::Equals([string]$selectedEdition, [string]$CURRENT_EDITION_DETECTED, [StringComparison]::OrdinalIgnoreCase)) {
+            $Script:ForceMenuRefresh = $true
+        }
         Write-Host "[OK] Proceso de cambio de edicion finalizado." -ForegroundColor Green
     } else {
         Write-Host "[ERROR] Fallo el cambio de edicion (Codigo: $LASTEXITCODE)."
@@ -1673,7 +1666,11 @@ function Limpieza-Menu {
             Write-Log -LogLevel INFO -Message "LIMPIEZA: DISM /RestoreHealth exitoso."
         }
 
-        if ($exitCode -in @(0, 3010)) { $Script:ForceMenuRefresh = $true }
+        if ($exitCode -in @(0, 3010)) {
+            if (Get-Command Request-AIODashboardRefreshIfDegraded -ErrorAction SilentlyContinue) {
+                Request-AIODashboardRefreshIfDegraded
+            }
+        }
         if (-not $IsSequence) { Pause }
     }
 	
@@ -1735,7 +1732,9 @@ function Limpieza-Menu {
 
                 SFC /scannow /offbootdir="$sfcBoot" /offwindir="$sfcWin"
                 if ($LASTEXITCODE -ne 0) { Write-Warning "SFC encontro errores o no pudo completar."}
-                else { $Script:ForceMenuRefresh = $true }
+                elseif (Get-Command Request-AIODashboardRefreshIfDegraded -ErrorAction SilentlyContinue) {
+                    Request-AIODashboardRefreshIfDegraded
+                }
                 Pause
             }
             "5" {
@@ -1815,7 +1814,9 @@ function Limpieza-Menu {
                 $sfcWin = Join-Path -Path $Script:MOUNT_DIR -ChildPath "Windows"
                 SFC /scannow /offbootdir="$sfcBoot" /offwindir="$sfcWin"
 
-                if ($LASTEXITCODE -eq 0) { $Script:ForceMenuRefresh = $true }
+                if ($LASTEXITCODE -eq 0 -and (Get-Command Request-AIODashboardRefreshIfDegraded -ErrorAction SilentlyContinue)) {
+                    Request-AIODashboardRefreshIfDegraded
+                }
 
                 # --- PASO 5 ---
                 Write-Host "`n[5/5] Analizando/Limpiando componentes..." -ForegroundColor Yellow
@@ -2165,12 +2166,18 @@ function Import-OfflineReg {
                             }
                         }
                     }
-                    # Solo las escrituras en los metadatos del SO invalidan el
-                    # panel; los ajustes de otras claves conservan su cache.
-                    $dashboardKey = 'OfflineSoftware\Microsoft\Windows NT\CurrentVersion'
-                    if (($kp -eq $dashboardKey -and $op.Action -ne 'CreateKey') -or
-                        ($op.Action -eq 'DeleteKey' -and $dashboardKey.StartsWith($kp + '\', [StringComparison]::OrdinalIgnoreCase))) {
-                        $Script:ForceMenuRefresh = $true
+                    # Solo las escrituras en los 12 valores de metadatos del SO leidos por el Dashboard
+                    # invalidan el panel; escribir otros valores (ej. RegisteredOwner) conserva la cache.
+                    if (Get-Command Test-AIODashboardRegistryMutationAffectsMetadata -ErrorAction SilentlyContinue) {
+                        if (Test-AIODashboardRegistryMutationAffectsMetadata -KeyPath $kp -Action $op.Action -ValueName $op.Name) {
+                            $Script:ForceMenuRefresh = $true
+                        }
+                    } else {
+                        $dashboardKey = 'OfflineSoftware\Microsoft\Windows NT\CurrentVersion'
+                        if (($kp -eq $dashboardKey -and $op.Action -ne 'CreateKey') -or
+                            ($op.Action -eq 'DeleteKey' -and $dashboardKey.StartsWith($kp + '\', [StringComparison]::OrdinalIgnoreCase))) {
+                            $Script:ForceMenuRefresh = $true
+                        }
                     }
                 } catch {
                     Write-Log -LogLevel WARN -Message "Import-OfflineReg: Fallo '$($op.Action)' -> '$($op.Name)' en '$kp' - $($_.Exception.Message)"
@@ -3099,7 +3106,8 @@ function Check-And-Repair-Mounts {
         $Script:WIM_FILE_PATH = $updated.ImageFile
         $Script:MOUNTED_INDEX = $updated.ImageIndex
         $Script:CachedControlSet = $null
-        $Script:ForceMenuRefresh = $true
+        $Script:AIODashboardCache = $null
+        $Script:ForceMenuRefresh = $false
         Write-Host '[OK] Imagen recuperada y verificada.' -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "MountRepair: Sesion recuperada en '$Script:MOUNT_DIR'."
     } catch {
@@ -3174,7 +3182,6 @@ function Main-Menu {
     $auth         = "by SOFTMAXTER"
 
     while ($true) {
-        Clear-Host
         $metadata = Get-AIOCachedDashboardMetadata -MountState $Script:IMAGE_MOUNTED -MountPath $Script:MOUNT_DIR `
             -ImagePath $Script:WIM_FILE_PATH -Index $Script:MOUNTED_INDEX -ForceRefresh:$Script:ForceMenuRefresh
         # Consumir la solicitud una sola vez; la navegacion conserva la cache.
@@ -3182,7 +3189,7 @@ function Main-Menu {
 
         # --- 2. INTERFAZ GRÁFICA (Dashboard) ---
         # [FIX] Todos los separadores usan ahora $separator / $separatorMid (antes dos de ellos eran literales hardcodeados)
-		Clear-Host
+        Clear-Host
         Write-Host $separator -ForegroundColor Cyan
         Write-Host (" " * [math]::Floor(($width - $title.Length)  / 2) + $title)  -ForegroundColor Cyan
         Write-Host (" " * [math]::Floor(($width - $verStr.Length) / 2) + $verStr) -ForegroundColor Gray

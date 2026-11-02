@@ -591,7 +591,8 @@ function Mount-Image {
             $Script:IMAGE_MOUNTED = 2         # Estado 2 = VHD
             $Script:MOUNTED_INDEX = $selectedPart.PartitionNumber
             $Script:CachedControlSet = $null
-            $Script:ForceMenuRefresh = $true
+            $Script:AIODashboardCache = $null
+            $Script:ForceMenuRefresh = $false
             
             Write-Host "[OK] VHD Montado en: $Script:MOUNT_DIR" -ForegroundColor Green
             Write-Log -LogLevel INFO -Message "MountManager: VHD Montado y vinculado exitosamente. Entorno local redireccionado a $Script:MOUNT_DIR"
@@ -648,7 +649,8 @@ function Mount-Image {
         $Script:IMAGE_MOUNTED = 1
         $Script:MOUNTED_INDEX = $INDEX
         $Script:CachedControlSet = $null
-        $Script:ForceMenuRefresh = $true
+        $Script:AIODashboardCache = $null
+        $Script:ForceMenuRefresh = $false
         Write-Host "[OK] Imagen montada." -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "MountManager: Montaje WIM completado exitosamente. Entorno listo para personalizacion."
     } else {
@@ -857,7 +859,8 @@ function Reload-Image {
         Write-Log -LogLevel INFO -Message "ImageReloader: Recarga completada exitosamente. El entorno esta listo para seguir trabajando."
         $Script:IMAGE_MOUNTED = 1
 		$Script:CachedControlSet = $null
-        $Script:ForceMenuRefresh = $true
+        $Script:AIODashboardCache = $null
+        $Script:ForceMenuRefresh = $false
     } else {
         Write-Host "[ERROR] Error al remontar la imagen."
         Write-Log -LogLevel ERROR -Message "ImageReloader: Fallo critico al remontar la imagen. El entorno ha quedado desmontado. LASTEXITCODE: $LASTEXITCODE"
