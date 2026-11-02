@@ -1,5 +1,5 @@
 
-# AdminImagenOffline V1.5.9 by SOFTMAXTER
+# AdminImagenOffline V1.5.10 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -9,16 +9,13 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.9 (Changelog)
+## 🆕 Novedades en la Versión 1.5.10 (Changelog)
 
-* **Nuevo Módulo BootSetup (GUI de Setup y Fondos)**: En *Editar boot.wim*, el índice de instalación (Setup) abre una ventana con dos pestañas, *Inicio y requisitos* y *Fondo de instalación*:
-  * **Setup Legacy**: configura `winpeshl.ini` para iniciar el instalador con `/legacy` y permite restaurar el inicio original.
-  * **Estilo Windows 10**: renombra `setupprep.exe` a `setupprep.exe.aio.bak` en `sources` del índice y del medio (requiere abrir el `boot.wim` del medio completo) y permite restaurarlo.
-  * **Bypass de Windows 11**: integra los valores `LabConfig` de TPM, Secure Boot y RAM en el `SYSTEM` offline del índice, sin tocar el registro del equipo anfitrión. *Restaurar requisitos* devuelve los valores previos o los elimina si no existían.
-  * **Fondo de instalación**: acepta imágenes PNG, JPG o BMP de hasta 64 megapixeles (recomendado 1024 x 768), con vista previa y silueta orientativa del asistente. Actualiza los fondos internos del índice y los externos del medio, y permite restaurar los originales.
-* **Guardado Seguro de boot.wim**: Al salir con `T` se elige guardar (`S`) o descartar (`N`). Al guardar, se verifican Setup, bypass y fondos antes del *Commit* y los cambios externos al `boot.wim` se aplican después de guardar. Al descartar, también se deshacen los cambios externos.
-* **Selección del Índice de boot.wim**: *Editar boot.wim* pregunta qué índice editar, detecta el de instalación por su nombre en lugar de asumir el índice 2 y valida el índice elegido.
-* **Convertir ESD a WIM con Varios Índices**: Permite exportar un índice, una lista (`1,3,5`) o todos (`T`) a un mismo `.wim`. Los índices se identifican con `DISM /English`, independientemente del idioma de Windows. Impide usar el ESD como destino y, si la conversión falla, no cambia la ruta del WIM activo.
+* **Preparación ESU Offline (Actualizaciones)**: Para imágenes `install.wim` de Windows 10 cliente no LTSC (compilaciones 19041 a 19045), el módulo pregunta si deseas preparar la integración ESU offline (por defecto *No*). Es un método no oficial: diagnostica el estado antes de escribir, usa un perfil fijo por arquitectura, registra un manifiesto y *Preflight* permite restaurar el medio. No instala ni activa una licencia ESU. Si no lo aceptas, la integración se detiene antes de modificar el medio.
+* **Verificación de `winre.wim` con wimlib**: Antes de reinyectar `winre.wim` se comprueba su integridad con `wimlib-imagex verify`, incluso sin informes completos, y después se compara por SHA-256. Ahora `wimlib-imagex.exe` debe estar en `Tools\wimlib` o en `PATH` para actualizar WinRE. Además se valida la compatibilidad de cada paquete con los índices elegidos.
+* **Dashboard con Caché de Metadatos**: Los datos de la imagen montada (nombre, edición, versión y compilación) se leen de forma nativa y se conservan entre menús. *Cambiar Edición* reutiliza esos datos y el panel solo se refresca cuando cambia algo relevante, como montar, desmontar, cambiar de edición o modificar los valores de registro que monitorea.
+* **Catálogo de Ediciones Ampliado**: Se agregan ediciones Server (Azure Edition, Core, Evaluation y Essentials), Enterprise Evaluation, IoT Enterprise LTSC Evaluation, Windows Team, Cloud PC y Starter. La búsqueda prioriza la coincidencia exacta de identificador o nombre.
+* **Plantilla de Inicio Opcional en Bloatware**: La plantilla minimalista del menú Inicio (Windows 10 y 11) ahora se aplica solo si marcas su casilla, que viene desmarcada. Los controles tienen ayudas y la confirmación previa indica qué ocurrirá con el menú Inicio. Desmarcarla no restaura una plantilla aplicada anteriormente.
 
 ## Características Principales
 
@@ -59,7 +56,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
     ├── Tools/
     │   ├── oscdimg.exe
     │   ├── SetLockScreen.zip
-    │   └── wimlib/                <-- wimlib-imagex.exe (ajuste de CREATIONTIME)
+    │   └── wimlib/                <-- wimlib-imagex.exe (verificación de winre.wim y ajuste de CREATIONTIME)
     └── Script/
         ├── AdminImagenOffline.ps1
         ├── Modulo-Actualizaciones.ps1
@@ -151,7 +148,7 @@ Gestión completa de los controladores *offline*.
 ### [ 6 ] Contenido de la Imagen (Apps y Paquetes)
 Gestión de todo lo que se ejecuta o se preinstala dentro de la imagen:
 
-* **Eliminar Bloatware (Apps):** Interfaz categorizada para purgar aplicaciones preinstaladas indeseadas, salvaguardando los componentes vitales del sistema operativo.
+* **Eliminar Bloatware (Apps):** Interfaz categorizada para purgar aplicaciones preinstaladas indeseadas, salvaguardando los componentes vitales del sistema operativo. La plantilla minimalista del menú Inicio es opcional (casilla desmarcada por defecto).
 * **Inyector y Actualizador de Apps Modernas (Appx/MSIX):** Motor heurístico de aprovisionamiento offline que analiza la identidad y versión reales de paquetes y bundles, detecta lo ya instalado en la imagen y marca cada entrada como **INSTALAR**, **ACTUALIZAR**, **REPARAR** u **OMITIR**. Lee dependencias declaradas en los manifiestos, selecciona versiones y arquitecturas compatibles, valida licencias por familia, procesa frameworks antes que las apps y puede limpiar marcas `Deprovisioned` para reparar paquetes previamente eliminados. Incluye actualización opcional de apps existentes, cancelación segura después del paquete actual y conservación de logs DISM cuando una operación falla.
 * **Inyector de Addons (.wim, .tpk, .bpk, .reg):**
   * **Uso:** Integra paquetes de utilidades sueltos (7-Zip, Visual C++, etc.).

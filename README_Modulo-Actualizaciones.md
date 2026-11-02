@@ -42,7 +42,8 @@ El módulo clasifica paquetes CAB y MSU mediante identidades y contenido interno
 - Puede reconstruir y optimizar todos los WIM.
 - Puede usar `wimlib-imagex.exe` para ajustar la fecha interna de creación.
 - Puede omitir las verificaciones completas Pre/Post-Commit conservando siempre la verificación estructural final.
-- Detecta LCU de la etapa ESU de Windows 10 en imágenes cliente no LTSC y detiene la integración con una explicación.
+- Detecta LCU de la etapa ESU de Windows 10 en imágenes cliente no LTSC y ofrece una preparación ESU offline experimental; si no la aceptas, detiene la integración con una explicación.
+- Verifica la integridad de `winre.wim` con `wimlib-imagex.exe` antes de reinyectarlo.
 - Genera reportes JSON, HTML, registro DISM y diagnóstico ZIP.
 
 ## Requisitos
@@ -63,9 +64,9 @@ Este módulo requiere `install.wim`. Si el medio contiene `install.esd`, convié
 
 El módulo detecta Windows ADK y utiliza la versión más reciente de DISM disponible. Si no encuentra ADK, puede utilizar DISM del sistema cuando resulte adecuado.
 
-### wimlib opcional
+### wimlib
 
-Para ajustar `CREATIONTIME` interno debe existir:
+`wimlib-imagex.exe` verifica `winre.wim` antes de reinyectarlo y ajusta el `CREATIONTIME` interno. Debe existir:
 
 ```text
 E:\windows\AdminImagenOffline\Tools\wimlib\wimlib-imagex.exe
@@ -73,7 +74,7 @@ E:\windows\AdminImagenOffline\Tools\wimlib\wimlib-imagex.exe
 
 o una instalación accesible desde `PATH`.
 
-Sin wimlib, la integración continúa y solamente se omite el ajuste de fecha interna.
+Sin wimlib no se puede verificar `winre.wim` y el módulo no lo reinyecta. El ajuste de fecha interna se omite y el resto de la integración continúa.
 
 ## Ubicación del módulo
 
@@ -149,9 +150,13 @@ Setup Dynamic Update. Se fusiona en la superficie `sources` del medio y, cuando 
 
 ### ESU
 
-Paquetes Extended Security Updates. El módulo no elimina ni omite requisitos de licencia o activación.
+Paquetes Extended Security Updates. El módulo no instala ni activa licencias ESU.
 
-Si la LCU pertenece a la etapa ESU de Windows 10 y la imagen es cliente no LTSC, el módulo se detiene antes de modificar el medio: el paquete de preparación no concede por sí solo el derecho ESU a una imagen offline. Despliega la imagen, activa ESU por el método autorizado y aplica la LCU en el sistema en línea, o usa un medio LTSC compatible.
+Si la LCU pertenece a la etapa ESU de Windows 10 y la imagen es cliente no LTSC (compilaciones 19041 a 19045), el módulo pregunta *Preparar integración ESU offline* (por defecto *No*). Si la aceptas, aplica un método offline experimental y no oficial: diagnostica el estado antes de escribir, usa un perfil fijo por arquitectura (x64, x86 o arm64), modifica el componente de comprobación ESU en `install.wim` y registra un manifiesto. *Preflight* permite restaurar el medio.
+
+Un estado parcial, distinto o más reciente bloquea la preparación automática. Los paquetes de preparación o licenciamiento se integran por separado y no acreditan activación ESU. Las coincidencias con una prueba offline no garantizan el arranque ni las actualizaciones futuras.
+
+Si no aceptas la preparación, el módulo se detiene antes de modificar el medio. Despliega la imagen, activa ESU por el método autorizado y aplica la LCU en el sistema en línea, o usa un medio LTSC compatible.
 
 ### Enablement
 
@@ -356,6 +361,7 @@ El módulo comprueba, según el contexto:
 - paquetes nuevos;
 - paquetes retirados o consolidados;
 - persistencia después del commit;
+- integridad de `winre.wim` con wimlib antes de reinyectarlo;
 - hash de `winre.wim` reinyectado;
 - estructura final de `install.wim`;
 - estructura final de `boot.wim`;
@@ -450,7 +456,7 @@ CBS puede conservar o restablecer una identidad neutral durante el mantenimiento
 
 ### No aparece la opción de CREATIONTIME
 
-Instala `wimlib-imagex.exe` en `Tools\wimlib` o agrégalo a `PATH`. El resto del mantenimiento puede completarse sin esa herramienta.
+Instala `wimlib-imagex.exe` en `Tools\wimlib` o agrégalo a `PATH`. Es necesario para verificar `winre.wim` antes de reinyectarlo; sin esa herramienta solo se omite el ajuste de `CREATIONTIME`.
 
 ### install.esd no es aceptado
 
