@@ -1681,18 +1681,19 @@ function Limpieza-Menu {
         $sfcBoot = $MountDir
         if (-not $sfcBoot.EndsWith("\")) { $sfcBoot += "\" }
         $sfcWin = Join-Path -Path $MountDir -ChildPath "Windows"
- 
+
         if (-not (Test-Path -LiteralPath $sfcWin -PathType Container)) {
             Write-Host "No se encuentra la carpeta Windows en $sfcWin. ¿Esta montada correctamente?" -ForegroundColor Red
             Write-Log -LogLevel ERROR -Message "LIMPIEZA: No se encontro la carpeta Windows en '$sfcWin' para ejecutar SFC."
             return $false
         }
- 
+
         # ---------------- Ayudantes visuales ----------------
         $lineWidth = 119
         try { $w = $Host.UI.RawUI.WindowSize.Width; if ($w -gt 20) { $lineWidth = $w - 1 } } catch {}
         $wrapWidth = [Math]::Min($lineWidth, 110)
- 
+        $spinState = @{ Row = -1 }   # fila de consola donde se dibujo el ultimo indicador de actividad
+
         # Quita el formato interno de CSI: [l:14]'texto' -> 'texto'
         function ConvertTo-SfcCleanText {
             param([string]$Text)
@@ -1701,14 +1702,14 @@ function Limpieza-Menu {
             $t = $t -replace '\s+', ' '
             return $t.Trim()
         }
- 
+
         # Traduce y compacta los mensajes [SR] mas comunes; si no reconoce el formato devuelve el texto limpio
         function Format-SfcSrText {
             param([string]$Text)
             $t = ConvertTo-SfcCleanText -Text $Text
- 
+
             if ($t -match '^Cannot repair member file \x27(?<f>[^\x27]+)\x27 of (?<c>[^,]+), version (?<v>[^,]+), arch (?<a>[^,]+),.*hash mismatch') {
-                return "No se pudo reparar '$($Matches['f'])' (hash distinto en el almacen) - $($Matches['c']) v$($Matches['v']) ($($Matches['a']))"
+                return @("No se pudo reparar '$($Matches['f'])' (hash distinto en el almacen)", "Componente: $($Matches['c']) v$($Matches['v']) ($($Matches['a']))")
             }
             if ($t -match '^This component was referenced by \x27(?<p>[^\x27]+)\x27') {
                 $pkgRaw  = $Matches['p']
@@ -1716,57 +1717,80 @@ function Limpieza-Menu {
                 $pkgName = $parts[0]
                 $pkgVer  = ""
                 if ($parts.Count -ge 5 -and $parts[4] -match '^\d+\.\d+\.\d+\.\d+') { $pkgVer = " v$($Matches[0])" }
-                return "Componente referenciado por el paquete: $pkgName$pkgVer"
+                return @("Componente referenciado por el paquete:", "$pkgName$pkgVer")
             }
             if ($t -match '^Could not reproject corrupted file (?<p>.+?); source file in store is also corrupted') {
                 $pathShow = ($Matches['p'] -replace '^\\\?\?\\', '') -replace '\\{2,}', '\'
-                return "No se pudo restaurar el archivo corrupto: $pathShow (el origen en el almacen tambien esta corrupto)"
+                return @("No se pudo restaurar el archivo corrupto:", $pathShow, "El origen en el almacen tambien esta corrupto")
             }
-            return $t
+            return @($t)
         }
- 
-        # Imprime texto con ajuste de linea por palabras y sangria, para que la consola no corte palabras a la mitad
+
+        # Imprime uno o varios segmentos con ajuste de linea por palabras y sangria (cada segmento inicia en linea nueva)
         function Write-SfcWrapped {
             param(
-                [string]$Text,
+                [string[]]$Text,
                 [string]$FirstPrefix = "     * ",
                 [string]$NextPrefix  = "       ",
                 [string]$Color = "Gray"
             )
             $avail = $wrapWidth - $FirstPrefix.Length
             if ($avail -lt 20) { $avail = 20 }
-            $wrapped = New-Object System.Collections.Generic.List[string]
-            $cur = ""
-            foreach ($word in ($Text -split ' ')) {
-                while ($word.Length -gt $avail) {
-                    if ($cur.Length -gt 0) { $wrapped.Add($cur); $cur = "" }
-                    $wrapped.Add($word.Substring(0, $avail))
-                    $word = $word.Substring($avail)
+            $isFirst = $true
+            foreach ($segment in $Text) {
+                $wrapped = New-Object System.Collections.Generic.List[string]
+                $cur = ""
+                foreach ($word in ($segment -split ' ')) {
+                    while ($word.Length -gt $avail) {
+                        if ($cur.Length -gt 0) { $wrapped.Add($cur); $cur = "" }
+                        $wrapped.Add($word.Substring(0, $avail))
+                        $word = $word.Substring($avail)
+                    }
+                    if ($cur.Length -eq 0) { $cur = $word }
+                    elseif (($cur.Length + 1 + $word.Length) -le $avail) { $cur += " " + $word }
+                    else { $wrapped.Add($cur); $cur = $word }
                 }
-                if ($cur.Length -eq 0) { $cur = $word }
-                elseif (($cur.Length + 1 + $word.Length) -le $avail) { $cur += " " + $word }
-                else { $wrapped.Add($cur); $cur = $word }
-            }
-            if ($cur.Length -gt 0) { $wrapped.Add($cur) }
-            for ($i = 0; $i -lt $wrapped.Count; $i++) {
-                $pfx = if ($i -eq 0) { $FirstPrefix } else { $NextPrefix }
-                Write-Host ($pfx + $wrapped[$i]) -ForegroundColor $Color
+                if ($cur.Length -gt 0) { $wrapped.Add($cur) }
+                foreach ($wl in $wrapped) {
+                    $pfx = if ($isFirst) { $FirstPrefix } else { $NextPrefix }
+                    Write-Host ($pfx + $wl) -ForegroundColor $Color
+                    $isFirst = $false
+                }
             }
         }
- 
+
         # Borra la linea del indicador de actividad (sin dejar restos) antes de imprimir un evento
         function Clear-SfcLiveLine {
             Write-Host ("`r" + (" " * $lineWidth) + "`r") -NoNewline
         }
- 
+
+        # Si sfc.exe imprimio texto despues del indicador, la linea del indicador quedo huerfana: se blanquea en su fila
+        # (solo si la fila sigue siendo valida, es decir, la consola no ha desplazado el contenido)
+        function Clear-SfcStaleSpinner {
+            if ($spinState.Row -lt 0) { return }
+            try {
+                $raw = $Host.UI.RawUI
+                $cur = $raw.CursorPosition
+                if ($spinState.Row -lt $cur.Y -and $cur.Y -lt ($raw.BufferSize.Height - 1)) {
+                    $pos = $cur
+                    $pos.X = 0
+                    $pos.Y = $spinState.Row
+                    $raw.CursorPosition = $pos
+                    Write-Host (" " * $lineWidth) -NoNewline
+                    $raw.CursorPosition = $cur
+                }
+            } catch {}
+            $spinState.Row = -1
+        }
+
         function Write-SfcLiveEvent {
-            param([string]$Tag, [string]$Text, [string]$Color = "Cyan")
+            param([string]$Tag, [string[]]$Text, [string]$Color = "Cyan")
             Clear-SfcLiveLine
             $pfx = "   [$Tag] "
             Write-SfcWrapped -Text $Text -FirstPrefix $pfx -NextPrefix (" " * $pfx.Length) -Color $Color
         }
         # ----------------------------------------------------
- 
+
         $sfcLogDir = if ($script:logDir -and (Test-Path -LiteralPath $script:logDir -PathType Container)) {
             $script:logDir
         } else {
@@ -1774,17 +1798,17 @@ function Limpieza-Menu {
         }
         $sfcStamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $sfcLogPath = Join-Path -Path $sfcLogDir -ChildPath "SFC_Offline_${sfcStamp}.log"
- 
+
         # Si la ruta contiene espacios y termina en '\', duplicar la barra final para que '\"' no escape la comilla en el parser C de sfc.exe
         $bootArg = if ($sfcBoot -match '\s') { "/offbootdir=`"$($sfcBoot.TrimEnd('\'))\\`"" } else { "/offbootdir=$sfcBoot" }
         $winArg  = if ($sfcWin -match '\s')  { "/offwindir=`"$sfcWin`"" }  else { "/offwindir=$sfcWin" }
         $logArg  = if ($sfcLogPath -match '\s') { "/offlogfile=`"$sfcLogPath`"" } else { "/offlogfile=$sfcLogPath" }
         $sfcCmdArgs = "/scannow $bootArg $winArg $logArg"
- 
+
         Write-Host "`n[+] Verificando archivos (SFC Offline)..." -ForegroundColor Yellow
         Write-Host "    Log detallado : $sfcLogPath" -ForegroundColor DarkGray
         Write-Log -LogLevel ACTION -Message "LIMPIEZA: Iniciando SFC Offline -> sfc.exe $sfcCmdArgs"
- 
+
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $lastOffset = 0L
         $carryOver = ""
@@ -1793,10 +1817,10 @@ function Limpieza-Menu {
         $spinnerChars = @('|', '/', '-', '\')
         $spinIdx = 0
         $liveSeen = New-Object System.Collections.Generic.HashSet[string]
- 
+
         try {
             $sfcProc = Start-Process -FilePath "sfc.exe" -ArgumentList $sfcCmdArgs -NoNewWindow -PassThru -ErrorAction Stop
- 
+
             # Esperar a que sfc.exe imprima su encabezado y cree el log antes de dibujar el indicador (evita lineas de actividad huerfanas)
             $startWait = [System.Diagnostics.Stopwatch]::StartNew()
             while (-not $sfcProc.HasExited -and $startWait.ElapsedMilliseconds -lt 8000) {
@@ -1805,8 +1829,9 @@ function Limpieza-Menu {
                 [void]$sfcProc.WaitForExit(200)
             }
             [void]$sfcProc.WaitForExit(700)
- 
+
             while (-not $sfcProc.WaitForExit(500)) {
+                Clear-SfcStaleSpinner
                 if (Test-Path -LiteralPath $sfcLogPath -PathType Leaf) {
                     try {
                         $fs = New-Object System.IO.FileStream(
@@ -1838,10 +1863,10 @@ function Limpieza-Menu {
                                             $liveComponents += [int]$Matches[1]
                                         }
                                         elseif ($nl -match '\[SR\]\s+(Repairing corrupted file|Cannot repair member file|Repaired file)\b(.*)$') {
-                                            $liveEvt = Format-SfcSrText -Text ($Matches[1] + $Matches[2])
+                                            $liveEvt = @(Format-SfcSrText -Text ($Matches[1] + $Matches[2]))
                                             # SFC repite el mismo evento varias veces: mostrar cada uno una sola vez
-                                            if ($liveSeen.Add("SR|$liveEvt")) {
-                                                $liveCol = if ($liveEvt -match '^No se pudo') { 'Red' } else { 'Cyan' }
+                                            if ($liveSeen.Add("SR|" + ($liveEvt -join ' '))) {
+                                                $liveCol = if ($liveEvt[0] -match '^No se pudo') { 'Red' } else { 'Cyan' }
                                                 Write-SfcLiveEvent -Tag "SFC-SR" -Text $liveEvt -Color $liveCol
                                             }
                                         }
@@ -1861,7 +1886,7 @@ function Limpieza-Menu {
                     }
                     catch {}
                 }
- 
+
                 $spin = $spinnerChars[$spinIdx % $spinnerChars.Count]
                 $spinIdx++
                 $elapsedStr = $sw.Elapsed.ToString("mm\:ss")
@@ -1874,9 +1899,11 @@ function Limpieza-Menu {
                 $padWidth = [Math]::Min(100, $lineWidth)
                 if ($statusMsg.Length -gt $padWidth) { $statusMsg = $statusMsg.Substring(0, $padWidth) }
                 Write-Host ("`r" + $statusMsg.PadRight($padWidth)) -NoNewline -ForegroundColor Cyan
+                try { $spinState.Row = $Host.UI.RawUI.CursorPosition.Y } catch { $spinState.Row = -1 }
             }
- 
+
             # Limpiar el indicador y dejar una unica linea final estatica
+            Clear-SfcStaleSpinner
             Clear-SfcLiveLine
             $sw.Stop()
             Write-Host "   [+] Analisis SFC finalizado | Tiempo: $($sw.Elapsed.ToString('mm\:ss'))" -ForegroundColor Cyan
@@ -1888,7 +1915,7 @@ function Limpieza-Menu {
             SFC /scannow /offbootdir="$sfcBoot" /offwindir="$sfcWin" /offlogfile="$sfcLogPath"
             $sfcExit = $LASTEXITCODE
         }
- 
+
         # Analisis completo post-ejecucion sobre el archivo /offlogfile ya cerrado por sfc.exe
         $totalBatches = 0
         $totalComponents = 0
@@ -1898,20 +1925,20 @@ function Limpieza-Menu {
         $hashMismatchEntries = New-Object System.Collections.Generic.List[string]
         $overlapEntries = New-Object System.Collections.Generic.List[string]
         $allSrLines = New-Object System.Collections.Generic.List[string]
- 
+
         if (Test-Path -LiteralPath $sfcLogPath -PathType Leaf) {
             try {
                 foreach ($line in [System.IO.File]::ReadLines($sfcLogPath)) {
                     if ([string]::IsNullOrWhiteSpace($line)) { continue }
- 
+
                     if (-not $wcpVersion -and $line -match 'WcpInitialize:\s+wcp\.dll\s+version\s+([^\s]+)') {
                         $wcpVersion = $Matches[1]
                     }
- 
+
                     if ($line -match '\[SR\]\s*(.*)$') {
                         $srBody = $Matches[1].Trim()
                         [void]$allSrLines.Add($srBody)
- 
+
                         if ($srBody -match '^Verifying\s+(\d+)\b') {
                             $totalBatches++
                             $totalComponents += [int]$Matches[1]
@@ -1925,7 +1952,7 @@ function Limpieza-Menu {
                             }
                         }
                     }
- 
+
                     if ($line -match 'Hashes for file member\s+(.*?)\s+do not match') {
                         $hm = $Matches[1].Trim()
                         if (-not $hashMismatchEntries.Contains($hm)) {
@@ -1944,7 +1971,7 @@ function Limpieza-Menu {
                 Write-Log -LogLevel WARN -Message "LIMPIEZA: Error al analizar '$sfcLogPath': $($_.Exception.Message)"
             }
         }
- 
+
         $totalElapsed = $sw.Elapsed.ToString("mm\:ss")
         Write-Host "`n   =======================================================" -ForegroundColor DarkCyan
         Write-Host "              ACTIVIDAD Y RESULTADO DE SFC OFFLINE        " -ForegroundColor Cyan
@@ -1955,7 +1982,7 @@ function Limpieza-Menu {
         Write-Host "   - Tiempo de ejecucion     : $totalElapsed" -ForegroundColor Gray
         $batchTxt = if ($totalBatches -ne $totalComponents) { " (en $totalBatches lotes CSI)" } else { "" }
         Write-Host "   - Componentes verificados : $totalComponents$batchTxt" -ForegroundColor Gray
- 
+
         if ($hashMismatchEntries.Count -gt 0) {
             Write-Host "   - Archivos modificados/danados detectados por Hash ($($hashMismatchEntries.Count)):" -ForegroundColor Yellow
             foreach ($hmItem in $hashMismatchEntries) {
@@ -1964,7 +1991,7 @@ function Limpieza-Menu {
                 Write-Log -LogLevel ACTION -Message "SFC_OFFLINE_HASH_MISMATCH: $hmItem"
             }
         }
- 
+
         if ($srRepairEntries.Count -gt 0) {
             Write-Host "   - Acciones de reparacion [SR] ($($srRepairEntries.Count)):" -ForegroundColor Cyan
             foreach ($srItem in $srRepairEntries) {
@@ -1994,7 +2021,7 @@ function Limpieza-Menu {
         elseif ($repairQueueCount -gt 0) {
             Write-Host "   - Componentes reparados en cola [SR]: $repairQueueCount" -ForegroundColor Yellow
         }
- 
+
         if (Test-Path -LiteralPath $sfcLogPath -PathType Leaf) {
             $logLenKB = [Math]::Round((Get-Item -LiteralPath $sfcLogPath).Length / 1KB, 1)
             Write-Host "   - Log completo (${logLenKB} KB) : $sfcLogPath" -ForegroundColor Gray
@@ -2003,9 +2030,9 @@ function Limpieza-Menu {
         }
         Write-Host "   =======================================================" -ForegroundColor DarkCyan
         Write-Host ""
- 
+
         Write-Log -LogLevel INFO -Message "LIMPIEZA: SFC Offline completado en $totalElapsed (ExitCode=$sfcExit, wcp=$wcpVersion, Lotes=$totalBatches, Componentes=$totalComponents, ColaReparacion=$repairQueueCount, HashMismatch=$($hashMismatchEntries.Count), AccionesSR=$($srRepairEntries.Count), Overlaps=$($overlapEntries.Count), Log='$sfcLogPath')."
- 
+
         if (Get-Command Request-AIODashboardRefreshIfDegraded -ErrorAction SilentlyContinue) {
             Request-AIODashboardRefreshIfDegraded
         }
