@@ -7,7 +7,7 @@
 #  CARGA       : . "$PSScriptRoot\Modulo-DeployVHD.ps1"
 #
 #  NOTA: Esta funcion NO requiere imagen montada ($Script:IMAGE_MOUNTED).
-#  Opera directamente sobre archivos WIM/ESD independientes y discos del
+#  Opera directamente sobre imagenes WIM/ESD y conjuntos SWM y discos del
 #  sistema host. Es autocontenida salvo por Write-Log.
 #
 #  NO modificar las firmas de funcion; el nucleo las invoca por nombre.
@@ -37,6 +37,80 @@
 #
 # Please contact softmaxter@hotmail.com for commercial licensing inquiries.
 # ==============================================================================
+
+# Lectura de cabeceras SWM en modo consulta; sin dependencia del modulo de conversion.
+function Get-AIODeployWimContainerInfo {
+    param([string]$Path)
+    if (-not ('AIODeployWimContainerV1' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class AIODeployWimContainerV1 {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct Info {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string WimPath;
+        public Guid Guid;
+        public uint ImageCount, CompressionType;
+        public ushort PartNumber, TotalParts;
+        public uint BootIndex, WimAttributes, WimFlagsAndAttr;
+    }
+    [DllImport("wimgapi.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern IntPtr WIMCreateFile(string path, uint access, uint disposition, uint flags, uint compression, out uint result);
+    [DllImport("wimgapi.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WIMGetAttributes(IntPtr handle, out Info info, uint size);
+    [DllImport("wimgapi.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WIMCloseHandle(IntPtr handle);
+    public static Info Read(string path) {
+        uint result;
+        // Acceso de consulta, WIM_OPEN_EXISTING; no se modifica la imagen.
+        IntPtr handle = WIMCreateFile(path, 0, 3, 0, 0, out result);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try {
+            Info info;
+            if (!WIMGetAttributes(handle, out info, (uint)Marshal.SizeOf(typeof(Info)))) throw new Win32Exception(Marshal.GetLastWin32Error());
+            return info;
+        } finally { WIMCloseHandle(handle); }
+    }
+}
+'@
+    }
+    [AIODeployWimContainerV1]::Read([IO.Path]::GetFullPath($Path))
+}
+
+function Get-AIODeploySwmSet {
+    param([string]$FirstPart)
+    $first = Get-Item -LiteralPath $FirstPart -Force -ErrorAction Stop
+    if ($first.Extension -ine '.swm') { throw 'Selecciona un archivo .swm.' }
+    $info = Get-AIODeployWimContainerInfo -Path $first.FullName
+    if ($info.PartNumber -ne 1) { throw 'Selecciona la primera parte del conjunto (por ejemplo, install.swm, no install2.swm).' }
+    if ($info.TotalParts -lt 1 -or $info.ImageCount -lt 1) { throw 'La primera parte SWM no contiene una cabecera valida.' }
+    # El patron que se pasara a DISM debe contener exclusivamente este conjunto.
+    $files = @(Get-ChildItem -LiteralPath $first.DirectoryName -File -Force -ErrorAction Stop | Where-Object {
+        $_.Extension -ieq '.swm' -and $_.BaseName.StartsWith($first.BaseName, [StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($files.Count -ne $info.TotalParts) {
+        throw "Conjunto incompleto o ambiguo: se esperaban $($info.TotalParts) partes y se encontraron $($files.Count). Coloca todas sus partes en una carpeta separada."
+    }
+    $parts = @{}
+    foreach ($file in $files) {
+        $part = Get-AIODeployWimContainerInfo -Path $file.FullName
+        $number = [int]$part.PartNumber
+        if ($part.Guid -ne $info.Guid -or $part.TotalParts -ne $info.TotalParts -or
+            $number -lt 1 -or $number -gt $info.TotalParts -or $parts.ContainsKey($number)) {
+            throw "Parte de otro conjunto, duplicada o invalida: $($file.Name)"
+        }
+        $expectedName = $first.BaseName + $(if ($number -eq 1) { '' } else { [string]$number }) + '.swm'
+        if ($file.Name -ine $expectedName) { throw "Nombre de parte inesperado: $($file.Name). Se esperaba $expectedName." }
+        $parts[$number] = $file
+    }
+    [pscustomobject]@{
+        First = $first.FullName; Pattern = (Join-Path $first.DirectoryName ($first.BaseName + '*.swm'))
+        Info = $info; Files = @(1..([int]$info.TotalParts) | ForEach-Object { $parts[$_] })
+    }
+}
 
 function Show-Deploy-To-VHD-GUI {
 
@@ -151,7 +225,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     # 2. Construccion del formulario
     # ------------------------------------------------------------------
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = "Despliegue de Imagen (WIM/ESD a VHDX o Disco Fisico)"
+    $form.Text            = "Despliegue WIM/ESD/SWM a VHD/VHDX o Disco Fisico"
     $form.Size            = New-Object System.Drawing.Size(720, 680)
     $form.StartPosition   = "CenterScreen"
     $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -161,7 +235,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
     # --- Grupo 1: Imagen de Origen ---
     $grpSource           = New-Object System.Windows.Forms.GroupBox
-    $grpSource.Text      = " 1. Imagen de Origen "
+    $grpSource.Text      = " 1. Imagen de Origen (WIM / ESD / SWM) "
     $grpSource.Location  = New-Object System.Drawing.Point(20, 15)
     $grpSource.Size      = New-Object System.Drawing.Size(660, 120)
     $grpSource.ForeColor = [System.Drawing.Color]::Cyan
@@ -360,6 +434,15 @@ public sealed class AIODeployNativeReader : IDisposable {
     $numRecSize.Value    = 1024
     $grpDest.Controls.Add($numRecSize)
 
+    # Compact OS se aplica a Windows dentro del destino (VHD o disco fisico).
+    $chkCompactOS           = New-Object System.Windows.Forms.CheckBox
+    $chkCompactOS.Text      = "Compact OS (reducir espacio ocupado por Windows)"
+    $chkCompactOS.Location  = "20, 187"
+    $chkCompactOS.AutoSize  = $true
+    $chkCompactOS.Checked   = $false
+    $chkCompactOS.ForeColor = [System.Drawing.Color]::LightGreen
+    $grpDest.Controls.Add($chkCompactOS)
+
     # Etiqueta de estado y boton principal
     $lblStatus           = New-Object System.Windows.Forms.Label
     $lblStatus.Text      = "Esperando configuracion..."
@@ -529,26 +612,39 @@ public sealed class AIODeployNativeReader : IDisposable {
     # Carga inicial: poblar la lista de discos
     $form.Add_Shown({ & $PopulateDisks })
 
-    # Seleccionar imagen WIM/ESD y poblar ComboBox de indices
+    # SWM: seleccionar la primera parte y mantener el conjunto en una sola carpeta.
     $btnBrowseWim.Add_Click({
         $ofd        = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "Imagenes (*.wim, *.esd)|*.wim;*.esd"
-        if ($ofd.ShowDialog() -eq 'OK') {
-            $txtWim.Text = $ofd.FileName
+        $ofd.Filter = "Imagenes WIM/ESD/SWM|*.wim;*.esd;*.swm|WIM (*.wim)|*.wim|ESD (*.esd)|*.esd|SWM (primera parte)|*.swm"
+        $ofd.Title  = "Selecciona WIM, ESD o la primera parte SWM (ej. install.swm)"
+        try {
+            if ($ofd.ShowDialog() -ne 'OK') { return }
+            $txtWim.Text = ''
             $cmbIndex.Items.Clear()
-            $lblStatus.Text = "Leyendo..."
+            $lblStatus.Text = "Leyendo imagen..."
             $form.Refresh()
             try {
-                $info = Get-WindowsImage -ImagePath $ofd.FileName
-                foreach ($img in $info) {
-                    $cmbIndex.Items.Add("[$($img.ImageIndex)] $($img.ImageName)")
+                $swmSet = $null
+                if ([IO.Path]::GetExtension($ofd.FileName) -ieq '.swm') {
+                    $swmSet = Get-AIODeploySwmSet -FirstPart $ofd.FileName
                 }
-                if ($cmbIndex.Items.Count -gt 0) { $cmbIndex.SelectedIndex = 0 }
-                $lblStatus.Text = "WIM Cargado."
+                $info = @(Get-WindowsImage -ImagePath $ofd.FileName -ErrorAction Stop)
+                if ($info.Count -eq 0) { throw 'No se encontraron indices en la imagen.' }
+                foreach ($img in $info) {
+                    [void]$cmbIndex.Items.Add("[$($img.ImageIndex)] $($img.ImageName)")
+                }
+                $cmbIndex.SelectedIndex = 0
+                $txtWim.Text = $ofd.FileName
+                $lblStatus.Text = if ($swmSet) { "SWM cargado ($($swmSet.Files.Count) partes)." } else { "Imagen cargada." }
             } catch {
-                $lblStatus.Text = "Error leyendo WIM."
+                $txtWim.Text = ''
+                $cmbIndex.Items.Clear()
+                $lblStatus.Text = "Error leyendo imagen."
+                Write-Log -LogLevel ERROR -Message "DEPLOY: Origen no valido: $($_.Exception.Message)"
+                [void][System.Windows.Forms.MessageBox]::Show(
+                    "No se pudo cargar la imagen:`n`n$($_.Exception.Message)", "Imagen de origen", 'OK', 'Error')
             }
-        }
+        } finally { $ofd.Dispose() }
     })
 
     # Guardar ruta del VHDX destino
@@ -590,6 +686,47 @@ public sealed class AIODeployNativeReader : IDisposable {
                 "No se pudo determinar el indice exacto de la imagen seleccionada.`nEl formato esperado es '[Indice] Nombre'.", 
                 "Error de Indice", 'OK', 'Error')
             return
+        }
+
+        # Revalidar SWM al pulsar Desplegar, ANTES de borrar/crear/formatear el destino.
+        $swmPattern = $null
+        $swmImage = $null
+        if ([IO.Path]::GetExtension($wimPath) -ieq '.swm') {
+            try {
+                $swmSet = Get-AIODeploySwmSet -FirstPart $wimPath
+                $wimPath = $swmSet.First
+                $swmPattern = $swmSet.Pattern
+                $swmImage = Get-WindowsImage -ImagePath $wimPath -Index $idx -ErrorAction Stop
+                if (-not $swmImage -or $swmImage.ImageIndex -ne $idx) {
+                    throw 'El indice seleccionado ya no esta disponible en el conjunto SWM.'
+                }
+                Write-Log -LogLevel INFO -Message "DEPLOY: SWM validado; $($swmSet.Files.Count) partes; indice $idx; origen=$wimPath"
+            } catch {
+                Write-Log -LogLevel ERROR -Message "DEPLOY: Conjunto SWM no valido: $($_.Exception.Message)"
+                [void][System.Windows.Forms.MessageBox]::Show(
+                    "No se puede desplegar el conjunto SWM:`n`n$($_.Exception.Message)", "Origen SWM", 'OK', 'Error')
+                return
+            }
+        }
+
+        # Leer una sola vez la opcion. El grupo queda bloqueado durante el trabajo.
+        $useCompactOS = [bool]$chkCompactOS.Checked
+        if ($useCompactOS) {
+            # Comprobar la imagen ANTES de borrar un VHD o formatear un disco.
+            try {
+                $compactImage = if ($swmImage) { $swmImage } else { Get-WindowsImage -ImagePath $wimPath -Index $idx -ErrorAction Stop }
+                $compactVersion = [version]$compactImage.Version
+                if ($null -eq $compactVersion -or $compactVersion.Major -lt 10 -or
+                    ([string]$compactImage.InstallationType).Trim() -ne 'Client') {
+                    throw 'Compact OS requiere una imagen cliente de Windows 10/11. Desmarca la opcion para desplegar otra imagen.'
+                }
+            } catch {
+                Write-Log -LogLevel ERROR -Message "DEPLOY: No se pudo validar Compact OS: $($_.Exception.Message)"
+                [System.Windows.Forms.MessageBox]::Show(
+                    "No se puede desplegar con Compact OS:`n`n$($_.Exception.Message)",
+                    "Compact OS", 'OK', 'Error')
+                return
+            }
         }
 
         $isGPT      = $chkUEFI.Checked
@@ -805,13 +942,37 @@ public sealed class AIODeployNativeReader : IDisposable {
             & $CompleteDeployStage -Stage 2
 
             # ── Fase 3: Aplicacion de la imagen principal ─────────────────
-            $lblStatus.Text = "Desplegando imagen (Esto tardara varios minutos)..."
+            $lblStatus.Text = if ($useCompactOS) {
+                "Desplegando Windows con Compact OS (Esto puede tardar mas)..."
+            } else { "Desplegando imagen (Esto tardara varios minutos)..." }
             $lblImageProgress.Text = "Aplicacion de imagen: 0%."
             $form.Refresh()
 
-            Write-Log -LogLevel ACTION -Message "DEPLOY: Ejecutando DISM nativo hacia $driveLetterSystem\ ..."
+            Write-Log -LogLevel ACTION -Message "DEPLOY: Ejecutando DISM nativo hacia $driveLetterSystem\. Compact OS solicitado: $useCompactOS."
             $dismArgs = "/English /Apply-Image /ImageFile:`"$wimPath`" /Index:$idx /ApplyDir:$driveLetterSystem\"
-            $dismExitCode = Invoke-AIODeployNativeProcess -FileName "dism.exe" -Arguments $dismArgs -OnPercent $ReportImagePercent
+            if ($swmPattern) {
+                $dismArgs += " /SWMFile:`"$swmPattern`" /CheckIntegrity /Verify"
+            }
+            $compactScratch = $null
+            try {
+                if ($useCompactOS) {
+                    $targetVolume = Get-Volume -DriveLetter $freeLetSys[0] -ErrorAction Stop
+                    if ($targetVolume.FileSystem -ne 'NTFS') {
+                        throw 'El destino de Compact OS debe estar formateado en NTFS.'
+                    }
+                    # Scratch en el volumen NTFS de Windows; nunca en la particion EFI FAT32.
+                    $compactScratch = Join-Path "$driveLetterSystem\" ("AIODeployScratch_" + [guid]::NewGuid().ToString('N'))
+                    New-Item -Path $compactScratch -ItemType Directory -ErrorAction Stop | Out-Null
+                    $dismArgs += " /Compact /ScratchDir:`"$compactScratch`""
+                }
+                $dismExitCode = Invoke-AIODeployNativeProcess -FileName "dism.exe" -Arguments $dismArgs -OnPercent $ReportImagePercent
+            } finally {
+                # El ejecutor espera a que DISM termine antes de llegar a esta limpieza.
+                if ($compactScratch -and (Test-Path -LiteralPath $compactScratch)) {
+                    try { Remove-Item -LiteralPath $compactScratch -Recurse -Force -ErrorAction Stop }
+                    catch { Write-Log -LogLevel WARN -Message "DEPLOY: Temporal de Compact OS pendiente en '$compactScratch': $($_.Exception.Message)" }
+                }
+            }
 
             if ($dismExitCode -ne 0) {
                 $lblImageProgress.Text = "Aplicacion de imagen: error (codigo $dismExitCode)."
@@ -891,11 +1052,13 @@ public sealed class AIODeployNativeReader : IDisposable {
                 & $CompleteDeployStage -Stage 6
             }
 
-            $lblStatus.Text      = "Completado."
+            $lblStatus.Text      = if ($useCompactOS) { "Completado con Compact OS." } else { "Completado." }
             $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
-            Write-Log -LogLevel INFO -Message "DEPLOY: Despliegue finalizado con exito."
+            Write-Log -LogLevel INFO -Message "DEPLOY: Despliegue finalizado con exito. Compact OS solicitado: $useCompactOS."
+            $successMessage = "El disco booteable ha sido creado exitosamente."
+            if ($useCompactOS) { $successMessage += "`n`nWindows se desplego con Compact OS." }
             [System.Windows.Forms.MessageBox]::Show(
-                "El disco booteable ha sido creado exitosamente.",
+                $successMessage,
                 "Despliegue Finalizado", 'OK', 'Information')
 
         } catch {
@@ -966,13 +1129,14 @@ public sealed class AIODeployNativeReader : IDisposable {
     $toolTip.ShowAlways   = $true
     $toolTip.IsBalloon    = $false
 
-    $toolTip.SetToolTip($btnBrowseWim,    "Haz clic para seleccionar el archivo de imagen (.wim o .esd) que contiene el instalador de Windows.")
+    $toolTip.SetToolTip($btnBrowseWim,    "Selecciona WIM, ESD o la primera parte SWM (ej. install.swm).`nPara SWM, todas las partes deben estar juntas en la misma carpeta.")
     $toolTip.SetToolTip($cmbIndex,        "Selecciona la edicion de Windows a instalar.")
     $toolTip.SetToolTip($btnBrowseVhd,    "Define donde se guardara el nuevo archivo de disco virtual (.vhdx o .vhd).")
     $toolTip.SetToolTip($btnRefreshDisks, "Actualiza la lista de discos fisicos extraibles detectados.")
     $toolTip.SetToolTip($numSize,         "Size maximo que podra tener el disco virtual (en Gigabytes).")
     $toolTip.SetToolTip($chkDynamic,      "Marcado: El archivo crece segun guardes datos.`nDesmarcado: Ocupa todo el Size inmediatamente.")
     $toolTip.SetToolTip($chkUEFI,         "Marcado (GPT): Para PCs modernos con UEFI.`nDesmarcado (MBR): Para PCs antiguos con BIOS Legacy.")
+    $toolTip.SetToolTip($chkCompactOS,    "Instala Windows 10/11 con sus archivos del sistema comprimidos para ahorrar espacio.`nPuede aumentar el tiempo de despliegue y el uso de CPU. Disponible para VHD/VHDX y disco fisico.")
     $toolTip.SetToolTip($numEfiSize,      "Size de la particion de arranque (EFI o System Reserved).")
     $toolTip.SetToolTip($numMsrSize,      "Size de la particion MSR. Solo aplica en GPT/UEFI.")
     $toolTip.SetToolTip($numRecSize,      "Size de la particion de Recuperacion (WinRE). Se recomienda 1024 MB.")

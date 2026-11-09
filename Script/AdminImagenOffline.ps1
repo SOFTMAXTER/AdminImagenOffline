@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.10
+    1.5.11
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.10"
+$script:Version = "1.5.11"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1087,39 +1087,55 @@ function Edit-Indexes-Menu {
 }
 
 function Convert-Image-Menu {
-     while ($true) {
+    while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "             Convertir Formato de Imagen a WIM         " -ForegroundColor Cyan
+        Write-Host "              Convertir Formato de Imagen               " -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "   [1] Convertir ESD a WIM"
-        Write-Host "       (Extrae indices de un .esd a .wim)" -ForegroundColor Gray
+        Write-Host "   IMAGENES WIM / ESD" -ForegroundColor Yellow
+        Write-Host "   [1] Convertir WIM a ESD"
+        Write-Host "       Comprime los indices seleccionados en un archivo ESD." -ForegroundColor Gray
+        Write-Host "   [2] Convertir ESD a WIM"
+        Write-Host "       Exporta los indices seleccionados de un ESD a WIM." -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Convertir VHD/VHDX a WIM"
-        Write-Host "       (Captura un disco virtual a .wim)" -ForegroundColor Gray
+        Write-Host "   ARCHIVOS DIVIDIDOS SWM" -ForegroundColor Yellow
+        Write-Host "   [3] Dividir WIM/ESD en SWM"
+        Write-Host "       Divide la imagen en partes del tamano que elijas." -ForegroundColor Gray
+        Write-Host "   [4] Reunir SWM en WIM"
+        Write-Host "       Reune las partes SWM y exporta sus indices a WIM." -ForegroundColor Gray
+        Write-Host "   [5] Reunir SWM en ESD"
+        Write-Host "       Reune las partes SWM y exporta sus indices a ESD." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   DISCOS VIRTUALES" -ForegroundColor Yellow
+        Write-Host "   [6] Convertir VHD/VHDX a WIM"
+        Write-Host "       Captura la particion Windows del disco virtual en WIM." -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
-        Write-Host ""
         Write-Host "   [V] Volver al menu anterior" -ForegroundColor Red
         Write-Host ""
         $opcionCI = Read-MenuOption "Selecciona una opcion"
-                
+
         switch ($opcionCI.ToUpper()) {
-            "1" { 
-                Write-Log -LogLevel INFO -Message "MenuConvert: Accediendo a 'Convert-ESD' (Compresion/Descompresion de archivos ESD y WIM)."
-                Convert-ESD 
+            "1" {
+                Write-Log -LogLevel INFO -Message "MenuConvert: Accediendo a 'Convert-WIMToESD' (WIM a ESD)."
+                Convert-WIMToESD
             }
-            "2" { 
-                Write-Log -LogLevel INFO -Message "MenuConvert: Accediendo a 'Convert-VHD' (Manejo de Discos Virtuales VHD/VHDX)."
-                Convert-VHD 
+            "2" {
+                Write-Log -LogLevel INFO -Message "MenuConvert: Accediendo a 'Convert-ImageFormat' (ESDToWIM)."
+                Convert-ImageFormat -Mode ESDToWIM
             }
-            "V" { 
-                return 
+            "3" { Convert-ImageFormat -Mode ToSWM }
+            "4" { Convert-ImageFormat -Mode ToWIM }
+            "5" { Convert-ImageFormat -Mode ToESD }
+            "6" {
+                Write-Log -LogLevel INFO -Message "MenuConvert: Accediendo a 'Convert-VHD' (VHD/VHDX a WIM)."
+                Convert-VHD
             }
-            default { 
+            "V" { return }
+            default {
                 Write-Warning "Opcion no valida."
-                Start-Sleep 1 
+                Start-Sleep 1
             }
         }
     }
