@@ -1,5 +1,5 @@
 
-# AdminImagenOffline V1.5.10 by SOFTMAXTER
+# AdminImagenOffline V1.5.11 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -9,18 +9,18 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.10 (Changelog)
+## 🆕 Novedades en la Versión 1.5.11 (Changelog)
 
-* **Preparación ESU Offline (Actualizaciones)**: Para imágenes `install.wim` de Windows 10 cliente no LTSC (compilaciones 19041 a 19045), el módulo pregunta si deseas preparar la integración ESU offline (por defecto *No*). Es un método no oficial: diagnostica el estado antes de escribir, usa un perfil fijo por arquitectura, registra un manifiesto y *Preflight* permite restaurar el medio. No instala ni activa una licencia ESU. Si no lo aceptas, la integración se detiene antes de modificar el medio.
-* **Verificación de `winre.wim` con wimlib**: Antes de reinyectar `winre.wim` se comprueba su integridad con `wimlib-imagex verify`, incluso sin informes completos, y después se compara por SHA-256. Ahora `wimlib-imagex.exe` debe estar en `Tools\wimlib` o en `PATH` para actualizar WinRE. Además se valida la compatibilidad de cada paquete con los índices elegidos.
-* **Dashboard con Caché de Metadatos**: Los datos de la imagen montada (nombre, edición, versión y compilación) se leen de forma nativa y se conservan entre menús. *Cambiar Edición* reutiliza esos datos y el panel solo se refresca cuando cambia algo relevante, como montar, desmontar, cambiar de edición o modificar los valores de registro que monitorea.
-* **Catálogo de Ediciones Ampliado**: Se agregan ediciones Server (Azure Edition, Core, Evaluation y Essentials), Enterprise Evaluation, IoT Enterprise LTSC Evaluation, Windows Team, Cloud PC y Starter. La búsqueda prioriza la coincidencia exacta de identificador o nombre.
-* **Plantilla de Inicio Opcional en Bloatware**: La plantilla minimalista del menú Inicio (Windows 10 y 11) ahora se aplica solo si marcas su casilla, que viene desmarcada. Los controles tienen ayudas y la confirmación previa indica qué ocurrirá con el menú Inicio. Desmarcarla no restaura una plantilla aplicada anteriormente.
+* **Convertir Formato de Imagen ampliado**: El menú *Convertir Formatos* pasa de 2 a 6 opciones: WIM a ESD, ESD a WIM, dividir WIM/ESD en SWM, reunir SWM en WIM, reunir SWM en ESD y VHD/VHDX a WIM. Todas permiten elegir uno, varios (`1,3`) o todos los índices, conservan el orden, los nombres y el índice de arranque, y verifican la salida antes de publicarla. Nunca sobrescriben un destino existente: el trabajo se hace en una carpeta temporal y se publica con verificación SHA-256 y reversión si falla.
+* **Archivos SWM**: Se valida el conjunto completo (primera parte, GUID, número de partes y nombres esperados) antes de usarlo. Al dividir, el tamaño por parte es configurable (3800 MB por defecto), se comprueba el límite de 4 GB de FAT32 y los ESD o las selecciones parciales pasan por un WIM intermedio en *Scratch*.
+* **Convertir VHD/VHDX a WIM con WinRE**: Busca `winre.wim` dentro de Windows (`Windows\System32\Recovery`), en `Recovery\WindowsRE` y en las particiones de recuperación del mismo VHD, y permite elegir si hay varias copias. Lo valida con `wimlib-imagex verify` (igual que Actualizaciones), lo incorpora tras la captura con `wimlib-imagex update` sin montar el WIM capturado y comprueba por SHA-256 que coincide con el origen. Requiere `wimlib-imagex.exe` en `Tools\wimlib` o en `PATH` cuando el VHD contiene WinRE. La captura se escribe como `.partial.wim` y solo reemplaza al destino cuando todo está verificado; además se valida que el destino sea distinto del VHD y que este no esté conectado.
+* **Gestionar WinRE rediseñado**: Ahora encuentra `winre.wim` en el volumen de Windows y, si la imagen es un VHD/VHDX, también en sus particiones *Recovery* (con elección si hay varias copias). Trabaja sobre una copia aislada en *Scratch* verificada por SHA-256 y exige un WinRE de un único índice. Al guardar (confirmación S/N), hace *Commit*, exporta con `/Compress:max /Bootable`, vuelve a montar el resultado en solo lectura para comprobar `SYSTEM`, `SOFTWARE` y `winpeshl.exe`, y lo publica en `Windows\System32\Recovery` con respaldo del original. Verifica contenido, ACL, propietario y atributos, y si algo falla restaura y verifica el original. Al terminar restaura el contexto de la imagen principal (punto de montaje, colmenas y caché del panel); si no se pueden liberar las colmenas, lo hace al volver a entrar al gestor, y ante errores conserva la carpeta de trabajo para recuperación.
+* **Despliegue a VHD / Disco Físico desde SWM y con Compact OS**: El origen acepta WIM, ESD o la primera parte de un SWM (todas las partes en la misma carpeta); el conjunto se revalida al pulsar *Desplegar*, antes de borrar o formatear el destino, y DISM aplica con `/SWMFile`, `/CheckIntegrity` y `/Verify`. Nueva casilla **Compact OS** (desmarcada por defecto) que aplica Windows con `/Compact`: exige una imagen cliente de Windows 10/11 y un destino NTFS, y usa un temporal en el propio volumen de Windows (nunca en la partición EFI).
 
 ## Características Principales
 
 * **Interfaz Híbrida e Intuitiva**: Combina la fluidez de la consola para la orquestación principal con interfaces gráficas modernas (Windows Forms) para una gestión visual de servicios, aplicaciones, configuraciones y despliegues.
-* **Gestión Integral de Imágenes**: Capacidad total para montar, editar y empaquetar formatos WIM y ESD. Soporte nativo para manipulación de discos virtuales (VHD/VHDX) con aplicación de cambios en tiempo real.
+* **Gestión Integral de Imágenes**: Capacidad total para montar, editar, convertir y empaquetar formatos WIM, ESD y SWM. Soporte nativo para manipulación de discos virtuales (VHD/VHDX) con aplicación de cambios en tiempo real.
 * **Suite de Personalización Modular**: Organizada en menús dedicados —Contenido (Bloatware, Appx, Addons), Sistema y Comportamiento (Features, Servicios, Tweaks) y OOBE y Marca (Unattend, OEM Branding)— para una gestión más clara del sistema.
 * **Inyector de Addons con Soporte DeltaPack**: Integra utilidades sueltas (`.tpk`/`.bpk`/`.reg`) o paquetes completos generados por **DeltaPack Dual-Engine**, respetando el orden de despliegue (WIM → Acciones → Eliminaciones → Registro → Acciones) declarado en su manifiesto.
 * **Sistema de Tweaks y Automatización**: Integra un potente motor para aplicar optimizaciones de rendimiento de forma gráfica, importar archivos `.reg` en lote y generar archivos `Unattend.xml` para instalaciones desatendidas (incluyendo la evasión de los requisitos de hardware de Windows 11).
@@ -56,7 +56,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
     ├── Tools/
     │   ├── oscdimg.exe
     │   ├── SetLockScreen.zip
-    │   └── wimlib/                <-- wimlib-imagex.exe (verificación de winre.wim y ajuste de CREATIONTIME)
+    │   └── wimlib/                <-- wimlib-imagex.exe (verificación e incorporación de winre.wim y ajuste de CREATIONTIME)
     └── Script/
         ├── AdminImagenOffline.ps1
         ├── Modulo-Actualizaciones.ps1
@@ -122,16 +122,18 @@ Este es el núcleo de la herramienta. Controla el ciclo de vida del montaje de l
 ### [ 2 ] Convertir Formatos
 Herramientas de conversión e ingesta de imágenes.
 
-* **Convertir ESD a WIM:** Los archivos `.esd` tienen compresión sólida y no pueden ser modificados directamente. Esta opción extrae uno o varios índices del ESD (uno, una lista como `1,3,5` o todos) y los convierte a un único `.wim` estándar para su posterior montaje y edición.
-* **Convertir VHD/VHDX a WIM:** Monta un disco virtual silenciosamente, detecta la partición del sistema operativo, le aplica un *Trim* (Optimización) si es posible, y captura todo el volumen hacia un archivo `.wim` usando compresión máxima.
+* **Convertir WIM a ESD / ESD a WIM:** Los archivos `.esd` tienen compresión sólida y no pueden ser modificados directamente. Estas opciones exportan uno o varios índices (uno, una lista como `1,3,5` o todos) entre WIM y ESD (compresión *recovery* hacia ESD, *max* hacia WIM) para su posterior montaje y edición, verificando nombres, orden e índice de arranque de la salida.
+* **Dividir WIM/ESD en SWM:** Divide una imagen en partes del tamaño elegido (3800 MB por defecto) y comprueba el límite de 4 GB por archivo cuando el destino es FAT32. Los ESD y las selecciones parciales pasan por un WIM intermedio.
+* **Reunir SWM en WIM / ESD:** Valida que el conjunto SWM esté completo y exporta los índices elegidos a un único WIM o ESD.
+* **Convertir VHD/VHDX a WIM:** Monta un disco virtual silenciosamente, detecta la partición del sistema operativo, le aplica un *Trim* (Optimización) si es posible, y captura todo el volumen hacia un archivo `.wim` usando compresión máxima. Si el VHD contiene `winre.wim` (dentro de Windows o en sus particiones de recuperación), lo verifica con *wimlib*, lo incorpora a `Windows\System32\Recovery` sin montar el WIM capturado y confirma por SHA-256 que coincide con el origen.
 
 ### [ 3 ] Herramientas de Arranque y Medios (Boot Tools)
 Diseñado para preparar la distribución y el despliegue final de tu sistema personalizado:
 
 * **Editar boot.wim:** Pregunta qué índice editar (detecta el de instalación por su nombre) y permite inyectar controladores de almacenamiento para que equipos modernos (con tecnologías Intel RST o VMD) reconozcan los discos duros durante la instalación, o inyectar DaRT. En el índice de instalación (Setup) abre además una **GUI de Setup y fondos** con Setup Legacy (`/legacy` en `winpeshl.ini`), estilo Windows 10 (renombra `setupprep.exe` en el índice y en el medio completo), bypass de TPM, Secure Boot y RAM (`LabConfig` offline) y fondo de instalación personalizado con vista previa. Cada cambio conserva un respaldo reversible y se verifica antes del *Commit*: al volver, `T` y `S` guardan y `T` y `N` descartan todo, incluidos los cambios externos al `boot.wim`.
-* **Gestionar WinRE (Entorno de Recuperación):** Va a `Windows\System32\Recovery`, extrae el `winre.wim`, lo monta en el *Scratch*, permite inyectar DaRT o Drivers, y al guardar, utiliza `/Export-Image /Bootable` para destruir los diccionarios viejos y recomprimir el entorno, ahorrando cientos de megabytes de "peso muerto".
+* **Gestionar WinRE (Entorno de Recuperación):** Localiza `winre.wim` en Windows (y en las particiones *Recovery* si la imagen es un VHD/VHDX), lo copia a una sesión aislada en el *Scratch* verificada por SHA-256, lo monta, permite inyectar Addons o Drivers y, al guardar, hace *Commit*, reexporta con `/Export-Image /Bootable` (recompresión máxima, ahorrando cientos de megabytes de "peso muerto"), verifica la imagen final en solo lectura y la publica en `Windows\System32\Recovery` con respaldo, comprobando contenido, ACL, propietario y atributos, con reversión automática si algo falla.
 * **Crear ISO Booteable:** Genera de manera eficiente un archivo ISO listo para ser empleado en herramientas como Rufus o Ventoy, asegurando compatibilidad integral con sistemas UEFI y BIOS Legacy.
-* **Despliegue a VHD / Disco Físico:** Aplica directamente tu imagen de Windows a una unidad de almacenamiento externa o a un disco virtual, particionando y configurando los sectores de arranque de manera totalmente automatizada.
+* **Despliegue a VHD / Disco Físico:** Aplica directamente tu imagen de Windows (WIM, ESD o conjunto SWM, seleccionando su primera parte) a una unidad de almacenamiento externa o a un disco virtual, particionando y configurando los sectores de arranque de manera totalmente automatizada. Incluye la opción **Compact OS** para reducir el espacio ocupado por Windows 10/11 cliente (a costa de más tiempo de despliegue y uso de CPU).
 
 ### [ 4 ] Actualizaciones e Idiomas (Servicing)
 Menú unificado para los dos motores de servicing offline:
