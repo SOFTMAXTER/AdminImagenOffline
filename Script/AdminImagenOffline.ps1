@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.11
+    1.5.12
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.11"
+$script:Version = "1.5.12"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1060,6 +1060,9 @@ function Edit-Indexes-Menu {
         Write-Host "   [2] Eliminar un Indice"
         Write-Host "       (Borra permanentemente un indice del WIM)" -ForegroundColor Gray
         Write-Host ""
+        Write-Host "   [3] Integrar y ordenar indices (GUI)"
+        Write-Host "       (Combina fuentes WIM/ESD y define el orden del nuevo WIM)" -ForegroundColor Gray
+        Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
         Write-Host "   [V] Volver al menu anterior" -ForegroundColor Red
@@ -1074,6 +1077,10 @@ function Edit-Indexes-Menu {
             "2" { 
                 Write-Log -LogLevel INFO -Message "MenuEditIndex: Accediendo a 'Delete-Index' (Eliminar un indice de la imagen actual)."
                 Delete-Index 
+            }
+            "3" {
+                Write-Log -LogLevel INFO -Message "MenuEditIndex: Integrar y ordenar indices (GUI)."
+                Show-AIOIndexIntegrator
             }
             "V" { 
                 return 
@@ -1154,7 +1161,7 @@ function Image-Management-Menu {
         Write-Host "   [2] Editar Info/Metadatos (Nombre, Descripcion, etc..)" -ForegroundColor Green
         Write-Host "       (Cambia el nombre que aparece al instalar Windows)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [3] Editar Indices (Exportar/Eliminar)" -ForegroundColor White
+        Write-Host "   [3] Editar Indices (Exportar/Eliminar/Integrar)" -ForegroundColor White
         Write-Host "       (Gestiona los indices dentro de un .wim)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"

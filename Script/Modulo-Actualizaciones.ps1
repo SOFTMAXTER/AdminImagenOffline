@@ -2564,7 +2564,7 @@ namespace AIOUpdate {
 
         public static IntPtr OpenRead(string path, out uint creationResult) {
             // Primero usa los flags documentados. Algunos MSU-WIM modernos
-            // requieren el flag de compatibilidad 0x20000000 que usa W10UI,
+            // requieren el flag de compatibilidad 0x20000000,
             // por lo que se reintenta solo si la apertura normal falla.
             IntPtr handle = WIMCreateFile(path, 0x80000000u, 3u, 0u, 0u, out creationResult);
             if (handle == IntPtr.Zero) {
@@ -3824,8 +3824,7 @@ function Assert-AIOUpdateRepositorySupport {
         $message = @"
 Se detecto un repositorio de actualizaciones dividido (WIM/PSF/CompDB) sin un MSU reconstruido.
 Este modulo no intenta aplicar esos fragmentos directamente porque produciria
-una imagen incompleta. Reconstruye primero la LCU como MSU con W10UI o coloca
-el MSU completo en el repositorio.
+una imagen incompleta.
 "@
         throw $message.Trim()
     }
