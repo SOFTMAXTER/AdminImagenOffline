@@ -1,5 +1,5 @@
 
-# AdminImagenOffline V1.5.11 by SOFTMAXTER
+# AdminImagenOffline V1.5.12 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -9,13 +9,12 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.11 (Changelog)
+## 🆕 Novedades en la Versión 1.5.12 (Changelog)
 
-* **Convertir Formato de Imagen ampliado**: El menú *Convertir Formatos* pasa de 2 a 6 opciones: WIM a ESD, ESD a WIM, dividir WIM/ESD en SWM, reunir SWM en WIM, reunir SWM en ESD y VHD/VHDX a WIM. Todas permiten elegir uno, varios (`1,3`) o todos los índices, conservan el orden, los nombres y el índice de arranque, y verifican la salida antes de publicarla. Nunca sobrescriben un destino existente: el trabajo se hace en una carpeta temporal y se publica con verificación SHA-256 y reversión si falla.
-* **Archivos SWM**: Se valida el conjunto completo (primera parte, GUID, número de partes y nombres esperados) antes de usarlo. Al dividir, el tamaño por parte es configurable (3800 MB por defecto), se comprueba el límite de 4 GB de FAT32 y los ESD o las selecciones parciales pasan por un WIM intermedio en *Scratch*.
-* **Convertir VHD/VHDX a WIM con WinRE**: Busca `winre.wim` dentro de Windows (`Windows\System32\Recovery`), en `Recovery\WindowsRE` y en las particiones de recuperación del mismo VHD, y permite elegir si hay varias copias. Lo valida con `wimlib-imagex verify` (igual que Actualizaciones), lo incorpora tras la captura con `wimlib-imagex update` sin montar el WIM capturado y comprueba por SHA-256 que coincide con el origen. Requiere `wimlib-imagex.exe` en `Tools\wimlib` o en `PATH` cuando el VHD contiene WinRE. La captura se escribe como `.partial.wim` y solo reemplaza al destino cuando todo está verificado; además se valida que el destino sea distinto del VHD y que este no esté conectado.
-* **Gestionar WinRE rediseñado**: Ahora encuentra `winre.wim` en el volumen de Windows y, si la imagen es un VHD/VHDX, también en sus particiones *Recovery* (con elección si hay varias copias). Trabaja sobre una copia aislada en *Scratch* verificada por SHA-256 y exige un WinRE de un único índice. Al guardar (confirmación S/N), hace *Commit*, exporta con `/Compress:max /Bootable`, vuelve a montar el resultado en solo lectura para comprobar `SYSTEM`, `SOFTWARE` y `winpeshl.exe`, y lo publica en `Windows\System32\Recovery` con respaldo del original. Verifica contenido, ACL, propietario y atributos, y si algo falla restaura y verifica el original. Al terminar restaura el contexto de la imagen principal (punto de montaje, colmenas y caché del panel); si no se pueden liberar las colmenas, lo hace al volver a entrar al gestor, y ante errores conserva la carpeta de trabajo para recuperación.
-* **Despliegue a VHD / Disco Físico desde SWM y con Compact OS**: El origen acepta WIM, ESD o la primera parte de un SWM (todas las partes en la misma carpeta); el conjunto se revalida al pulsar *Desplegar*, antes de borrar o formatear el destino, y DISM aplica con `/SWMFile`, `/CheckIntegrity` y `/Verify`. Nueva casilla **Compact OS** (desmarcada por defecto) que aplica Windows con `/Compact`: exige una imagen cliente de Windows 10/11 y un destino NTFS, y usa un temporal en el propio volumen de Windows (nunca en la partición EFI).
+* **Integrar y ordenar índices (GUI)**: Nueva opción dentro de *Editar Índices* (módulo `Modulo-IntegrarIndices.ps1`). Combina índices de varias fuentes WIM/ESD (no cifradas) en un único WIM nuevo, con el orden que definas en la tabla *Orden final*, que será la numeración resultante (1, 2, 3...). Los nombres de salida son editables, se etiquetan con la arquitectura (`[x86]`, `[x64]`, `[ARM64]`) y los duplicados reciben un sufijo numérico. Incluye agrupación opcional por arquitectura, marca de un índice como arranque WinPE y compresión a elegir (LZX, XPRESS o sin compresión).
+* **Integración segura**: Las fuentes se abren solo para lectura y nunca se modifican; se rechazan las que estén montadas o hayan cambiado desde que se leyeron. El WIM se crea con `wimlib-imagex` en un temporal, se verifica por completo (`verify`) y se comprueba que orden, nombres y metadatos coincidan con el plan antes de publicarlo. Nunca sobrescribe un archivo existente, permite cancelar y deja un registro `.log` junto al destino. Muestra avisos de compatibilidad al mezclar arquitecturas, combinar x86 con Windows 11 o incluir ARM64. Requiere `wimlib-imagex.exe` en `Tools\wimlib` o en `PATH`.
+* **Gestionar WinRE y Editar boot.wim con interfaz renovada**: Ambos flujos muestran ahora los pasos numerados (`[1/5]`... y `[1/4]`...), un resumen de la sesión (origen, tamaño, montaje y destino) y, en WinRE, el tamaño original frente al final. Al elegir copia de WinRE o índice de `boot.wim` se puede cancelar con `V` o Enter, el índice se identifica con su versión y rol (Windows PE o Instalador), y los errores de las ventanas de Addons y Drivers se registran sin cerrar el gestor.
+* **Nueva interfaz de SFC Offline con progreso en vivo y resumen detallado**: En lugar de mostrar solo la salida cruda de `sfc.exe`, la herramienta lee el log de SFC mientras se ejecuta y muestra un indicador de actividad con cronómetro y componentes verificados. Los eventos relevantes (reparaciones `[SR]`, archivos con hash distinto y componentes que no se pueden reparar) aparecen una sola vez, traducidos y compactados. Al terminar presenta un resumen con la versión del motor CSI (`wcp.dll`), el tiempo, los componentes verificados, los archivos dañados por hash, las acciones de reparación, los ajustes de metadatos CSI y la ruta del log completo (`SFC_Offline_<fecha>.log`), y registra todo en el log de la herramienta.
 
 ## Características Principales
 
@@ -56,7 +55,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
     ├── Tools/
     │   ├── oscdimg.exe
     │   ├── SetLockScreen.zip
-    │   └── wimlib/                <-- wimlib-imagex.exe (verificación e incorporación de winre.wim y ajuste de CREATIONTIME)
+    │   └── wimlib/                <-- wimlib-imagex.exe (verificación e incorporación de winre.wim, integración de índices y ajuste de CREATIONTIME)
     └── Script/
         ├── AdminImagenOffline.ps1
         ├── Modulo-Actualizaciones.ps1
@@ -71,6 +70,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
         ├── Modulo-EditIndex.ps1
         ├── Modulo-Environments.ps1
         ├── Modulo-Features.ps1
+        ├── Modulo-IntegrarIndices.ps1
         ├── Modulo-IsoMaker.ps1
         ├── Modulo-Lenguajes.ps1
         ├── Modulo-Metadata.ps1
@@ -117,7 +117,7 @@ Este es el núcleo de la herramienta. Controla el ciclo de vida del montaje de l
   * **Guardar Cambios:** Sobrescribir el índice actual, agregarlos como un nuevo índice (*Append*) o exportarlos a un archivo `.wim` completamente nuevo (*Save As*).
   * **Guardar y Desmontar (Commit) / Desmontar sin Guardar:** Si hay bloqueos de registro, el script fuerza un `[GC]::Collect()` (recolección de basura en .NET) para liberar *handles* huérfanos antes de desmontar, evitando corrupciones.
 * **Editar Info/Metadatos:** Cambia el nombre interno y la descripción de la imagen (ej. de "Windows 10 Pro" a "Mi Custom OS").
-* **Editar Índices:** Permite Exportar un índice específico para crear una imagen más ligera o Eliminar índices que no necesitas permanentemente.
+* **Editar Índices:** Permite Exportar un índice específico para crear una imagen más ligera o Eliminar índices que no necesitas permanentemente. También permite **Integrar y ordenar índices** de varias fuentes WIM/ESD en un nuevo WIM mediante una interfaz gráfica, con orden libre, nombres editables, agrupación opcional por arquitectura y verificación completa del resultado.
 
 ### [ 2 ] Convertir Formatos
 Herramientas de conversión e ingesta de imágenes.
@@ -173,7 +173,7 @@ Mantenimiento de la integridad de la imagen.
 
 * **CheckHealth / ScanHealth:** Verifica daños en el almacén de componentes.
 * **Reparar Imagen (RestoreHealth):** Si la imagen está corrupta, intenta repararla. Si falla, el script despliega un protocolo de emergencia (*Fallback*) que te pedirá un `install.wim` sano para usarlo como fuente de reparación (`/LimitAccess`).
-* **SFC Offline:** Ejecuta el comprobador de archivos del sistema apuntando a la unidad montada.
+* **SFC Offline:** Ejecuta el comprobador de archivos del sistema apuntando a la unidad montada. Muestra el progreso en vivo, traduce los eventos de reparación y finaliza con un resumen del resultado y la ruta del log detallado.
 * **Limpiar Componentes (StartComponentCleanup):** Pule el tamaño de la imagen borrando actualizaciones obsoletas. Te preguntará si deseas usar `/ResetBase` (mayor compresión, pero impide desinstalar actualizaciones previas).
 
 ### [ 10 ] Cambiar Edición
