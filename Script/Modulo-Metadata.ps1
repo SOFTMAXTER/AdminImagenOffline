@@ -33,53 +33,15 @@
 # Please contact softmaxter@hotmail.com for commercial licensing inquiries.
 # ==============================================================================
 
-function Show-WimMetadata-GUI {
+. (Join-Path $PSScriptRoot 'Metadata-Comun.ps1')
 
-    # 1. Cargar Catálogo de Ediciones (Fallback inteligente)
-    $editionsFile = Join-Path $PSScriptRoot "Catalogos\Ediciones.ps1"
-    if (-not (Test-Path $editionsFile)) { $editionsFile = Join-Path $PSScriptRoot "Modulo-Ediciones.ps1" }
-    if (-not (Test-Path $editionsFile)) { $editionsFile = Join-Path $PSScriptRoot "Ediciones.ps1" }
-    
-    if (Test-Path $editionsFile) { 
-        . $editionsFile 
-    } else { 
-        Write-Warning "Falta el archivo del catálogo de Ediciones. El autocompletado no funcionará." 
-    }
+function Show-WimMetadata-GUI {
 
     # 2. Cargar dependencias de UI y XML
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
     Add-Type -AssemblyName System.Xml
     Add-Type -AssemblyName System.Xml.Linq
-
-    # --- CATEGORÍAS EXCLUSIVAS DE EDICIONES ---
-    $win10Editions = @(
-        "Core", "CoreN", "CoreK", "CoreSingleLanguage", "CoreCountrySpecific",
-        "Professional", "ProfessionalN", "ProfessionalEducation", "ProfessionalEducationN", 
-        "ProfessionalWorkstation", "ProfessionalWorkstationN", "ProfessionalCountrySpecific", "ProfessionalSingleLanguage", 
-        "Education", "EducationN", "Enterprise", "EnterpriseN", "EnterpriseG", "EnterpriseGN",
-        "ServerRdsh", "IoTEnterprise", "Cloud", "CloudN"
-    )
-
-    $win11Editions = @(
-        "Core", "CoreN", "CoreK", "CoreSingleLanguage", "CoreCountrySpecific",
-        "Professional", "ProfessionalN", "ProfessionalEducation", "ProfessionalEducationN", 
-        "ProfessionalWorkstation", "ProfessionalWorkstationN", "ProfessionalCountrySpecific", "ProfessionalSingleLanguage", 
-        "Education", "EducationN", "Enterprise", "EnterpriseN", "EnterpriseG", "EnterpriseGN",
-        "ServerRdsh", "IoTEnterprise", "IoTEnterpriseK", "CloudEdition", "CloudEditionN"
-    )
-
-    $win10LTSCEditions = @(
-        "EnterpriseS", "EnterpriseSN", "IoTEnterpriseS"
-    )
-
-    $win11LTSCEditions = @(
-        "EnterpriseS", "EnterpriseSN", "IoTEnterpriseS", "IoTEnterpriseSK"
-    )
-
-    $serverEditions = @(
-        "ServerStandard", "ServerStandardCore", "ServerDatacenter", "ServerDatacenterCore", "ServerAzureCor"
-    )
 
     # 3. Motor C# — P/Invoke sobre wimgapi.dll
     $wimEngineSource = @"
@@ -329,6 +291,7 @@ public class WimMasterEngine
     $dgv.Columns.Add("Val",  "Valor")     | Out-Null
     $dgv.Columns[0].ReadOnly   = $true
     $dgv.Columns[0].FillWeight = 30
+    foreach ($column in $dgv.Columns) { $column.SortMode = 'NotSortable' }
     $form.Controls.Add($dgv)
 
     # -- Boton guardar y etiqueta de estado --
@@ -392,9 +355,11 @@ public class WimMasterEngine
     # EVENTO: Cambio de indice — mostrar metadatos y poblar desplegable
     # ---------------------------------------------------------------
     $cmbIndex.Add_SelectedIndexChanged({
-        if ($txtPath.Text) {
+        if ($txtPath.Text -and $cmbIndex.SelectedIndex -ge 0) {
             $idx = $cmbIndex.SelectedIndex + 1
             $dgv.Rows.Clear()
+            $btnSave.Enabled = $false
+            $cmbEditionAuto.Enabled = $false
             try {
                 $xml = [System.Xml.Linq.XDocument]::Parse(
                     [WimMasterEngine]::GetImageXml($txtPath.Text, $idx)
@@ -430,38 +395,27 @@ public class WimMasterEngine
                 if ($null -ne $winNode) {
                     $vNode = $winNode.Element("VERSION")
                     if ($null -ne $vNode) {
-                        $buildNum = [int](Get-NodeVal $vNode 'BUILD')
+                        [void][int]::TryParse((Get-NodeVal $vNode 'BUILD'), [ref]$buildNum)
                         $verStr = "$(Get-NodeVal $vNode 'MAJOR').$(Get-NodeVal $vNode 'MINOR').$buildNum.$(Get-NodeVal $vNode 'SPBUILD')"
                     }
                 }
                 $rowVer = $dgv.Rows.Add("Version", $verStr)
 
-                # --- Lógica de llenado del Desplegable de Ediciones (Filtrado Exclusivo) ---
+                # Las mismas reglas se usan al preparar indices en el integrador.
+                $metadataImage = [pscustomobject]@{
+                    Name = Get-NodeVal $img 'NAME'
+                    Edition = $editionId; Build = $buildNum
+                    Flags = Get-NodeVal $img 'FLAGS'
+                    ProductType = if ($null -ne $winNode) { Get-NodeVal $winNode 'PRODUCTTYPE' } else { '' }
+                    InstallationType = if ($null -ne $winNode) { Get-NodeVal $winNode 'INSTALLATIONTYPE' } else { '' }
+                }
                 $cmbEditionAuto.Items.Clear()
-                $cmbEditionAuto.Items.Add("-- Selecciona una edición para autocompletar --")
-                
-                $isWin11 = ($buildNum -ge 22000)
-                $targetList = @()
-
-                if ($editionId -match "(?i)Server") {
-                    $targetList = $serverEditions
-                } elseif ($editionId -match "(?i)(EnterpriseS|EnterpriseSN|IoTEnterpriseS|IoTEnterpriseSK)$") {
-                    # LTSC / LTSB Branches (EnterpriseS, IoTEnterpriseS, EnterpriseSN, etc.)
-                    $targetList = if ($isWin11) { $win11LTSCEditions } else { $win10LTSCEditions }
-                } else {
-                    # Standard Branches
-                    $targetList = if ($isWin11) { $win11Editions } else { $win10Editions }
-                }
-                
-                foreach ($ed in $targetList) {
-                    $cmbEditionAuto.Items.Add($ed) | Out-Null
-                }
-                
+                [void]$cmbEditionAuto.Items.Add('-- Selecciona una edicion para autocompletar --')
+                $choices = @(Get-AIOWimEditionChoices $metadataImage)
+                foreach ($ed in $choices) { [void]$cmbEditionAuto.Items.Add($ed) }
+                $cmbEditionAuto.Tag = $metadataImage
                 $cmbEditionAuto.SelectedIndex = 0
-                $cmbEditionAuto.Enabled = $true
-                
-                # Guardamos el OS detectado en el Tag para usarlo en el evento SelectionChanged
-                $cmbEditionAuto.Tag = $isWin11 
+                $cmbEditionAuto.Enabled = $choices.Count -gt 0
 
                 # C) Tamaño en GB
                 $bytesStr    = Get-NodeVal $img "TOTALBYTES"
@@ -524,34 +478,18 @@ public class WimMasterEngine
     $cmbEditionAuto.Add_SelectedIndexChanged({
         if ($cmbEditionAuto.SelectedIndex -gt 0) {
             $selectedEd = $cmbEditionAuto.SelectedItem.ToString()
-            $isWin11 = $cmbEditionAuto.Tag
-            
-            # Buscamos en el catalogo cargado en memoria
             try {
-                if (Get-Command Get-WindowsEditionMetadata -ErrorAction SilentlyContinue) {
-                    $meta = Get-WindowsEditionMetadata -QueryString $selectedEd
-                    
-                    # Adaptar el prefijo OS, excepto si es Windows Server, donde ya viene completo
-                    if ($meta.Name -match "Server") {
-                        $finalName = $meta.Name
-                    } else {
-                        $osPrefix = if ($isWin11) { "Windows 11" } else { "Windows 10" }
-                        $finalName = $meta.Name -replace "Windows ", "$osPrefix "
-                    }
-                    
-                    # Inyectamos a la grilla (Indices 0 a 4 correspondientes a las celdas editables)
-                    $dgv.Rows[0].Cells[1].Value = $finalName
-                    $dgv.Rows[1].Cells[1].Value = $meta.Description
-                    $dgv.Rows[2].Cells[1].Value = $finalName
-                    $dgv.Rows[3].Cells[1].Value = $meta.Description
-                    $dgv.Rows[4].Cells[1].Value = $selectedEd
-                    
-                    $lblStatus.Text = "Autocompletado con: $finalName"
-                } else {
-                    Write-Warning "El catálogo de Ediciones no está cargado."
-                }
+                [void]$dgv.EndEdit()
+                $meta = Get-AIOWimMetadataTemplate $cmbEditionAuto.Tag $selectedEd
+                $dgv.Rows[0].Cells[1].Value = $meta.Name
+                $dgv.Rows[1].Cells[1].Value = $meta.Description
+                $dgv.Rows[2].Cells[1].Value = $meta.DisplayName
+                $dgv.Rows[3].Cells[1].Value = $meta.DisplayDescription
+                $dgv.Rows[4].Cells[1].Value = $meta.Edition
+                $lblStatus.Text = "Autocompletado con: $($meta.Name)"
             } catch {
-                Write-Log -LogLevel ERROR -Message "WimMetadataManager: Fallo al autocompletar metadatos."
+                Write-Log -LogLevel ERROR -Message "WimMetadataManager: Fallo al autocompletar: $($_.Exception.Message)"
+                [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Metadatos', 'OK', 'Warning')
             }
         }
     })
@@ -560,6 +498,7 @@ public class WimMasterEngine
     # EVENTO: Boton GUARDAR — commit de metadatos via WimMasterEngine
     # ---------------------------------------------------------------
     $btnSave.Add_Click({
+        [void]$dgv.EndEdit()
         $path = $txtPath.Text
         $idx  = $cmbIndex.SelectedIndex + 1
 
@@ -576,6 +515,11 @@ public class WimMasterEngine
         $success         = $false
 
         try {
+            Assert-AIOWimMetadata ([pscustomobject]@{
+                Name = $d['Nombre']; Description = $d['Descripcion']
+                DisplayName = $d['Nombre Mostrado']; DisplayDescription = $d['Descripcion Mostrada']
+                Edition = $d['ID de Edicion']
+            })
             [WimMasterEngine]::WriteImageMetadata(
                 $path,
                 $idx,

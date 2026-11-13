@@ -1,51 +1,8 @@
-﻿# =================================================================
-#  Modulo-IntegrarIndices
-#
-#  CONTENIDO   : Show-AIOIndexIntegrator (GUI) y sus funciones de apoyo
-#                (lectura del catalogo de indices, plan de salida, validacion,
-#                compatibilidad y exportacion con wimlib)
-#  DEPENDENCIAS DEL NUCLEO (heredadas via dot-source):
-#    - $Script:IMAGE_MOUNTED  : estado de montaje (1 = WIM); solo se consulta
-#    - $Script:WIM_FILE_PATH  : ruta de la imagen montada; se usa para rechazar
-#                               una fuente que este montada en la aplicacion
-#  DEPENDENCIAS EXTERNAS:
-#    - wimlib-imagex.exe      : en Tools\wimlib o en PATH (lectura, exportacion
-#                               y verificacion de los WIM)
-#  CARGA       : . "$PSScriptRoot\Modulo-IntegrarIndices.ps1"
-#
-#  NOTA: Esta funcion NO requiere imagen montada ($Script:IMAGE_MOUNTED).
-#  Las fuentes WIM/ESD se abren solo para lectura y nunca se modifican; el
-#  modulo no cambia el estado de montaje global y es autocontenido (usa su
-#  propio registro .log junto al destino en lugar de Write-Log). Carga sin
-#  efectos laterales.
-#
-#  NO modificar las firmas de funcion; el nucleo las invoca por nombre.
-#
-# ==============================================================================
-# Copyright (C) 2026 SOFTMAXTER
-#
-# DUAL LICENSING NOTICE:
-# This software is dual-licensed. By default, AdminImagenOffline is 
-# distributed under the GNU General Public License v3.0 (GPLv3).
-# 
-# 1. OPEN SOURCE (GPLv3):
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details: <https://www.gnu.org/licenses/>.
-#
-# 2. COMMERCIAL LICENSE:
-# If you wish to integrate this software into a proprietary/commercial product, 
-# distribute it without revealing your source code, or require commercial 
-# support, you must obtain a commercial license from the original author.
-#
-# Please contact softmaxter@hotmail.com for commercial licensing inquiries.
-# ==============================================================================
+﻿#requires -Version 5.1
+# Integracion y orden de indices. Extension de AdminImagenOffline, GPLv3.
+# No modifica fuentes ni el estado de montaje global. Carga sin efectos laterales.
+
+. (Join-Path $PSScriptRoot 'Metadata-Comun.ps1')
 
 function Find-AIOIndexWimlib {
     $bundled = Join-Path (Split-Path $PSScriptRoot -Parent) 'Tools\wimlib\wimlib-imagex.exe'
@@ -219,6 +176,7 @@ function Read-AIOIndexCatalog {
             [pscustomobject]@{
                 Source = $file.FullName; Index = [int]$node.GetAttribute('INDEX')
                 Name = [string]$node.NAME; Description = [string]$node.DESCRIPTION
+                DisplayName = [string]$node.DISPLAYNAME; DisplayDescription = [string]$node.DISPLAYDESCRIPTION
                 Architecture = $archName; Edition = [string]$node.WINDOWS.EDITIONID
                 Build = [string]$node.WINDOWS.VERSION.BUILD; Flags = [string]$node.FLAGS
                 ProductType = [string]$node.WINDOWS.PRODUCTTYPE
@@ -237,14 +195,16 @@ function Format-AIOIndexOutputName {
         'X86' { 'x86' }; 'X64' { 'x64' }; 'ARM64' { 'ARM64' }
         '' { 'sin arquitectura' }; default { $Architecture.Trim() }
     }
-    # La etiqueta final pertenece al gestor. Corregirla al editar o reimportar;
-    # conservar los demas corchetes y el texto personalizado del nombre.
+    # La arquitectura se muestra en su columna, no como sufijo del nombre.
+    # Aceptar etiquetas anteriores en corchetes o parentesis; conservar el
+    # resto del texto personalizado, como (LTSC), (2) o [Empresa].
     $baseName = $Name.Trim()
-    $pattern = '\s*\[(?:x86|x64|ARM64|sin arquitectura|' + [regex]::Escape($arch) + ')\]\s*$'
+    $architectures = '(?:x86|x64|ARM64|sin arquitectura|' + [regex]::Escape($arch) + ')'
+    $pattern = '\s*(?:\[\s*' + $architectures + '\s*\]|\(\s*' + $architectures + '\s*\))\s*$'
     while ($baseName -match $pattern) { $baseName = [regex]::Replace($baseName, $pattern, '', 'IgnoreCase').Trim() }
     if (-not $baseName) { return '' }
     if ($Suffix -gt 1) { $baseName += ' (' + $Suffix + ')' }
-    return $baseName + ' [' + $arch + ']'
+    return $baseName
 }
 
 function New-AIOIndexPlanEntry {
@@ -260,6 +220,8 @@ function New-AIOIndexPlanEntry {
     [pscustomobject]@{
         Source = $Image.Source; Index = $Image.Index; Name = $name
         OriginalName = $Image.Name; Description = $Image.Description
+        DisplayName = [string]$Image.DisplayName; DisplayDescription = [string]$Image.DisplayDescription
+        OriginalEdition = $Image.Edition
         Architecture = $Image.Architecture; Edition = $Image.Edition; Build = $Image.Build
         ProductType = $Image.ProductType; InstallationType = $Image.InstallationType
         Flags = $Image.Flags; Bytes = $Image.Bytes
@@ -267,10 +229,23 @@ function New-AIOIndexPlanEntry {
     }
 }
 
-function Move-AIOIndexPlanEntry {
+function Get-AIOIndexArchitectureKey {
+    param([string]$Architecture)
+    return $Architecture.Trim().ToUpperInvariant()
+}
+
+function Test-AIOIndexPlanMove {
     param([Collections.IList]$Plan, [int]$Index, [ValidateSet(-1, 1)][int]$Direction)
     $target = $Index + $Direction
-    if ($Index -lt 0 -or $Index -ge $Plan.Count -or $target -lt 0 -or $target -ge $Plan.Count) { return $Index }
+    if ($Index -lt 0 -or $Index -ge $Plan.Count -or $target -lt 0 -or $target -ge $Plan.Count) { return $false }
+    return (Get-AIOIndexArchitectureKey $Plan[$Index].Architecture) -eq (Get-AIOIndexArchitectureKey $Plan[$target].Architecture)
+}
+
+function Move-AIOIndexPlanEntry {
+    param([Collections.IList]$Plan, [int]$Index, [ValidateSet(-1, 1)][int]$Direction)
+    # La misma regla protege los botones, los atajos y las llamadas sin GUI.
+    if (-not (Test-AIOIndexPlanMove $Plan $Index $Direction)) { return $Index }
+    $target = $Index + $Direction
     $entry = $Plan[$Index]
     $Plan.RemoveAt($Index)
     $Plan.Insert($target, $entry)
@@ -281,7 +256,7 @@ function Group-AIOIndexPlanByArchitecture {
     param([Collections.IList]$Plan, [int]$SelectedIndex = -1)
     # Indice original como desempate explicito: Sort-Object de PS 5.1 no tiene -Stable.
     $ordered = @(for ($i = 0; $i -lt $Plan.Count; $i++) {
-        $arch = ([string]$Plan[$i].Architecture).Trim().ToUpperInvariant()
+        $arch = Get-AIOIndexArchitectureKey $Plan[$i].Architecture
         $rank = switch ($arch) { 'X86' { 0 }; 'X64' { 1 }; 'ARM64' { 2 }; default { 3 } }
         [pscustomobject]@{ Rank = $rank; Architecture = $arch; Position = $i; Entry = $Plan[$i] }
     })
@@ -295,27 +270,90 @@ function Group-AIOIndexPlanByArchitecture {
     return $selected
 }
 
+function Add-AIOIndexPlanImages {
+    param([Collections.IList]$Plan, [object[]]$Images, [int]$SelectedIndex = -1)
+    $added = 0
+    foreach ($image in $Images) {
+        # Una misma fuente/indice se agrega una sola vez, incluso entre lotes.
+        $exists = @($Plan | Where-Object { $_.Source -ieq $image.Source -and $_.Index -eq $image.Index }).Count -gt 0
+        if ($exists) { continue }
+        [void]$Plan.Add((New-AIOIndexPlanEntry $image @($Plan)))
+        $SelectedIndex = $Plan.Count - 1
+        $added++
+    }
+    # Insertar cada nuevo indice en su grupo, sin alterar el orden manual
+    # de los indices que ya estaban dentro de esa arquitectura.
+    if ($added -gt 0) { $SelectedIndex = Group-AIOIndexPlanByArchitecture $Plan $SelectedIndex }
+    [pscustomobject]@{ Added = $added; SelectedIndex = $SelectedIndex }
+}
+
+function Get-AIOIndexArchitectureBreaks {
+    param([object[]]$Plan)
+    # Indices de filas reales cuyo margen inferior separa dos arquitecturas.
+    # No introducir filas ficticias: la fila N siempre corresponde al indice N.
+    for ($i = 0; $i -lt ($Plan.Count - 1); $i++) {
+        $current = Get-AIOIndexArchitectureKey $Plan[$i].Architecture
+        $next = Get-AIOIndexArchitectureKey $Plan[$i + 1].Architecture
+        if ($current -ne $next) { $i }
+    }
+}
+
+function Assert-AIOIndexArchitectureGroups {
+    param([object[]]$Plan)
+    $seen = @{}
+    $previous = $null
+    foreach ($entry in $Plan) {
+        $key = Get-AIOIndexArchitectureKey $entry.Architecture
+        if ($null -ne $previous -and $key -eq $previous) { continue }
+        if ($seen.ContainsKey($key)) {
+            throw 'Los indices de cada arquitectura deben permanecer juntos. No se pueden mezclar grupos.'
+        }
+        $seen[$key] = $true
+        $previous = $key
+    }
+}
+
 function Test-AIOIndexWindows11 {
     param([object]$Image)
-    # Windows Server y WinPE pueden compartir compilacion con Windows 11.
-    if ($Image.ProductType -match '^(ServerNT|LanmanNT)$' -or
-        $Image.InstallationType -match '^(Server|WindowsPE|WinPE)' -or
-        $Image.Edition -match '^(Server|WindowsPE|WinPE)' -or $Image.Flags -match '^(Server|WindowsPE|WinPE)') { return $false }
-    $build = 0
-    $hasBuild = [int]::TryParse([string]$Image.Build, [ref]$build)
-    if ($hasBuild -and $build -lt 22000) { return $false }
-    if ($hasBuild -and ($Image.InstallationType -eq 'Client' -or $Image.ProductType -eq 'WinNT' -or
-        $Image.Edition -match '^(Core|Professional|Enterprise|Education|IoTEnterprise|Cloud|PPIPro)')) { return $true }
-    # Solo como respaldo de metadatos incompletos; nunca usar el nombre editado.
-    $sourceName = if ($Image.PSObject.Properties['OriginalName']) { [string]$Image.OriginalName } else { [string]$Image.Name }
-    return $sourceName -match '\bWindows\s*11\b'
+    return (Get-AIOWimImageProfile $Image).IsWindows11
+}
+
+function Set-AIOIndexPlanMetadata {
+    param([object]$Entry, [object]$Metadata, [object[]]$OtherEntries = @())
+    Assert-AIOWimMetadata $Metadata
+    $name = Format-AIOIndexOutputName $Metadata.Name $Entry.Architecture
+    if (-not $name) { throw 'El nombre no puede contener solamente la etiqueta de arquitectura.' }
+    if (@($OtherEntries | Where-Object { $_.Name -ieq $name }).Count) {
+        throw "Nombre repetido en el resultado: '$name'. Elige otro nombre."
+    }
+    # Validar antes de modificar la entrada. OriginalName/OriginalEdition conservan
+    # la identidad de la fuente para su verificacion y las advertencias de arranque.
+    $Entry.Name = $name
+    foreach ($field in @('Description', 'DisplayName', 'DisplayDescription', 'Edition')) {
+        $Entry.$field = [string]$Metadata.$field
+    }
+}
+
+function Get-AIOIndexMetadataArguments {
+    param([object]$Entry, [object]$Original)
+    # NAME ya se asigna al exportar. Escribir solo cambios explicitos en los
+    # otros campos; conservar nodos ausentes y FLAGS de la imagen original.
+    $properties = [ordered]@{
+        Description = 'DESCRIPTION'; DisplayName = 'DISPLAYNAME'
+        DisplayDescription = 'DISPLAYDESCRIPTION'; Edition = 'WINDOWS/EDITIONID'
+    }
+    foreach ($field in $properties.Keys) {
+        if ([string]$Entry.$field -cne [string]$Original.$field) {
+            '--image-property=' + $properties[$field] + '=' + [string]$Entry.$field
+        }
+    }
 }
 
 function Get-AIOIndexCompatibilityWarnings {
     param([object[]]$Plan)
     $architectures = @($Plan | Select-Object -ExpandProperty Architecture -Unique | Where-Object { $_ })
     if ($architectures.Count -gt 1) {
-        [pscustomobject]@{ Code = 'MixedArchitecture'; Message = 'Arquitecturas distintas: el orden de los indices es libre. El WIM integrado no prepara el arranque ni Windows Setup para cada arquitectura.' }
+        [pscustomobject]@{ Code = 'MixedArchitecture'; Message = 'Arquitecturas distintas: los indices se mantienen en grupos separados y solo se pueden ordenar dentro de su arquitectura. El WIM integrado no prepara el arranque ni Windows Setup para cada arquitectura.' }
     }
     if ($architectures -icontains 'x86' -and @($Plan | Where-Object { Test-AIOIndexWindows11 $_ }).Count -gt 0) {
         [pscustomobject]@{ Code = 'X86Windows11'; Message = 'x86 + Windows 11: Windows 11 no tiene edicion x86 y WinPE x86 no sirve para desplegarlo. Prepara una ruta de arranque, boot.wim (WinPE) y Setup x86 para las imagenes x86, y otra compatible con Windows 11 x64 o ARM64. Si una imagen se identifica como Windows 11 x86, revisa su origen.' }
@@ -328,6 +366,7 @@ function Get-AIOIndexCompatibilityWarnings {
 function Assert-AIOIndexPlan {
     param([object[]]$Plan, [string]$Destination)
     if (-not $Plan -or $Plan.Count -eq 0) { throw 'Agrega al menos un indice al orden final.' }
+    Assert-AIOIndexArchitectureGroups $Plan
     if ([string]::IsNullOrWhiteSpace($Destination)) { throw 'Selecciona el archivo WIM de salida.' }
     $dest = [IO.Path]::GetFullPath($Destination)
     if ([IO.Path]::GetExtension($dest) -ine '.wim') { throw 'El archivo de salida debe tener extension .wim.' }
@@ -337,8 +376,8 @@ function Assert-AIOIndexPlan {
     $boots = 0
     foreach ($entry in $Plan) {
         if ($entry.Index -lt 1) { throw 'Indice de origen invalido.' }
-        if ([string]::IsNullOrWhiteSpace($entry.Name) -or $entry.Name -match '[\x00-\x1F]') { throw 'Todos los indices necesitan un nombre valido, sin saltos de linea.' }
-        if ($names.ContainsKey($entry.Name)) { throw "Nombre repetido en el resultado: '$($entry.Name)'. Edita la celda Nombre de salida." }
+        Assert-AIOWimMetadata $entry
+        if ($names.ContainsKey($entry.Name)) { throw "Nombre repetido en el resultado: '$($entry.Name)'. Abre los metadatos con doble clic y cambia el nombre." }
         $names[$entry.Name] = $true
         if ($entry.Boot) { $boots++ }
         $source = Get-Item -LiteralPath $entry.Source -Force -ErrorAction Stop
@@ -397,6 +436,13 @@ function Export-AIOIndexPlan {
             if ($entry.Boot) { $argsList += '--boot' }
             $argsList += @('--', $entry.Source, [string]$entry.Index, $pending, $entry.Name)
             Invoke-AIOIndexNative $Engine $argsList $State $log
+            $original = $catalogs[$entry.Source] | Where-Object { $_.Index -eq $entry.Index } | Select-Object -First 1
+            $metadataArgs = @(Get-AIOIndexMetadataArguments $entry $original)
+            if ($metadataArgs.Count) {
+                Assert-AIOIndexNotCancelled $State
+                $State.Status = "Aplicando metadatos al indice $position de salida..."
+                Invoke-AIOIndexNative $Engine (@('info') + $metadataArgs + @('--', $pending, [string]$position)) $State $log
+            }
         }
         $State.Progress = 85
         $State.Status = 'Verificando todos los datos del WIM resultante...'
@@ -407,6 +453,7 @@ function Export-AIOIndexPlan {
             $expected = $Plan[$i]; $actual = $result[$i]
             if ($actual.Index -ne ($i + 1) -or $actual.Name -cne $expected.Name -or
                 $actual.Description -cne $expected.Description -or $actual.Flags -cne $expected.Flags -or
+                $actual.DisplayName -cne $expected.DisplayName -or $actual.DisplayDescription -cne $expected.DisplayDescription -or
                 $actual.Architecture -ne $expected.Architecture -or $actual.Edition -cne $expected.Edition -or
                 $actual.ProductType -cne $expected.ProductType -or $actual.InstallationType -cne $expected.InstallationType -or
                 $actual.Build -ne $expected.Build -or $actual.Bytes -ne $expected.Bytes) {
@@ -475,13 +522,13 @@ function Show-AIOIndexIntegrator {
     $root = New-Object Windows.Forms.TableLayoutPanel
     $root.Dock = 'Fill'; $root.Padding = New-Object Windows.Forms.Padding(16)
     $root.ColumnCount = 1; $root.RowCount = 7
-    foreach ($height in @(56, 44, -1, 78, 44, 52, 100)) {
+    foreach ($height in @(56, 44, -1, 52, 44, 52, 100)) {
         if ($height -eq -1) { [void]$root.RowStyles.Add((New-Object Windows.Forms.RowStyle('Percent', 100))) }
         else { [void]$root.RowStyles.Add((New-Object Windows.Forms.RowStyle('Absolute', $height))) }
     }
     $form.Controls.Add($root)
     $intro = New-Object Windows.Forms.Label
-    $intro.Text = "Integra indices de varias fuentes WIM / ESD en un nuevo WIM. Orden libre; agrupar es opcional.`r`nEl orden de la tabla derecha sera la numeracion final: 1, 2, 3... Las fuentes se conservan."
+    $intro.Text = "Agrupacion automatica: x86, x64 y ARM64. Subir / Bajar ordena solo dentro de cada arquitectura.`r`nDoble clic en un indice del orden final para editar sus metadatos. Las fuentes se conservan."
     $intro.Dock = 'Fill'; $intro.AutoSize = $true
     $intro.ForeColor = [Drawing.Color]::Silver
     $root.Controls.Add($intro, 0, 0)
@@ -515,7 +562,7 @@ function Show-AIOIndexIntegrator {
     $sourceGroup.Text = '1. Indices disponibles (Ctrl / Shift para seleccionar varios)'; $sourceGroup.Dock = 'Fill'
     $planGroup = New-Object Windows.Forms.GroupBox
     $planGroup.ForeColor = [Drawing.Color]::Orange
-    $planGroup.Text = '2. Orden final (Nombre de salida editable)'; $planGroup.Dock = 'Fill'
+    $planGroup.Text = '2. Orden final (doble clic: metadatos)'; $planGroup.Dock = 'Fill'
     $columns.Controls.Add($sourceGroup, 0, 0); $columns.Controls.Add($planGroup, 1, 0)
 
     function New-AIOIndexGrid {
@@ -557,7 +604,7 @@ function Show-AIOIndexIntegrator {
     $planGrid = New-AIOIndexGrid
     $planGrid.MultiSelect = $false
     Add-AIOIndexColumn $planGrid 'Order' 'Orden' 40
-    Add-AIOIndexColumn $planGrid 'Name' 'Nombre de salida' 165 $true
+    Add-AIOIndexColumn $planGrid 'Name' 'Nombre de salida' 165
     Add-AIOIndexColumn $planGrid 'Source' 'Fuente / indice' 120
     Add-AIOIndexColumn $planGrid 'Arch' 'Arq.' 45
     $bootColumn = New-Object Windows.Forms.DataGridViewCheckBoxColumn
@@ -565,19 +612,14 @@ function Show-AIOIndexIntegrator {
     $bootColumn.FlatStyle = 'Flat'
     $bootColumn.SortMode = 'NotSortable'; [void]$planGrid.Columns.Add($bootColumn)
     $planGroup.Controls.Add($planGrid)
-    $planGrid.Add_EditingControlShowing({ param($sender, $e)
-        $e.Control.BackColor = [Drawing.Color]::FromArgb(50, 50, 50)
-        $e.Control.ForeColor = [Drawing.Color]::White
-    })
-
     $actions = New-Object Windows.Forms.FlowLayoutPanel
     $actions.Dock = 'Fill'; $actions.Padding = New-Object Windows.Forms.Padding(0, 10, 0, 0)
     $addSelected = New-AIOIndexButton 'Agregar seleccion >' 160
     $addAll = New-AIOIndexButton 'Agregar todos >' 140
     $up = New-AIOIndexButton 'Subir' 80; $down = New-AIOIndexButton 'Bajar' 80
-    $groupArchitecture = New-AIOIndexButton 'Agrupar por arquitectura' 195
     $remove = New-AIOIndexButton 'Quitar' 85; $clearPlan = New-AIOIndexButton 'Vaciar orden' 115
-    $actions.Controls.AddRange(@($addSelected, $addAll, $up, $down, $groupArchitecture, $remove, $clearPlan))
+    $actions.AutoScroll = $true
+    $actions.Controls.AddRange(@($addSelected, $addAll, $up, $down, $remove, $clearPlan))
     $root.Controls.Add($actions, 0, 3)
 
     $outputRow = New-Object Windows.Forms.TableLayoutPanel
@@ -679,21 +721,24 @@ function Show-AIOIndexIntegrator {
     $statusBox.Controls.Add($nativeStatus, 0, 2); $statusBox.Controls.Add($nativeProgress, 0, 3)
     $root.Controls.Add($statusBox, 0, 6)
     $tips = New-Object Windows.Forms.ToolTip
-    $tips.SetToolTip($planGrid, 'Edita el nombre con doble clic; la etiqueta de arquitectura se conserva automaticamente. WinPE marca UN indice de arranque de boot.wim; dejalo sin marcar para install.wim.')
+    $tips.SetToolTip($planGrid, 'Doble clic en una celda de texto (o Enter/F2) para editar metadatos. Los separadores delimitan grupos de arquitectura. Subir/Bajar solo mueve dentro del mismo grupo. WinPE se marca con un clic; dejalo sin marcar para install.wim.')
     $tips.SetToolTip($addSource, 'Selecciona varios .wim o .esd con Ctrl. Para ISO: extrae primero sources\install.wim o install.esd. Para SWM: convierte primero a WIM.')
-    $tips.SetToolTip($up, 'Sube una posicion el indice seleccionado. Alt + Flecha arriba.')
-    $tips.SetToolTip($down, 'Baja una posicion el indice seleccionado. Alt + Flecha abajo.')
-    $tips.SetToolTip($groupArchitecture, 'Opcional: agrupa x86, x64 y ARM64; otras arquitecturas quedan al final. Conserva el orden dentro de cada grupo. Despues puedes seguir usando Subir/Bajar. No cambia la compatibilidad de arranque.')
+    $tips.SetToolTip($up, 'Sube una posicion dentro de la misma arquitectura. Alt + Flecha arriba.')
+    $tips.SetToolTip($down, 'Baja una posicion dentro de la misma arquitectura. Alt + Flecha abajo.')
     $tips.SetToolTip($progress, 'Avance general por indices y verificacion final. Solo termina cuando el WIM esta verificado y publicado.')
     $tips.SetToolTip($nativeProgress, 'Porcentaje real de la fase actual. Se reinicia al pasar de comprobar integridad a exportar datos o a otra fase.')
     $tips.SetToolTip($clearSources, 'Vacia la lista de fuentes disponibles. El orden final conserva sus referencias.')
-    $editableControls = @($addSource, $clearSources, $sourceGrid, $planGrid, $addSelected, $addAll, $up, $down, $groupArchitecture, $remove, $clearPlan, $destination, $browse, $compression, $build)
+    $editableControls = @($addSource, $clearSources, $sourceGrid, $planGrid, $addSelected, $addAll, $up, $down, $remove, $clearPlan, $destination, $browse, $compression, $build)
 
+    $updateMoveButtons = {
+        $selected = if ($planGrid.SelectedRows.Count) { $planGrid.SelectedRows[0].Index } else { -1 }
+        $up.Enabled = (-not $ui.Worker) -and (Test-AIOIndexPlanMove $ui.Plan $selected -1)
+        $down.Enabled = (-not $ui.Worker) -and (Test-AIOIndexPlanMove $ui.Plan $selected 1)
+    }
+    $planGrid.Add_SelectionChanged({ & $updateMoveButtons })
     $syncPlan = {
         [void]$planGrid.EndEdit()
         for ($i = 0; $i -lt $ui.Plan.Count; $i++) {
-            $ui.Plan[$i].Name = Format-AIOIndexOutputName ([string]$planGrid.Rows[$i].Cells['Name'].Value) $ui.Plan[$i].Architecture
-            $planGrid.Rows[$i].Cells['Name'].Value = $ui.Plan[$i].Name
             $ui.Plan[$i].Boot = [bool]$planGrid.Rows[$i].Cells['Boot'].Value
         }
     }
@@ -704,13 +749,20 @@ function Show-AIOIndexIntegrator {
             $entry = $ui.Plan[$i]
             $row = $planGrid.Rows.Add([object[]]@(($i + 1), $entry.Name, ('{0} / {1}' -f [IO.Path]::GetFileName($entry.Source), $entry.Index), $entry.Architecture, $entry.Boot))
             $planGrid.Rows[$row].Cells['Source'].ToolTipText = $entry.Source
+            $planGrid.Rows[$row].Cells['Name'].ToolTipText = "Doble clic para editar metadatos.`r`nEdicion: $($entry.Edition)`r`nNombre mostrado: $($entry.DisplayName)`r`nDescripcion: $($entry.Description)"
+        }
+        $dividerHeight = [Math]::Max(4, [int]($planGrid.Font.Height / 3))
+        foreach ($rowIndex in @(Get-AIOIndexArchitectureBreaks @($ui.Plan.ToArray()))) {
+            $planGrid.Rows[$rowIndex].Height = $planGrid.RowTemplate.Height + $dividerHeight
+            $planGrid.Rows[$rowIndex].DividerHeight = $dividerHeight
         }
         $planGrid.ClearSelection()
         if ($Selected -ge 0 -and $Selected -lt $planGrid.Rows.Count) {
             $planGrid.CurrentCell = $planGrid.Rows[$Selected].Cells['Name']
             $planGrid.Rows[$Selected].Selected = $true
         }
-        $planGroup.Text = '2. Orden final: ' + $ui.Plan.Count + ' indices (Nombre de salida editable)'
+        $planGroup.Text = '2. Orden final: ' + $ui.Plan.Count + ' indices (doble clic: metadatos)'
+        & $updateMoveButtons
     }
     $refreshSources = {
         $sourceGrid.Rows.Clear()
@@ -801,6 +853,7 @@ function Show-AIOIndexIntegrator {
         finally {
             $ui.Worker = $null; $ui.Handle = $null; $worker.Dispose(); $ui.Started.Stop()
             foreach ($control in $editableControls) { $control.Enabled = $true }
+            & $updateMoveButtons
             $cancel.Enabled = $false; $ui.ProgressBusy = $false
             & $renderProgress; & $renderNativeProgress
             $timer.Start()
@@ -819,19 +872,20 @@ function Show-AIOIndexIntegrator {
         param([bool]$All)
         & $syncPlan
         $rows = if ($All) { @($sourceGrid.Rows) } else { @($sourceGrid.SelectedRows | Sort-Object Index) }
-        foreach ($row in $rows) {
-            $entry = $row.Tag
-            # Evitar duplicados accidentales de la misma fuente e indice.
-            $exists = @($ui.Plan | Where-Object { $_.Source -ieq $entry.Source -and $_.Index -eq $entry.Index }).Count -gt 0
-            if (-not $exists) { [void]$ui.Plan.Add((New-AIOIndexPlanEntry $entry @($ui.Plan.ToArray()))) }
+        $selected = if ($planGrid.SelectedRows.Count) { $planGrid.SelectedRows[0].Index } else { -1 }
+        $images = @($rows | ForEach-Object { $_.Tag })
+        $result = Add-AIOIndexPlanImages -Plan $ui.Plan -Images $images -SelectedIndex $selected
+        & $refreshPlan $result.SelectedIndex
+        if ($result.Added -gt 0) {
+            $status.Text = 'Indices agregados a su grupo de arquitectura. Subir/Bajar ordena solo dentro de cada grupo.'
         }
-        & $refreshPlan ($ui.Plan.Count - 1)
     }
     $addSelected.Add_Click({ & $addEntries $false })
     $addAll.Add_Click({ & $addEntries $true })
     $sourceGrid.Add_CellDoubleClick({ param($sender, $e) if ($e.RowIndex -ge 0) { & $addEntries $false } })
     $moveSelection = {
         param([int]$Direction)
+        if ($ui.Worker) { return }
         & $syncPlan
         if ($planGrid.SelectedRows.Count) {
             $selected = Move-AIOIndexPlanEntry $ui.Plan $planGrid.SelectedRows[0].Index $Direction
@@ -839,23 +893,36 @@ function Show-AIOIndexIntegrator {
         }
     }
     $up.Add_Click({ & $moveSelection -1 }); $down.Add_Click({ & $moveSelection 1 })
-    $groupArchitecture.Add_Click({
-        & $syncPlan
-        $selected = if ($planGrid.SelectedRows.Count) { $planGrid.SelectedRows[0].Index } else { -1 }
-        $selected = Group-AIOIndexPlanByArchitecture $ui.Plan $selected
-        & $refreshPlan $selected
-        $status.Text = 'Agrupacion aplicada: x86, x64, ARM64 y otras. El orden sigue siendo editable.'
-    })
-    $planGrid.Add_CellEndEdit({ param($sender, $e)
-        if ($e.RowIndex -ge 0 -and $e.RowIndex -lt $ui.Plan.Count -and $e.ColumnIndex -eq $planGrid.Columns['Name'].Index) {
-            $cell = $planGrid.Rows[$e.RowIndex].Cells['Name']
-            $cell.Value = Format-AIOIndexOutputName ([string]$cell.Value) $ui.Plan[$e.RowIndex].Architecture
-            $ui.Plan[$e.RowIndex].Name = [string]$cell.Value
+    $openMetadata = {
+        param([int]$Selected)
+        try {
+            if ($ui.Worker -or $Selected -lt 0 -or $Selected -ge $ui.Plan.Count) { return }
+            & $syncPlan
+            $entry = $ui.Plan[$Selected]
+            $draft = Show-AIOWimMetadataDraftEditor -Image $entry -Owner $form
+            if ($null -ne $draft) {
+                $others = @(for ($i = 0; $i -lt $ui.Plan.Count; $i++) { if ($i -ne $Selected) { $ui.Plan[$i] } })
+                Set-AIOIndexPlanMetadata -Entry $entry -Metadata $draft -OtherEntries $others
+                & $refreshPlan $Selected
+                $status.Text = 'Metadatos guardados en el plan. Se aplicaran al crear el WIM de salida.'
+            }
+        } catch { & $showError $_.Exception.Message }
+    }
+    $planGrid.Add_CellMouseDoubleClick({ param($sender, $e)
+        # Mantener la casilla WinPE como control de un clic; editar solo desde
+        # las celdas de texto, sin entrar antes en un editor de nombre en linea.
+        if ($e.Button -eq [Windows.Forms.MouseButtons]::Left -and $e.RowIndex -ge 0 -and
+            $e.ColumnIndex -ge 0 -and $e.ColumnIndex -ne $planGrid.Columns['Boot'].Index) {
+            & $openMetadata $e.RowIndex
         }
     })
     $planGrid.Add_KeyDown({ param($sender, $e)
         if ($e.Alt -and $e.KeyCode -eq 'Up') { & $moveSelection -1; $e.Handled = $true; $e.SuppressKeyPress = $true }
         elseif ($e.Alt -and $e.KeyCode -eq 'Down') { & $moveSelection 1; $e.Handled = $true; $e.SuppressKeyPress = $true }
+        elseif (($e.KeyCode -eq 'Enter' -or $e.KeyCode -eq 'F2') -and $planGrid.SelectedRows.Count) {
+            $e.Handled = $true; $e.SuppressKeyPress = $true
+            & $openMetadata $planGrid.SelectedRows[0].Index
+        }
     })
     $planGrid.Add_CurrentCellDirtyStateChanged({
         if ($planGrid.IsCurrentCellDirty -and $planGrid.CurrentCell.ColumnIndex -eq 4) { [void]$planGrid.CommitEdit([Windows.Forms.DataGridViewDataErrorContexts]::Commit) }
@@ -902,6 +969,6 @@ function Show-AIOIndexIntegrator {
     $form.Add_FormClosing({ param($sender, $e)
         if ($ui.Worker) { $e.Cancel = $true; & $showError 'Hay una operacion en curso. Usa Cancelar proceso y espera a que termine antes de cerrar.' }
     })
-    try { $timer.Start(); [void]$form.ShowDialog() }
+    try { & $refreshPlan; $timer.Start(); [void]$form.ShowDialog() }
     finally { $timer.Stop(); $timer.Dispose(); $tips.Dispose(); $form.Dispose() }
 }

@@ -112,6 +112,31 @@ function Get-AIODeploySwmSet {
     }
 }
 
+function Format-AIODeployElapsedTime {
+    param([TimeSpan]$Elapsed)
+    # Horas acumuladas: no volver a 00 al superar un dia de despliegue.
+    return ('{0:00}:{1:00}:{2:00}' -f [math]::Floor($Elapsed.TotalHours), $Elapsed.Minutes, $Elapsed.Seconds)
+}
+
+function Assert-AIODeployNotCancelled {
+    param([hashtable]$State)
+    if ($State -and $State.CancelRequested) {
+        throw [OperationCanceledException]::new('Despliegue cancelado por el usuario.')
+    }
+}
+
+function Remove-AIODeployPartialVhd {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $vhd = Get-VHD -Path $Path -ErrorAction Stop
+    if ($vhd.Attached) {
+        Dismount-VHD -Path $Path -ErrorAction Stop
+        $vhd = Get-VHD -Path $Path -ErrorAction Stop
+    }
+    if ($vhd.Attached) { throw "El VHD sigue montado; se conserva el archivo: $Path" }
+    Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+}
+
 function Show-Deploy-To-VHD-GUI {
 
     # ------------------------------------------------------------------
@@ -127,6 +152,13 @@ function Show-Deploy-To-VHD-GUI {
     Add-Type -AssemblyName System.Drawing
 
     $script:isDeploying = $false
+    $deployState = @{ CancelRequested = $false }
+    $CheckDeployCancellation = {
+        # Atender el boton solo entre operaciones, nunca desmontar mientras
+        # Storage, DISM o BCDBOOT sigan escribiendo en el destino.
+        [System.Windows.Forms.Application]::DoEvents()
+        Assert-AIODeployNotCancelled $deployState
+    }
 
     # Los lectores nativos drenan ambos canales en segundo plano. Solo el hilo
     # de WinForms actualiza los controles; no se ejecutan scriptblocks en esos hilos.
@@ -172,6 +204,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     function Invoke-AIODeployNativeProcess {
         param([string]$FileName, [string]$Arguments, [scriptblock]$OnPercent)
 
+        & $CheckDeployCancellation
         $reader = New-Object AIODeployNativeReader($FileName, $Arguments)
         $started = $false
         $lastPercent = -1.0
@@ -213,6 +246,9 @@ public sealed class AIODeployNativeReader : IDisposable {
             if ($exitCode -ne 0 -and $tail.Count -gt 0) {
                 Write-Log -LogLevel ERROR -Message ("DEPLOY: {0} devolvio {1}: {2}" -f $FileName, $exitCode, ($tail -join ' | '))
             }
+            # Cancelacion cooperativa: esperar la salida real del proceso antes
+            # de lanzar la excepcion que inicia la limpieza del destino.
+            & $CheckDeployCancellation
             return $exitCode
         } finally {
             # Nunca entregar el control a la limpieza mientras DISM siga escribiendo.
@@ -454,7 +490,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
     $btnDeploy           = New-Object System.Windows.Forms.Button
     $btnDeploy.Text      = "EJECUTAR DESPLIEGUE"
-    $btnDeploy.Location  = "380, 586"
+    $btnDeploy.Location  = "20, 586"
     $btnDeploy.Size      = "300, 40"
     $btnDeploy.BackColor = [System.Drawing.Color]::SeaGreen
     $btnDeploy.ForeColor = [System.Drawing.Color]::White
@@ -462,8 +498,19 @@ public sealed class AIODeployNativeReader : IDisposable {
     $btnDeploy.Font      = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
     $form.Controls.Add($btnDeploy)
 
+    $btnCancel           = New-Object System.Windows.Forms.Button
+    $btnCancel.Text      = "CANCELAR"
+    $btnCancel.Location  = "500, 586"
+    $btnCancel.Size      = "180, 40"
+    $btnCancel.BackColor = [System.Drawing.Color]::Firebrick
+    $btnCancel.ForeColor = [System.Drawing.Color]::White
+    $btnCancel.FlatStyle = "Flat"
+    $btnCancel.Font      = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+    $btnCancel.Enabled   = $false
+    $form.Controls.Add($btnCancel)
+
     $lblDeployProgress           = New-Object System.Windows.Forms.Label
-    $lblDeployProgress.Text      = "Progreso general: esperando inicio."
+    $lblDeployProgress.Text      = "Progreso general: 0% | Tiempo: 00:00:00"
     $lblDeployProgress.Location  = "20, 478"
     $lblDeployProgress.Size      = "660, 20"
     $lblDeployProgress.ForeColor = [System.Drawing.Color]::Silver
@@ -500,14 +547,26 @@ public sealed class AIODeployNativeReader : IDisposable {
     $progressImage.Value    = 0
     $form.Controls.Add($progressImage)
 
-    $deployProgress = @{ Completed = 0; Total = 6 }
+    # Stopwatch conserva el tiempo real aunque Storage bloquee temporalmente
+    # la GUI. El Timer solo refresca porcentaje y tiempo en el hilo WinForms.
+    $deployWatch = New-Object System.Diagnostics.Stopwatch
+    $deployProgress = @{ Completed = 0; Total = 6; Caption = 'Progreso general' }
     $RefreshDeployProgress = {
         $percent = [int][math]::Floor(100.0 * $deployProgress.Completed / $deployProgress.Total)
         $progressDeployFill.Width = [int][math]::Floor(
             $progressDeploy.ClientSize.Width * $deployProgress.Completed / $deployProgress.Total)
-        $lblDeployProgress.Text = "Progreso general: $($deployProgress.Completed) de $($deployProgress.Total) etapas completadas ($percent%)."
+        $elapsedText = Format-AIODeployElapsedTime $deployWatch.Elapsed
+        $lblDeployProgress.Text = "$($deployProgress.Caption): $($deployProgress.Completed) de $($deployProgress.Total) etapas ($percent%) | Tiempo: $elapsedText"
         $progressDeploy.Refresh()
         $lblDeployProgress.Refresh()
+    }
+    $deployTimer = New-Object System.Windows.Forms.Timer
+    $deployTimer.Interval = 500
+    $deployTimer.Add_Tick({ & $RefreshDeployProgress })
+    $StopDeployTime = {
+        $deployWatch.Stop()
+        $deployTimer.Stop()
+        & $RefreshDeployProgress
     }
     $CompleteDeployStage = {
         param([int]$Stage)
@@ -519,7 +578,7 @@ public sealed class AIODeployNativeReader : IDisposable {
         $deployProgress.Completed = $Stage
         & $RefreshDeployProgress
         $form.Refresh()
-        [System.Windows.Forms.Application]::DoEvents()
+        & $CheckDeployCancellation
     }
 
     $ReportImagePercent = {
@@ -657,6 +716,18 @@ public sealed class AIODeployNativeReader : IDisposable {
     # ------------------------------------------------------------------
     # 4. Motor de despliegue
     # ------------------------------------------------------------------
+    $btnCancel.Add_Click({
+        if (-not $script:isDeploying -or $deployState.CancelRequested) { return }
+        $deployState.CancelRequested = $true
+        $btnCancel.Text = 'CANCELANDO...'
+        $btnCancel.Enabled = $false
+        $deployProgress.Caption = 'Cancelando'
+        $lblStatus.Text = 'Cancelacion solicitada. Esperando a que termine la operacion activa para limpiar el destino...'
+        $lblStatus.ForeColor = [System.Drawing.Color]::Gold
+        & $RefreshDeployProgress
+        $form.Refresh()
+    })
+
     $btnDeploy.Add_Click({
         if ($script:isDeploying) { return }
 
@@ -774,8 +845,12 @@ public sealed class AIODeployNativeReader : IDisposable {
             if ([System.Windows.Forms.MessageBox]::Show($msg, "Destruccion de Datos", 'YesNo', 'Warning') -eq 'No') { return }
         }
 
+        $deployState.CancelRequested = $false
+        $vhdCreationStarted   = $false
         $script:isDeploying   = $true
         $btnDeploy.Enabled    = $false
+        $btnCancel.Text       = 'CANCELAR'
+        $btnCancel.Enabled    = $true
         $grpSource.Enabled    = $false
         $grpTargetMode.Enabled = $false
         $grpDest.Enabled      = $false
@@ -783,6 +858,9 @@ public sealed class AIODeployNativeReader : IDisposable {
 
         $deployProgress.Completed = 0
         $deployProgress.Total = if ($isVhdMode) { 6 } else { 5 }
+        $deployProgress.Caption = 'Progreso general'
+        $deployWatch.Reset()
+        $lblDeployProgress.ForeColor = [System.Drawing.Color]::Silver
         & $RefreshDeployProgress
         $progressImage.Value = 0
         $lblImageProgress.Text = "Aplicacion de imagen: en espera."
@@ -792,6 +870,12 @@ public sealed class AIODeployNativeReader : IDisposable {
         [System.Windows.Forms.Application]::DoEvents()
 
         try {
+            # Excluir configuracion y confirmaciones; reiniciar por cada despliegue.
+            $deployWatch.Restart()
+            & $RefreshDeployProgress
+            $deployTimer.Start()
+            & $CheckDeployCancellation
+
             # Bug 1 corregido: acumulador en memoria para evitar colisiones de letras por latencia VDS
             $reservedLetters = @()
 
@@ -801,12 +885,14 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $form.Refresh()
 
                 $totalSize = [long]$numSize.Value * 1GB
+                $vhdCreationStarted = $true
                 if ($chkDynamic.Checked) {
                     New-VHD -Path $vhdPath -SizeBytes $totalSize -Dynamic -ErrorAction Stop | Out-Null
                 } else {
                     New-VHD -Path $vhdPath -SizeBytes $totalSize -Fixed   -ErrorAction Stop | Out-Null
                 }
 
+                & $CheckDeployCancellation
                 Mount-VHD -Path $vhdPath -ErrorAction Stop | Out-Null
                 
                 $diskNum = $null
@@ -816,7 +902,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 # Bucle de espera activa: evalúa cada 500ms si el disco ya está expuesto
                 while ($null -eq $diskNum -and $retryCount -lt $maxRetries) {
                     Start-Sleep -Milliseconds 500
-                    [System.Windows.Forms.Application]::DoEvents()
+                    & $CheckDeployCancellation
                     $vhdInfo = Get-VHD -Path $vhdPath -ErrorAction SilentlyContinue
                     if ($vhdInfo -and $vhdInfo.DiskNumber -ge 0) {
                         $diskNum = $vhdInfo.DiskNumber
@@ -835,6 +921,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 Set-Disk -Number $diskNum -IsOffline $true -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 1
                 Set-Disk -Number $diskNum -IsOffline $false -ErrorAction SilentlyContinue
+                & $CheckDeployCancellation
                 
                 # Limpieza con atributo RemoveOEM para destruir particiones protegidas antiguas
                 Clear-Disk -Number $diskNum -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop
@@ -847,10 +934,12 @@ public sealed class AIODeployNativeReader : IDisposable {
             $form.Refresh()
             $partStyle = if ($isGPT) { "GPT" } else { "MBR" }
             Initialize-Disk -Number $diskNum -PartitionStyle $partStyle -ErrorAction Stop
+            & $CheckDeployCancellation
 
             # Prevencion de anomalias: Purga proactiva de particiones automaticas 
             # (Ej. particion MSR fantasma de 16MB inyectada por el motor de Initialize-Disk en GPT)
             Get-Partition -DiskNumber $diskNum | Remove-Partition -Confirm:$false -ErrorAction SilentlyContinue
+            & $CheckDeployCancellation
 
             Write-Log -LogLevel INFO -Message "DEPLOY: Formateando y asignando particiones en Disco $diskNum con esquema $partStyle..."
 
@@ -862,15 +951,18 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $pEFI = New-Partition -DiskNumber $diskNum -Size ($sizeBootMB * 1MB) `
                     -GptType "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}" -ErrorAction Stop
                 Format-Volume -Partition $pEFI -FileSystem FAT32 -Confirm:$false | Out-Null
+                & $CheckDeployCancellation
                 $freeLetBoot      = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                 $reservedLetters += $freeLetBoot.ToString()
                 Set-Partition -InputObject $pEFI -NewDriveLetter $freeLetBoot -ErrorAction Stop
                 $driveLetterBoot  = "$($freeLetBoot):"
+                & $CheckDeployCancellation
 
                 # 2. MSR (Microsoft Reserved)
                 if ($sizeMsrMB -gt 0) {
                     New-Partition -DiskNumber $diskNum -Size ($sizeMsrMB * 1MB) `
                         -GptType "{e3c9e316-0b5c-4db8-817d-f92df00215ae}" -ErrorAction Stop | Out-Null
+                    & $CheckDeployCancellation
                 }
 
                 # 3. Windows (Volumen principal del SO)
@@ -884,16 +976,19 @@ public sealed class AIODeployNativeReader : IDisposable {
                     $pWin = New-Partition -DiskNumber $diskNum -UseMaximumSize -ErrorAction Stop
                 }
                 Format-Volume -Partition $pWin -FileSystem NTFS -Confirm:$false | Out-Null
+                & $CheckDeployCancellation
                 $freeLetSys       = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                 $reservedLetters += $freeLetSys.ToString()
                 Set-Partition -InputObject $pWin -NewDriveLetter $freeLetSys -ErrorAction Stop
                 $driveLetterSystem = "$($freeLetSys):"
+                & $CheckDeployCancellation
 
                 # 4. Recovery (Entorno de Recuperacion)
                 if ($sizeRecMB -gt 0) {
                     $pRec = New-Partition -DiskNumber $diskNum -UseMaximumSize `
                         -GptType "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}" -ErrorAction Stop
                     Format-Volume -Partition $pRec -FileSystem NTFS -Confirm:$false | Out-Null
+                    & $CheckDeployCancellation
                     $freeLetRec       = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                     $reservedLetters += $freeLetRec.ToString()
                     Set-Partition -InputObject $pRec -NewDriveLetter $freeLetRec -ErrorAction Stop
@@ -907,10 +1002,12 @@ public sealed class AIODeployNativeReader : IDisposable {
                 # 1. System Reserved (Arranque Activo)
                 $pBoot = New-Partition -DiskNumber $diskNum -Size ($sizeBootMB * 1MB) -IsActive -ErrorAction Stop
                 Format-Volume -Partition $pBoot -FileSystem NTFS -Confirm:$false | Out-Null
+                & $CheckDeployCancellation
                 $freeLetBoot      = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                 $reservedLetters += $freeLetBoot.ToString()
                 Set-Partition -InputObject $pBoot -NewDriveLetter $freeLetBoot -ErrorAction Stop
                 $driveLetterBoot  = "$($freeLetBoot):"
+                & $CheckDeployCancellation
 
                 # 2. Windows (Volumen principal del SO)
                 $diskObj   = Get-Disk -Number $diskNum
@@ -923,15 +1020,18 @@ public sealed class AIODeployNativeReader : IDisposable {
                     $pWin = New-Partition -DiskNumber $diskNum -UseMaximumSize -ErrorAction Stop
                 }
                 Format-Volume -Partition $pWin -FileSystem NTFS -Confirm:$false | Out-Null
+                & $CheckDeployCancellation
                 $freeLetSys       = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                 $reservedLetters += $freeLetSys.ToString()
                 Set-Partition -InputObject $pWin -NewDriveLetter $freeLetSys -ErrorAction Stop
                 $driveLetterSystem = "$($freeLetSys):"
+                & $CheckDeployCancellation
 
                 # 3. Recovery (Proteccion Legacy Oculta)
                 if ($sizeRecMB -gt 0) {
                     $pRec = New-Partition -DiskNumber $diskNum -UseMaximumSize -MbrType 0x27 -ErrorAction Stop
                     Format-Volume -Partition $pRec -FileSystem NTFS -Confirm:$false | Out-Null
+                    & $CheckDeployCancellation
                     $freeLetRec       = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
                     $reservedLetters += $freeLetRec.ToString()
                     Set-Partition -InputObject $pRec -NewDriveLetter $freeLetRec -ErrorAction Stop
@@ -1027,6 +1127,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $driveLetterRecovery = $null
             }
 
+            & $CheckDeployCancellation
             $lblStatus.Text = "Ocultando particiones de arranque..."
             $form.Refresh()
             
@@ -1054,53 +1155,94 @@ public sealed class AIODeployNativeReader : IDisposable {
 
             $lblStatus.Text      = if ($useCompactOS) { "Completado con Compact OS." } else { "Completado." }
             $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
-            Write-Log -LogLevel INFO -Message "DEPLOY: Despliegue finalizado con exito. Compact OS solicitado: $useCompactOS."
+            $btnCancel.Enabled = $false
+            # Detener antes del dialogo: leer el resultado no suma tiempo de trabajo.
+            & $StopDeployTime
+            $lblDeployProgress.ForeColor = [System.Drawing.Color]::LightGreen
+            $elapsedText = Format-AIODeployElapsedTime $deployWatch.Elapsed
+            Write-Log -LogLevel INFO -Message "DEPLOY: Despliegue finalizado con exito. Compact OS solicitado: $useCompactOS. Tiempo total: $elapsedText."
             $successMessage = "El disco booteable ha sido creado exitosamente."
             if ($useCompactOS) { $successMessage += "`n`nWindows se desplego con Compact OS." }
+            $successMessage += "`n`nTiempo total: $elapsedText"
             [System.Windows.Forms.MessageBox]::Show(
                 $successMessage,
                 "Despliegue Finalizado", 'OK', 'Information')
 
         } catch {
-            $lblStatus.Text      = "Error Critico."
-            $lblStatus.ForeColor = [System.Drawing.Color]::Red
-            $lblDeployProgress.Text = "Detenido: $($deployProgress.Completed) de $($deployProgress.Total) etapas completadas."
+            $failureMessage = $_.Exception.Message
+            $cancelled = $_.Exception -is [OperationCanceledException]
+            $btnCancel.Enabled = $false
+            $deployProgress.Caption = if ($cancelled) { 'Cancelando' } else { 'Detenido' }
+            $resultColor = if ($cancelled) { [System.Drawing.Color]::Gold } else { [System.Drawing.Color]::Red }
+            $lblStatus.Text = if ($cancelled) { 'Cancelando: limpiando el destino...' } else { 'Error en el despliegue. Limpiando el destino...' }
+            $lblStatus.ForeColor = $resultColor
+            $lblDeployProgress.ForeColor = $resultColor
             if ($deployProgress.Completed -eq 2 -and $progressImage.Value -lt $progressImage.Maximum) {
-                $lblImageProgress.Text = "Aplicacion de imagen: no completada."
-                $lblImageProgress.ForeColor = [System.Drawing.Color]::Red
+                $lblImageProgress.Text = if ($cancelled) { 'Aplicacion de imagen: detenida por cancelacion.' } else { 'Aplicacion de imagen: no completada.' }
+                $lblImageProgress.ForeColor = $resultColor
             }
+            & $RefreshDeployProgress
             $form.Refresh()
-            Write-Log -LogLevel ERROR -Message "DEPLOY: FALLO - $($_.Exception.Message)"
+            $resultLevel = if ($cancelled) { 'INFO' } else { 'ERROR' }
+            Write-Log -LogLevel $resultLevel -Message "DEPLOY: $failureMessage"
+            $cleanupWarnings = New-Object 'System.Collections.Generic.List[string]'
 
-            # Limpiar letras de unidad asignadas antes del fallo
+            # DISM/BCDBOOT ya han terminado. Retirar solo accesos del disco destino.
             foreach ($letter in @($driveLetterSystem, $driveLetterBoot, $driveLetterRecovery)) {
-                if ($letter -and (Test-Path "$letter\")) {
-                    $part = Get-Partition -DriveLetter $letter[0] -ErrorAction SilentlyContinue
-                    if ($part) {
-                        Remove-PartitionAccessPath `
-                            -DiskNumber $diskNum `
-                            -PartitionNumber $part.PartitionNumber `
-                            -AccessPath $letter `
-                            -ErrorAction SilentlyContinue
+                try {
+                    if ($letter -and (Test-Path "$letter\")) {
+                        $part = Get-Partition -DriveLetter $letter[0] -ErrorAction Stop
+                        if ($part -and $part.DiskNumber -eq $diskNum) {
+                            Remove-PartitionAccessPath `
+                                -DiskNumber $diskNum `
+                                -PartitionNumber $part.PartitionNumber `
+                                -AccessPath $letter `
+                                -ErrorAction Stop
+                        }
                     }
+                } catch {
+                    [void]$cleanupWarnings.Add("No se pudo retirar el acceso ${letter}: $($_.Exception.Message)")
+                }
+                [System.Windows.Forms.Application]::DoEvents()
+            }
+
+            # Solo retirar el VHD de esta ejecucion, y nunca si sigue montado.
+            if ($isVhdMode -and $vhdCreationStarted -and $vhdPath) {
+                try {
+                    Remove-AIODeployPartialVhd -Path $vhdPath
+                } catch {
+                    [void]$cleanupWarnings.Add("Revisa el VHD conservado en '$vhdPath': $($_.Exception.Message)")
                 }
             }
 
-            # Desmontar y eliminar el VHD parcialmente construido
-            if ($isVhdMode -and $vhdPath) {
-                try {
-                    Dismount-VHD -Path $vhdPath -ErrorAction SilentlyContinue
-                    Start-Sleep -Seconds 1
-                    if (Test-Path $vhdPath) { Remove-Item $vhdPath -Force -ErrorAction SilentlyContinue }
-                } catch {}
+            $deployProgress.Caption = if ($cancelled) { 'Cancelado' } else { 'Detenido' }
+            $lblStatus.Text = if ($cancelled) { 'Despliegue cancelado.' } else { 'Error en el despliegue.' }
+            if ($cleanupWarnings.Count) { $lblStatus.Text += ' Hay tareas de limpieza pendientes.' }
+            & $StopDeployTime
+            $elapsedText = Format-AIODeployElapsedTime $deployWatch.Elapsed
+            Write-Log -LogLevel $resultLevel -Message "DEPLOY: $($deployProgress.Caption). Tiempo total: $elapsedText."
+            $resultMessage = if ($cancelled) {
+                "Despliegue cancelado. No se continuara con las etapas restantes."
+            } else { "Ocurrio un error durante el despliegue:`n`n$failureMessage" }
+            if (-not $isVhdMode) {
+                $resultMessage += "`n`nLos cambios ya realizados en el disco fisico no se revierten; el destino puede quedar incompleto."
+            } elseif ($cancelled -and $vhdCreationStarted -and -not $cleanupWarnings.Count) {
+                $resultMessage += "`n`nEl VHD de esta ejecucion se ha retirado."
             }
-
+            foreach ($warning in $cleanupWarnings) { Write-Log -LogLevel WARN -Message "DEPLOY: $warning" }
+            if ($cleanupWarnings.Count) { $resultMessage += "`n`nLimpieza pendiente:`n" + ($cleanupWarnings -join "`n") }
+            $resultMessage += "`n`nTiempo total: $elapsedText"
+            $resultTitle = if ($cancelled) { 'Despliegue cancelado' } else { 'Error de Despliegue' }
+            $resultIcon = if ($cancelled) { 'Information' } else { 'Error' }
+            if ($cleanupWarnings.Count) { $resultIcon = 'Warning' }
             [System.Windows.Forms.MessageBox]::Show(
-                "Ocurrio un error critico durante el despliegue:`n`n" + $_.Exception.Message,
-                "Error de Despliegue", 'OK', 'Error')
+                $resultMessage, $resultTitle, 'OK', $resultIcon)
 
         } finally {
+            & $StopDeployTime
             $script:isDeploying = $false
+            $btnCancel.Enabled = $false
+            $btnCancel.Text = 'CANCELAR'
             $btnDeploy.Enabled  = $true
             $grpSource.Enabled = $true
             $grpTargetMode.Enabled = $true
@@ -1113,7 +1255,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $form.Add_FormClosing({
         if ($script:isDeploying) {
             [System.Windows.Forms.MessageBox]::Show(
-                "El despliegue esta en curso. Espera a que termine antes de cerrar para evitar corrupcion de datos.",
+                "El despliegue esta en curso. Usa Cancelar y espera a que termine la operacion activa y su limpieza antes de cerrar.",
                 "Operacion en curso", 'OK', 'Warning')
             $_.Cancel = $true
         }
@@ -1141,9 +1283,11 @@ public sealed class AIODeployNativeReader : IDisposable {
     $toolTip.SetToolTip($numMsrSize,      "Size de la particion MSR. Solo aplica en GPT/UEFI.")
     $toolTip.SetToolTip($numRecSize,      "Size de la particion de Recuperacion (WinRE). Se recomienda 1024 MB.")
     $toolTip.SetToolTip($btnDeploy,       "ADVERTENCIA: Iniciara el proceso de creacion/formateo y aplicacion de imagen.")
+    $toolTip.SetToolTip($btnCancel,       "Solicita cancelar. Espera a que termine la operacion activa (incluido DISM) y despues limpia el destino. Los cambios ya realizados en un disco fisico no se revierten.")
     $toolTip.SetToolTip($progressDeploy,  "Cuenta las etapas terminadas. El porcentaje no representa el tiempo restante.")
     $toolTip.SetToolTip($progressDeployFill, "Avanza inmediatamente al terminar cada etapa; permanece fijo durante la etapa en curso.")
     $toolTip.SetToolTip($progressImage,   "Muestra el avance informado al aplicar la imagen. Solo llega a 100% cuando la aplicacion termina correctamente.")
+    $toolTip.SetToolTip($lblDeployProgress, "Porcentaje de etapas completadas y tiempo transcurrido (horas:minutos:segundos). El reloj se reinicia en cada ejecucion y se detiene al finalizar, cancelar o fallar.")
 
     $form.Add_FormClosing({
         if ($script:isDeploying -or $_.Cancel) { return }
@@ -1163,6 +1307,13 @@ public sealed class AIODeployNativeReader : IDisposable {
     # ------------------------------------------------------------------
     # 6. Mostrar y limpiar
     # ------------------------------------------------------------------
-    $form.ShowDialog() | Out-Null
-    $form.Dispose()
+    try {
+        $form.ShowDialog() | Out-Null
+    } finally {
+        $deployWatch.Stop()
+        $deployTimer.Stop()
+        $deployTimer.Dispose()
+        $toolTip.Dispose()
+        $form.Dispose()
+    }
 }
