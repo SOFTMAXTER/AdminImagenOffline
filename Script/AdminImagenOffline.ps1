@@ -1060,7 +1060,7 @@ function Edit-Indexes-Menu {
         Write-Host "   [2] Eliminar un Indice"
         Write-Host "       (Borra permanentemente un indice del WIM)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [3] Integrar y ordenar indices (GUI)"
+        Write-Host "   [3] Integrar y ordenar indices"
         Write-Host "       (Combina fuentes WIM/ESD y define el orden del nuevo WIM)" -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
@@ -1079,7 +1079,7 @@ function Edit-Indexes-Menu {
                 Delete-Index 
             }
             "3" {
-                Write-Log -LogLevel INFO -Message "MenuEditIndex: Integrar y ordenar indices (GUI)."
+                Write-Log -LogLevel INFO -Message "MenuEditIndex: Integrar y ordenar indices."
                 Show-AIOIndexIntegrator
             }
             "V" { 
