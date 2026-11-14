@@ -364,7 +364,7 @@ function Get-AIODashboardEditionLabel {
 }
 
 function ConvertTo-AIODashboardMetadata {
-    param([AllowNull()]$RegistryData, [version]$KernelVersion, [string]$Architecture = 'No disponible', [string]$CurrentEdition)
+    param([AllowNull()]$RegistryData, [version]$KernelVersion, [string]$Architecture = 'No disponible', [string]$CurrentEdition, [AllowNull()]$Environment)
     $issues = New-Object 'System.Collections.Generic.List[string]'
     $rawProductName = if ($null -ne $RegistryData -and $null -ne $RegistryData.ProductName) { [string]$RegistryData.ProductName } else { '' }
     $rawEditionId = if ($null -ne $RegistryData -and $null -ne $RegistryData.EditionID) { ([string]$RegistryData.EditionID).Trim() } else { '' }
@@ -417,8 +417,20 @@ function ConvertTo-AIODashboardMetadata {
     # edicion efectiva; el nombre original se conserva en el log.
     $nameSource = 'ProductName offline'
     $family = $null
-    $isServer = ($installationType -match '^Server(?:\s|$)') -or ($edition -match '^Server(?!Rdsh\b)')
-    if ($installationType -eq 'Client' -and $hasBuild) {
+    $isPE = $null -ne $Environment -and $Environment.IsWinPE
+    $isServer = -not $isPE -and (($installationType -match '^Server(?:\s|$)') -or ($edition -match '^Server(?!Rdsh\b)'))
+    if ($isPE) {
+        $name = $Environment.Name
+        $nameSource = $Environment.Source
+        $installationType = 'WindowsPE'
+        # DisplayVersion/ReleaseId pueden venir heredados de la base de Windows.
+        # PE/RE conservan su build real, sin atribuirles una version comercial.
+        $displayVersion = 'No aplica (WinPE)'
+        if ($edition -notmatch '^(?i:Windows\s*PE|WinPE)$') {
+            $edition = 'WindowsPE'
+            $editionSource = $Environment.Source
+        }
+    } elseif ($installationType -eq 'Client' -and $hasBuild) {
         $family = Get-AIODashboardClientFamilyFromBuild -Build $build
         if ($family) { $nameSource = 'Build y tipo offline + edicion efectiva' }
     } elseif ($isServer) {
@@ -448,39 +460,169 @@ function ConvertTo-AIODashboardMetadata {
         NameSource = $nameSource; DisplayVersion = $displayVersion; Version = $versionText
         Architecture = $Architecture; InstallationType = $installationType
         VersionSource = $versionSource; Issues = @($issues.ToArray())
+        EnvironmentKind = if ($null -ne $Environment) { $Environment.Kind } else { 'Unknown' }
+        EnvironmentRole = if ($null -ne $Environment) { $Environment.Role } else { '' }
+        EnvironmentSource = if ($null -ne $Environment) { $Environment.Source } else { '' }
+        EnvironmentConfidence = if ($null -ne $Environment) { $Environment.Confidence } else { '' }
+        IsWinPE = $isPE
+        ImageIndex = $null; ImageName = ''; ImageDescription = ''
     }
+}
+
+function Get-AIODashboardImageInfo {
+    param([string]$ImagePath, $Index)
+    # Consultar exclusivamente el indice montado. Ni el numero 2 ni Bootable
+    # identifican por si solos un instalador; los indices se pueden reordenar.
+    if ([string]::IsNullOrWhiteSpace($ImagePath) -or
+        [IO.Path]::GetExtension($ImagePath) -notin @('.wim', '.esd', '.swm')) { return $null }
+    $imageIndex = 0
+    if (-not [int]::TryParse([string]$Index, [ref]$imageIndex) -or $imageIndex -lt 1) {
+        throw 'No hay un indice WIM valido para consultar sus metadatos.'
+    }
+    if (-not (Test-Path -LiteralPath $ImagePath -PathType Leaf)) { throw "No se encuentra la imagen de origen: $ImagePath." }
+    $images = @(Get-WindowsImage -ImagePath $ImagePath -Index $imageIndex -ErrorAction Stop)
+    if ($images.Count -ne 1 -or [string]$images[0].ImageIndex -ne [string]$imageIndex) {
+        throw "La consulta WIM no devolvio exclusivamente el indice $imageIndex."
+    }
+    return $images[0]
+}
+
+function Get-AIODashboardLaunchText {
+    param([string]$MountPath)
+    $ini = Join-Path $MountPath 'Windows\System32\winpeshl.ini'
+    if (-not (Test-Path -LiteralPath $ini -PathType Leaf)) { return '' }
+    # Solo leer el INI; nunca ejecutar scripts ni expandir variables del host.
+    if ((Get-Item -LiteralPath $ini -Force -ErrorAction Stop).Length -gt 64KB) {
+        throw 'winpeshl.ini supera 64 KB; no se usara para identificar el entorno.'
+    }
+    $section = ''; $commands = @()
+    foreach ($line in @(Get-Content -LiteralPath $ini -ErrorAction Stop)) {
+        $text = $line.Trim()
+        if (-not $text -or $text -match '^[;#]') { continue }
+        if ($text -match '^\[([^\]]+)\]') { $section = $matches[1].Trim(); continue }
+        if ($section -eq 'LaunchApp' -and $text -match '^AppPath\s*=\s*(.+)$') { $commands += $matches[1] }
+        elseif ($section -eq 'LaunchApps') { $commands += $text }
+    }
+    return ($commands -join "`n")
+}
+
+function Get-AIODashboardEnvironment {
+    param([Parameter(Mandatory = $true)][string]$MountPath, [AllowNull()]$RegistryData,
+        [AllowNull()]$ImageInfo, [string]$ImagePath)
+    $issues = @()
+    $registryPE = $false; $registryWindows = $false
+    if ($null -ne $RegistryData) {
+        $registryPE = ([string]$RegistryData.InstallationType).Trim() -match '^(Windows\s*PE|WinPE)$' -or
+            ([string]$RegistryData.EditionID).Trim() -match '^(Windows\s*PE|WinPE)$'
+        $registryWindows = ([string]$RegistryData.InstallationType).Trim() -match '^(Client|Server(?:\s.*)?)$'
+    }
+    $result = [pscustomobject]@{
+        Kind = 'Unknown'; IsWinPE = $false; Name = ''; Role = ''; Source = 'No disponible'
+        Confidence = 'No determinada'; Issues = @()
+    }
+    # Un Windows completo puede contener winre.wim, ReAgent.xml y utilidades de
+    # recuperacion. No son prueba de que el indice ACTIVO sea WinRE.
+    if ($registryWindows -and -not $registryPE) {
+        $result.Kind = 'Windows'; $result.Source = 'Registro SOFTWARE offline'; $result.Confidence = 'Alta'
+        return $result
+    }
+
+    $files = @{}
+    foreach ($relative in @('Windows\System32\winpeshl.exe', 'Windows\System32\wpeinit.exe',
+        'Windows\System32\winpeshl.ini', 'Windows\System32\startnet.cmd',
+        'sources\recovery\recenv.exe', 'Windows\System32\recenv.exe', 'WinRE\recenv.exe',
+        'setup.exe', 'sources\setup.exe')) {
+        $files[$relative] = Test-Path -LiteralPath (Join-Path $MountPath $relative) -PathType Leaf
+    }
+    # No exigir la ausencia de explorer.exe: un PE personalizado puede incluirlo.
+    $filesPE = $files['Windows\System32\winpeshl.exe'] -and
+        ($files['Windows\System32\wpeinit.exe'] -or $files['Windows\System32\winpeshl.ini'] -or $files['Windows\System32\startnet.cmd'] -or
+         $files['sources\recovery\recenv.exe'] -or $files['sources\setup.exe'])
+    $imagePE = $false; $imageWindows = $false; $imageText = ''
+    if ($null -ne $ImageInfo) {
+        $imagePE = ([string]$ImageInfo.InstallationType).Trim() -match '^(Windows\s*PE|WinPE)$' -or
+            ([string]$ImageInfo.EditionId).Trim() -match '^(Windows\s*PE|WinPE)$'
+        $imageWindows = ([string]$ImageInfo.InstallationType).Trim() -match '^(Client|Server(?:\s.*)?)$'
+        $imageText = @($ImageInfo.ImageName, $ImageInfo.ImageDescription) -join ' '
+    }
+    if ($imageWindows -and -not $registryPE -and -not $filesPE) {
+        $result.Kind = 'Windows'; $result.Source = 'Tipo del indice WIM'; $result.Confidence = 'Media'
+        return $result
+    }
+    $rePattern = '\bWinRE\b|\bWindows\s+RE\b|\bWindows Recovery Environment\b|\bEntorno de recuperaci[oó]n(?: de Windows)?\b'
+    $setupPattern = '\bWindows\s+Setup\b|\bSetup\b|\bInstalador(?: de Windows)?\b|\bInstalaci[oó]n de Windows\b'
+    $pePattern = '\bWinPE\b|\bWindows\s+PE\b|\bWindows Preinstallation Environment\b|\bEntorno de preinstalaci[oó]n\b'
+    $nameRE = $imageText -match $rePattern
+    $nameSetup = $imageText -match $setupPattern
+    $namePE = $imageText -match $pePattern
+    # Los nombres editables son respaldo, nunca sustituyen un tipo Client/Server.
+    $result.IsWinPE = $registryPE -or $filesPE -or $imagePE -or $nameRE -or $nameSetup -or $namePE
+    if (-not $result.IsWinPE) { return $result }
+    $result.Kind = 'WinPE'; $result.Name = 'Entorno de preinstalacion de Windows (WinPE)'; $result.Role = 'Windows PE'
+    $result.Source = if ($registryPE) { 'Registro SOFTWARE offline' } elseif ($filesPE) { 'Archivos WinPE montados' } else { 'Metadatos del indice WIM' }
+    $result.Confidence = if ($registryPE -or $filesPE) { 'Alta' } else { 'Media' }
+
+    $hasRE = $files['sources\recovery\recenv.exe'] -or $files['Windows\System32\recenv.exe'] -or $files['WinRE\recenv.exe']
+    $hasSetup = $files['sources\setup.exe'] -or $files['setup.exe']
+    $launch = ''
+    try { $launch = Get-AIODashboardLaunchText -MountPath $MountPath }
+    catch { $issues += $_.Exception.Message }
+    # Reconocer ejecutables de inicio, no comentarios ni secciones ajenas del INI.
+    $launchRE = $hasRE -and $launch -match '(?im)^\s*(?:"(?:[^"\r\n]*[\\/])?recenv\.exe"|(?:[^\s",]*[\\/])?recenv\.exe)(?=[\s,]|$)'
+    $launchSetup = $hasSetup -and $launch -match '(?im)^\s*(?:"(?:[^"\r\n]*[\\/])?setup\.exe"|(?:[^\s",]*[\\/])?setup\.exe)(?=[\s,]|$)'
+    $kind = ''
+    if ($launchRE -xor $launchSetup) {
+        $kind = if ($launchRE) { 'WinRE' } else { 'WindowsSetup' }
+        $result.Source = 'winpeshl.ini y ejecutables montados'; $result.Confidence = 'Alta'
+    } elseif ($launchRE -and $launchSetup) {
+        $issues += 'El inicio declara recuperacion y Setup; no se atribuye un rol unico.'
+    } elseif ($hasRE -xor $hasSetup) {
+        $kind = if ($hasRE) { 'WinRE' } else { 'WindowsSetup' }
+        $result.Source = 'Ejecutables del entorno montado'; $result.Confidence = 'Alta'
+    } elseif ($nameRE -xor $nameSetup) {
+        $kind = if ($nameRE) { 'WinRE' } else { 'WindowsSetup' }
+        $result.Source = 'Nombre/descripcion del indice WIM'; $result.Confidence = 'Media'
+    } elseif (($hasRE -and $hasSetup) -or ($nameRE -and $nameSetup)) {
+        $issues += 'Hay indicios de recuperacion y Setup; el rol del indice no es concluyente.'
+    } elseif ([IO.Path]::GetFileName($ImagePath) -match '^winre(?:[._ -].*)?\.wim$') {
+        # Pista debil, solo tras comprobar que es PE. Incluye las copias de trabajo
+        # winre_editado.wim / winre_final.wim del gestor de entornos.
+        $kind = 'WinRE'; $result.Source = 'Entorno PE + nombre del archivo (probable)'; $result.Confidence = 'Baja'
+        $issues += 'WinRE probable por el nombre del archivo; faltan marcadores que confirmen el rol.'
+    }
+    if ($kind -eq 'WinRE') {
+        $result.Kind = 'WinRE'; $result.Name = 'Entorno de recuperacion de Windows (WinRE)'; $result.Role = 'Recuperacion de Windows (WinRE)'
+        if ($result.Confidence -eq 'Baja') { $result.Name += ' probable'; $result.Role += ' probable' }
+    } elseif ($kind -eq 'WindowsSetup') {
+        $result.Kind = 'WindowsSetup'; $result.Name = 'Instalador de Windows (Windows Setup)'; $result.Role = 'Instalador de Windows (Setup)'
+    } elseif (($hasRE -and $hasSetup) -or ($nameRE -and $nameSetup)) {
+        $result.Role = 'WinPE con recuperacion y Setup (rol no determinado)'; $result.Confidence = 'No determinada'
+    }
+    if (($kind -eq 'WinRE' -and $nameSetup) -or ($kind -eq 'WindowsSetup' -and $nameRE)) {
+        $issues += 'El contenido montado y el nombre/descripcion WIM discrepan; se priorizo el contenido.'
+    }
+    $result.Issues = @($issues)
+    return $result
 }
 
 function Test-AIODashboardIsWinPE {
     param([Parameter(Mandatory = $true)][string]$MountPath, [AllowNull()]$RegistryData)
-    if ($null -ne $RegistryData) {
-        if ($RegistryData.InstallationType -eq 'WindowsPE' -or $RegistryData.EditionID -eq 'WindowsPE') {
-            return $true
-        }
-        if (-not [string]::IsNullOrWhiteSpace([string]$RegistryData.InstallationType)) {
-            return $false
-        }
-    }
-    # Si el registro no estuvo disponible, comprobar marcadores exclusivos de WinPE/WinRE
-    # para no ejecutar DISM /Get-CurrentEdition sobre un entorno PE.
-    $peMarker1 = Join-Path $MountPath 'Windows\System32\winpeshl.ini'
-    $peMarker2 = Join-Path $MountPath 'Windows\System32\startnet.cmd'
-    $explorer = Join-Path $MountPath 'Windows\explorer.exe'
-    if (((Test-Path -LiteralPath $peMarker1 -PathType Leaf) -or (Test-Path -LiteralPath $peMarker2 -PathType Leaf)) -and
-        -not (Test-Path -LiteralPath $explorer -PathType Leaf)) {
-        return $true
-    }
-    return $false
+    return (Get-AIODashboardEnvironment -MountPath $MountPath -RegistryData $RegistryData).IsWinPE
 }
 
 function Read-AIODashboardMetadata {
-    param([Parameter(Mandatory = $true)][string]$MountPath)
+    param([Parameter(Mandatory = $true)][string]$MountPath, [string]$ImagePath, $Index)
     $issues = @(); $registry = $null; $kernelVersion = $null; $arch = 'No disponible'; $currentEdition = $null
     $kernel = Join-Path $MountPath 'Windows\System32\ntoskrnl.exe'
     try { $registry = Get-AIODashboardRegistryData -MountPath $MountPath }
     catch { $issues += $_.Exception.Message }
+    $imageInfo = $null
+    try { $imageInfo = Get-AIODashboardImageInfo -ImagePath $ImagePath -Index $Index }
+    catch { $issues += "No se pudo leer el indice WIM; se conserva la deteccion offline. $($_.Exception.Message)" }
+    $environment = Get-AIODashboardEnvironment -MountPath $MountPath -RegistryData $registry -ImageInfo $imageInfo -ImagePath $ImagePath
+    $issues += @($environment.Issues)
     # Microsoft no admite consultas de mantenimiento de edicion en Windows PE.
-    if (-not (Test-AIODashboardIsWinPE -MountPath $MountPath -RegistryData $registry)) {
+    if (-not $environment.IsWinPE) {
         try { $currentEdition = Get-AIODashboardCurrentEdition -MountPath $MountPath }
         catch { $issues += "Edicion DISM no verificada; se usa EditionID del registro si esta disponible. $($_.Exception.Message)" }
     }
@@ -494,10 +636,15 @@ function Read-AIODashboardMetadata {
             }
         }
     } catch { $issues += "No se pudo leer la version del kernel: $($_.Exception.Message)" }
-    $result = ConvertTo-AIODashboardMetadata -RegistryData $registry -KernelVersion $kernelVersion -Architecture $arch -CurrentEdition $currentEdition
+    $result = ConvertTo-AIODashboardMetadata -RegistryData $registry -KernelVersion $kernelVersion -Architecture $arch -CurrentEdition $currentEdition -Environment $environment
+    if ($null -ne $imageInfo) {
+        $result.ImageIndex = $imageInfo.ImageIndex; $result.ImageName = [string]$imageInfo.ImageName
+        $result.ImageDescription = [string]$imageInfo.ImageDescription
+    }
     $result.Issues = @(@($result.Issues) + $issues | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
     Write-Log -LogLevel INFO -Message ("Dashboard: {0} | Edicion {1} | Version {2} | Build {3} | {4} | Fuente: {5} | ProductName original: {6}" -f $result.Name, $result.Edition, $result.DisplayVersion, $result.Version, $result.Architecture, $result.VersionSource, $result.RawProductName)
     Write-Log -LogLevel INFO -Message ("Dashboard: Fuente del nombre: {0} | Fuente de edicion: {1} | EditionID original: {2}" -f $result.NameSource, $result.EditionSource, $result.RawEditionID)
+    Write-Log -LogLevel INFO -Message ("Dashboard: Entorno {0} | Rol: {1} | Fuente: {2} | Confianza: {3} | Indice: {4} | Nombre WIM: {5}" -f $result.EnvironmentKind, $result.EnvironmentRole, $result.EnvironmentSource, $result.EnvironmentConfidence, $Index, $result.ImageName)
     if ($currentEdition -and $result.RawEditionID -and $currentEdition -ne $result.RawEditionID) {
         Write-Log -LogLevel WARN -Message "Dashboard: DISM informa $currentEdition y el registro $($result.RawEditionID). Se muestra la edicion de DISM en nombre y edicion."
     }
@@ -567,7 +714,7 @@ function Get-AIOCachedDashboardMetadata {
     # operacion que solicite refresco; volver al menu no dispara reintentos.
     if ($ForceRefresh -or $null -eq $cache -or $cache.Key -cne $key) {
         Write-Host 'Leyendo metadatos del sistema operativo...' -ForegroundColor DarkGray
-        $data = Read-AIODashboardMetadata -MountPath $MountPath
+        $data = Read-AIODashboardMetadata -MountPath $MountPath -ImagePath $ImagePath -Index $Index
         $script:AIODashboardCache = [pscustomobject]@{ Key = $key; Data = $data; ReadUtc = [DateTime]::UtcNow }
     }
     return $script:AIODashboardCache.Data
@@ -576,10 +723,17 @@ function Get-AIOCachedDashboardMetadata {
 function Write-AIODashboardMetadata {
     param($Metadata, [string]$MountPath, [int]$Width = 80)
     if ($null -eq $Metadata) { return }
-    foreach ($item in @(
+    $rows = @(
         @('Detalles SO', $Metadata.Name), @('Edicion', $Metadata.Edition), @('Version', $Metadata.DisplayVersion),
-        @('Build', $Metadata.Version), @('Arquitectura', $Metadata.Architecture), @('Tipo', $Metadata.InstallationType), @('Directorio', $MountPath)
-    )) {
+        @('Build', $Metadata.Version), @('Arquitectura', $Metadata.Architecture), @('Tipo', $Metadata.InstallationType)
+    )
+    if ($Metadata.IsWinPE) {
+        $rows += ,@('Rol', $Metadata.EnvironmentRole)
+        $rows += ,@('Deteccion', $Metadata.EnvironmentConfidence)
+    }
+    if ($null -ne $Metadata.ImageIndex) { $rows += ,@('Indice WIM', "[$($Metadata.ImageIndex)] $($Metadata.ImageName)") }
+    $rows += ,@('Directorio', $MountPath)
+    foreach ($item in $rows) {
         $prefix = '  + {0,-12}: ' -f $item[0]
         $value = ([string]$item[1] -replace '[\x00-\x1F\x7F]', ' ').Trim()
         $available = [Math]::Max(4, $Width - $prefix.Length - 1)
