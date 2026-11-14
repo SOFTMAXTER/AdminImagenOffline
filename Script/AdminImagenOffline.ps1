@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.12
+    1.5.13
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.12"
+$script:Version = "1.5.13"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -66,6 +66,26 @@ function Write-Log {
     }
     catch {
         Write-Warning "No se pudo escribir en el archivo de log: $_"
+    }
+}
+
+function Release-SingleInstanceMutex {
+    $mutex = $Script:SingleInstanceMutex
+    try {
+        if ($null -ne $mutex -and $Script:SingleInstanceMutexOwned) {
+            $mutex.ReleaseMutex()
+        }
+    } catch {
+        Write-Warning "No se pudo liberar el mutex de instancia unica: $($_.Exception.Message)"
+    } finally {
+        try {
+            if ($null -ne $mutex) { $mutex.Dispose() }
+        } catch {
+            Write-Warning "No se pudo cerrar el mutex de instancia unica: $($_.Exception.Message)"
+        } finally {
+            $Script:SingleInstanceMutex = $null
+            $Script:SingleInstanceMutexOwned = $false
+        }
     }
 }
 
@@ -338,6 +358,7 @@ del "%~f0"
 
         Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$batPath`"" -ErrorAction Stop | Out-Null
         Write-Log -LogLevel INFO -Message "UPDATER: ApplyUpdate.cmd iniciado correctamente. El registro continuara desde CMD."
+        Release-SingleInstanceMutex
         exit
     }
     catch {
@@ -534,7 +555,7 @@ function Ensure-WorkingDirectories {
                 } catch {
                     Write-Host "[ERROR] No se pudo crear el directorio. Error: $($_.Exception.Message)"
                     Write-Log -LogLevel ERROR -Message "Fallo al auto-crear MOUNT_DIR. Error: $($_.Exception.Message)"
-                    Read-Host "Presiona Enter para salir."; exit
+                    Read-Host "Presiona Enter para salir."; Release-SingleInstanceMutex; exit
                 }
             }
             'S' {
@@ -546,12 +567,13 @@ function Ensure-WorkingDirectories {
                     Save-Config # Guardar la nueva seleccion
                 } else {
                     Write-Warning "No se selecciono ruta. Saliendo."
-                    Read-Host "Presiona Enter para salir."; exit
+                    Read-Host "Presiona Enter para salir."; Release-SingleInstanceMutex; exit
                 }
             }
             default {
                 Write-Host "Operacion cancelada por el usuario. Saliendo."
                 Write-Log -LogLevel INFO -Message "Usuario cancelo en la verificacion de directorios."
+                Release-SingleInstanceMutex
                 exit
             }
         }
@@ -577,7 +599,7 @@ function Ensure-WorkingDirectories {
                 } catch {
                     Write-Host "[ERROR] No se pudo crear el directorio. Error: $($_.Exception.Message)"
                     Write-Log -LogLevel ERROR -Message "Fallo al auto-crear Scratch_DIR. Error: $($_.Exception.Message)"
-                    Read-Host "Presiona Enter para salir."; exit
+                    Read-Host "Presiona Enter para salir."; Release-SingleInstanceMutex; exit
                 }
             }
             'S' {
@@ -589,12 +611,13 @@ function Ensure-WorkingDirectories {
                     Save-Config # Guardar la nueva seleccion
                 } else {
                     Write-Warning "No se selecciono ruta. Saliendo."
-                    Read-Host "Presiona Enter para salir."; exit
+                    Read-Host "Presiona Enter para salir."; Release-SingleInstanceMutex; exit
                 }
             }
             default {
                 Write-Host "Operacion cancelada por el usuario. Saliendo."
                 Write-Log -LogLevel INFO -Message "Usuario cancelo en la verificacion de directorios."
+                Release-SingleInstanceMutex
                 exit
             }
         }
@@ -627,6 +650,97 @@ if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     Read-Host "Presiona Enter para salir."
     exit
 }
+
+# =================================================================
+#  Control de Instancia Unica (Mutex Global)
+# =================================================================
+$Script:SingleInstanceMutexName  = "Global\SOFTMAXTER_AdminImagenOffline_SingleInstance"
+$Script:SingleInstanceMutex      = $null
+$Script:SingleInstanceMutexOwned = $false
+
+try {
+    $Script:SingleInstanceMutex = New-Object -TypeName System.Threading.Mutex -ArgumentList @($false, $Script:SingleInstanceMutexName) -ErrorAction Stop
+    try {
+        $Script:SingleInstanceMutexOwned = $Script:SingleInstanceMutex.WaitOne(0, $false)
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        # Si la sesion previa se cerro forzosamente, el sistema nos transfiere el bloqueo
+        $Script:SingleInstanceMutexOwned = $true
+    }
+}
+catch {
+    $mutexError = $_.Exception.Message
+    Release-SingleInstanceMutex
+    # No cambiar a Local ni continuar sin bloqueo: seria una instancia sin
+    # coordinacion con las que ya adquirieron el mutex global.
+    Write-Host "`n[ERROR] No se pudo adquirir el bloqueo global de instancia unica." -ForegroundColor Red
+    Write-Host "El programa no continuara para proteger las imagenes y las colmenas offline." -ForegroundColor Yellow
+    Write-Host "Detalle: $mutexError" -ForegroundColor Gray
+    Read-Host "Presiona Enter para salir."
+    exit 1
+}
+
+if (-not $Script:SingleInstanceMutexOwned) {
+    # Esta copia no es propietaria; cerrar su handle antes de mostrar el aviso.
+    Release-SingleInstanceMutex
+    try { [System.Console]::Beep(400, 250) } catch {}
+    Write-Host ""
+    Write-Host "  =======================================================" -ForegroundColor Red
+    Write-Host "           ¡INSTANCIA EN EJECUCION DETECTADA!            " -ForegroundColor Yellow
+    Write-Host "  =======================================================" -ForegroundColor Red
+    Write-Host "  AdminImagenOffline ya se encuentra abierto en otra ventana." -ForegroundColor White
+    Write-Host "  Para proteger las imagenes montadas (DISM) y las colmenas" -ForegroundColor Gray
+    Write-Host "  del Registro offline, no se permiten instancias simultaneas." -ForegroundColor Gray
+    Write-Host ""
+
+    for ($sec = 3; $sec -ge 1; $sec--) {
+        Write-Host ("`r  [!] Esta ventana se cerrara automaticamente en {0} segundo(s)... " -f $sec) -NoNewline -ForegroundColor Cyan
+        Start-Sleep -Seconds 1
+    }
+    Write-Host ""
+
+    # Restaurar y traer al frente la ventana activa de AdminImagenOffline al cerrar esta copia
+    try {
+        $winFocusDef = @'
+using System;
+using System.Runtime.InteropServices;
+public static class WinFocusHelper {
+    [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+}
+'@
+        if (-not ([System.Management.Automation.PSTypeName]'WinFocusHelper').Type) {
+            Add-Type -TypeDefinition $winFocusDef -ErrorAction SilentlyContinue | Out-Null
+        }
+        $existingProc = Get-Process -Name "powershell", "pwsh", "WindowsTerminal" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Id -ne $PID -and $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.MainWindowTitle -like "*AdminImagenOffline*" } |
+            Select-Object -First 1
+        if (-not $existingProc) {
+            # Fallback: si la instancia activa tiene abierto un dialogo modal WinForms, su MainWindowTitle cambia al del modulo
+            $cimMatch = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe' OR Name = 'pwsh.exe'" -ErrorAction SilentlyContinue |
+                Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like "*AdminImagenOffline.ps1*" } |
+                Select-Object -First 1
+            if ($cimMatch) {
+                $existingProc = Get-Process -Id $cimMatch.ProcessId -ErrorAction SilentlyContinue |
+                    Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero }
+            }
+        }
+        if ($existingProc) {
+            if ([WinFocusHelper]::IsIconic($existingProc.MainWindowHandle)) {
+                [WinFocusHelper]::ShowWindowAsync($existingProc.MainWindowHandle, 9) | Out-Null
+            }
+            [WinFocusHelper]::SetForegroundWindow($existingProc.MainWindowHandle) | Out-Null
+        }
+    } catch {}
+
+    exit 1
+}
+
+# Cubrir tambien las salidas y errores de inicializacion anteriores al menu.
+# El bloque try no crea otro scope: las funciones siguen viendo $Script:.
+try {
+try { $Host.UI.RawUI.WindowTitle = "AdminImagenOffline v$($script:Version) by SOFTMAXTER" } catch {}
 
 try {
     $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem"
@@ -714,6 +828,7 @@ $Script:OfflineUserClassesPresent = $null
 $Script:AIODashboardCache = $null
 $Script:ForceMenuRefresh = $false
 $Script:GlobalPrivilegesEnabled = $false
+$Script:AIOEnabledPrivileges = @{}
 
 $script:ModulosFallidos = New-Object System.Collections.Generic.List[string]
 $modulosDisponibles = @(Get-ChildItem -Path $PSScriptRoot -Filter "Modulo-*.ps1" -File -ErrorAction SilentlyContinue | Sort-Object Name)
@@ -2951,83 +3066,85 @@ function Translate-OfflinePath {
 }
 
 # --- UTILIDAD: ACTIVAR PRIVILEGIOS DE TOKEN (SeTakeOwnership / SeRestore) ---
+function Initialize-AIOPrivilegeNative {
+    # Nombre propio para no reutilizar una version antigua de TokenManipulator.
+    if (([System.Management.Automation.PSTypeName]'AIOPrivilegeNative').Type) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class AIOPrivilegeNative {
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct TokenPrivileges {
+        public uint Count;
+        public long Luid;
+        public uint Attributes;
+    }
+    [DllImport("kernel32.dll", ExactSpelling=true)]
+    private static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll", ExactSpelling=true, SetLastError=true)]
+    private static extern bool CloseHandle(IntPtr handle);
+    [DllImport("advapi32.dll", ExactSpelling=true, SetLastError=true)]
+    private static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", EntryPoint="LookupPrivilegeValueW", ExactSpelling=true, CharSet=CharSet.Unicode, SetLastError=true)]
+    private static extern bool LookupPrivilegeValue(string system, string name, out long luid);
+    [DllImport("advapi32.dll", ExactSpelling=true, SetLastError=true)]
+    private static extern bool AdjustTokenPrivileges(IntPtr token, bool disableAll,
+        ref TokenPrivileges state, uint length, IntPtr previous, IntPtr returned);
+    public static void Enable(string privilege) {
+        IntPtr token = IntPtr.Zero;
+        try {
+            if (!OpenProcessToken(GetCurrentProcess(), 0x0020 | 0x0008, out token)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            long luid;
+            if (!LookupPrivilegeValue(null, privilege, out luid)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            TokenPrivileges state = new TokenPrivileges();
+            state.Count = 1;
+            state.Luid = luid;
+            state.Attributes = 0x00000002;
+            bool adjusted = AdjustTokenPrivileges(token, false, ref state, 0, IntPtr.Zero, IntPtr.Zero);
+            int error = Marshal.GetLastWin32Error();
+            // TRUE tambien puede devolver ERROR_NOT_ALL_ASSIGNED (1300).
+            if (!adjusted || error != 0) { throw new Win32Exception(error); }
+        } finally {
+            if (token != IntPtr.Zero) { CloseHandle(token); }
+        }
+    }
+}
+'@ -ErrorAction Stop | Out-Null
+}
+
 function Enable-Privileges {
     param(
+        [ValidateNotNullOrEmpty()]
         [string[]]$Privileges = @(
-            "SeTakeOwnershipPrivilege",
-            "SeRestorePrivilege",
-            "SeBackupPrivilege",
-            "SeSecurityPrivilege"
+            'SeTakeOwnershipPrivilege', 'SeRestorePrivilege',
+            'SeBackupPrivilege', 'SeSecurityPrivilege'
         )
     )
-    
-    # CONTROL SINGLETON: Si ya se activaron en esta sesión, salimos de inmediato (0ms de coste)
-    if ($Script:GlobalPrivilegesEnabled) { return }
-    
-    $definition = @'
-    using System;
-    using System.Runtime.InteropServices;
-    
-    public class TokenManipulator
-    {
-        [DllImport("advapi32.dll", ExactSpelling = true, SetLastError = true)]
-        internal static extern bool AdjustTokenPrivileges(IntPtr htok, bool disall, ref TokPriv1Luid newst, int len, IntPtr prev, IntPtr relen);
-        
-        [DllImport("kernel32.dll", ExactSpelling = true)]
-        internal static extern IntPtr GetCurrentProcess();
-        
-        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
-        internal static extern bool CloseHandle(IntPtr handle);
-        
-        [DllImport("advapi32.dll", ExactSpelling = true, SetLastError = true)]
-        internal static extern bool OpenProcessToken(IntPtr h, int acc, ref IntPtr phtok);
-        
-        [DllImport("advapi32.dll", SetLastError = true)]
-        internal static extern bool LookupPrivilegeValue(string host, string name, ref long pluid);
-        
-        [StructLayout(LayoutKind.Sequential, Pack = 1)]
-        internal struct TokPriv1Luid
-        {
-            public int Count;
-            public long Luid;
-            public int Attr;
-        }
-        
-        internal const int SE_PRIVILEGE_ENABLED = 0x00000002;
-        internal const int TOKEN_QUERY = 0x00000008;
-        internal const int TOKEN_ADJUST_PRIVILEGES = 0x00000020;
-        
-        public static bool AddPrivilege(string privilege)
-        {
-            IntPtr htok = IntPtr.Zero;
-            try {
-                bool retVal;
-                TokPriv1Luid tp;
-                IntPtr hproc = GetCurrentProcess();
-                retVal = OpenProcessToken(hproc, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, ref htok);
-                tp.Count = 1;
-                tp.Luid = 0;
-                tp.Attr = SE_PRIVILEGE_ENABLED;
-                retVal = LookupPrivilegeValue(null, privilege, ref tp.Luid);
-                retVal = AdjustTokenPrivileges(htok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
-                return retVal;
-            } catch { return false; }
-            finally {
-                if (htok != IntPtr.Zero) CloseHandle(htok);
-            }
+    if (-not (Get-Variable -Name AIOEnabledPrivileges -Scope Script -ErrorAction SilentlyContinue)) {
+        $Script:AIOEnabledPrivileges = @{}
+    }
+    Initialize-AIOPrivilegeNative
+    $failures = @()
+    foreach ($privilege in @($Privileges | Sort-Object -Unique)) {
+        if ($Script:AIOEnabledPrivileges.ContainsKey($privilege)) { continue }
+        try {
+            [AIOPrivilegeNative]::Enable($privilege)
+            $Script:AIOEnabledPrivileges[$privilege] = $true
+        } catch {
+            # No guardar fallos: la siguiente llamada debe poder reintentarlo.
+            $failures += "${privilege}: $($_.Exception.Message)"
         }
     }
-'@
-    if (-not ([System.Management.Automation.PSTypeName]'TokenManipulator').Type) {
-        Add-Type -TypeDefinition $definition -PassThru | Out-Null
-    }
-    
-    foreach ($priv in $Privileges) {
-        [TokenManipulator]::AddPrivilege($priv) | Out-Null
-    }
-
-    # Marcamos la bandera global para bloquear llamadas redundantes
-    $Script:GlobalPrivilegesEnabled = $true
+    $defaults = @('SeTakeOwnershipPrivilege', 'SeRestorePrivilege', 'SeBackupPrivilege', 'SeSecurityPrivilege')
+    $Script:GlobalPrivilegesEnabled = @($defaults | Where-Object {
+        -not $Script:AIOEnabledPrivileges.ContainsKey($_)
+    }).Count -eq 0
+    if ($failures.Count -gt 0) { throw ('No se pudieron activar los privilegios: ' + ($failures -join '; ')) }
 }
 
 # Diccionario global en RAM para almacenar los permisos exactos de fabrica
@@ -3424,9 +3541,14 @@ function Get-OfflineControlSet {
 function Check-And-Repair-Mounts {
     Write-Host 'Verificando consistencia del entorno WIM...' -ForegroundColor DarkGray
     if ($Script:IMAGE_MOUNTED -eq 2) { return }
+    if (Test-AIOHostWinREProtectedMount -Path $Script:MOUNT_DIR) {
+        Write-Log -LogLevel INFO -Message 'MountRepair: Se omite la recuperacion automatica por la comprobacion de WinRE del host.'
+        return
+    }
     try {
         $mounts = @(Get-AIOMountedImages)
         $current = Get-AIOMountForPath -Mounts $mounts -Path $Script:MOUNT_DIR
+        if (Test-AIOHostWinREProtectedMount -Path $Script:MOUNT_DIR -Mount $current) { return }
     } catch {
         Write-Warning $_.Exception.Message
         Write-Log -LogLevel WARN -Message "MountRepair: No se pudo consultar DISM: $($_.Exception.Message)"
@@ -3452,8 +3574,14 @@ function Check-And-Repair-Mounts {
     if ($msgResult -ne 'Yes') { return }
 
     Write-Host '>>> INTENTANDO RECUPERAR SESION (Remount-Image)...' -ForegroundColor Yellow
-    & dism.exe /Remount-Image "/MountDir:$Script:MOUNT_DIR" /English | Out-Host
-    $remountCode = $LASTEXITCODE
+    try {
+        $remountResult = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments @('/Remount-Image',"/MountDir:$Script:MOUNT_DIR",'/English')
+        $remountCode = $remountResult.ExitCode
+    } catch {
+        Write-Warning "No se pudo ejecutar la recuperacion de la sesion: $($_.Exception.Message)"
+        Write-Log -LogLevel ERROR -Message "MountRepair: Error ejecutando Remount-Image: $($_.Exception.Message)"
+        return
+    }
     if ($remountCode -ne 0) {
         Write-Warning "No se pudo recuperar la sesion (codigo $remountCode). Los cambios no se han descartado."
         Write-Log -LogLevel ERROR -Message "MountRepair: Remount-Image fallo en '$Script:MOUNT_DIR': $remountCode"
@@ -3586,6 +3714,12 @@ function Main-Menu {
         Write-Host $separator -ForegroundColor Cyan
         Write-Host ""
 
+        if ($Script:AIOHostWinREAttentionRequired) {
+            Write-Host ' AVISO DE INICIO: se conservaron montajes WinRE o no pudieron verificarse.' -ForegroundColor Yellow
+            Write-Host ' No se recuperaron automaticamente. Consulta Registro.log para el detalle.' -ForegroundColor Gray
+            Write-Host ''
+        }
+
         # Menu de Opciones
         Write-Host " [ GESTION DE IMAGEN ]" -ForegroundColor Yellow
         Write-Host "   1. Montar / Guardar / Desmontar Imagen"
@@ -3702,6 +3836,383 @@ function Show-Mount-Warning {
     Start-Sleep -Seconds 2
 }
 
+function Invoke-AIOConsoleSystemTool {
+    param(
+        [Parameter(Mandatory=$true)][ValidateSet('dism.exe','reagentc.exe')][string]$Tool,
+        [Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][string[]]$Arguments
+    )
+    if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw 'No se conoce SystemRoot del anfitrion.' }
+    $systemFolder = 'System32'
+    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { $systemFolder = 'Sysnative' }
+    $exe = Join-Path $env:SystemRoot "$systemFolder\$Tool"
+    # Start-Process une ArgumentList en una cadena. Proteger espacios, comillas
+    # y barras finales segun las reglas de argumentos nativos de Windows.
+    $commandLine = (@($Arguments | ForEach-Object {
+        $escaped = [regex]::Replace($_, '(\\*)"', '$1$1\"')
+        $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+        '"' + $escaped + '"'
+    }) -join ' ')
+    $process = $null
+    try {
+        # El hijo hereda la consola incluso si el caller captura este resultado.
+        # No redirigir stdout/stderr: DISM conserva su progreso en la misma linea.
+        $process = Start-Process -FilePath $exe -ArgumentList $commandLine -NoNewWindow -Wait -PassThru -ErrorAction Stop
+        if ($null -eq $process -or $null -eq $process.ExitCode) { throw "No se obtuvo el codigo de salida de $Tool." }
+        [pscustomobject]@{ ExitCode = [int]$process.ExitCode }
+    } finally {
+        if ($null -ne $process) { $process.Dispose() }
+    }
+}
+
+# --- Comprobacion de WinRE del anfitrion antes de recuperar imagenes anteriores ---
+function ConvertTo-AIOHostWinREPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    $value = $Path.Trim().Replace('/', '\')
+    if ($value.StartsWith('\??\', [StringComparison]::OrdinalIgnoreCase)) {
+        $value = '\\?\' + $value.Substring(4)
+    } elseif ($value.StartsWith('\Device\', [StringComparison]::OrdinalIgnoreCase)) {
+        $value = '\\?\GLOBALROOT' + $value
+    }
+    if ($value.StartsWith('\\?\UNC\', [StringComparison]::OrdinalIgnoreCase)) {
+        $value = '\\' + $value.Substring(8)
+    } elseif ($value.StartsWith('\\?\') -and $value.Substring(4) -match '^[A-Za-z]:\\') {
+        $value = $value.Substring(4)
+    }
+    # Nunca convertir GLOBALROOT/Volume en una ruta relativa al directorio actual.
+    if ($value -notmatch '^(?:[A-Za-z]:\\|\\\\)' -or $value -match '(?:^|\\)\.\.?(?:\\|$)') { return '' }
+    return $value.TrimEnd('\')
+}
+
+function Initialize-AIOHostWinREPathNative {
+    if (([System.Management.Automation.PSTypeName]'AIOHostWinREPathNative').Type) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+public static class AIOHostWinREPathNative {
+    [DllImport("kernel32.dll", EntryPoint="CreateFileW", ExactSpelling=true, CharSet=CharSet.Unicode, SetLastError=true)]
+    private static extern SafeFileHandle CreateFile(string path, uint access, uint share,
+        IntPtr security, uint creation, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", EntryPoint="GetFinalPathNameByHandleW", ExactSpelling=true, CharSet=CharSet.Unicode, SetLastError=true)]
+    private static extern uint GetFinalPathNameByHandle(SafeFileHandle handle, StringBuilder path, uint length, uint flags);
+    public static string Resolve(string path) {
+        // Solo consulta: acceso 0, compartir lectura/escritura/borrado, OPEN_EXISTING.
+        using (SafeFileHandle handle = CreateFile(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+            if (handle.IsInvalid) { throw new Win32Exception(Marshal.GetLastWin32Error()); }
+            StringBuilder buffer = new StringBuilder(1024);
+            uint length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 2);
+            if (length == 0) { throw new Win32Exception(Marshal.GetLastWin32Error()); }
+            if (length >= buffer.Capacity) {
+                buffer = new StringBuilder(checked((int)length + 1));
+                length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 2);
+                if (length == 0) { throw new Win32Exception(Marshal.GetLastWin32Error()); }
+                if (length >= buffer.Capacity) { throw new InvalidOperationException("La ruta cambio durante la consulta."); }
+            }
+            return buffer.ToString(); // VOLUME_NAME_NT: no depende de letras de unidad.
+        }
+    }
+}
+'@ -ErrorAction Stop | Out-Null
+}
+
+function Get-AIOHostWinREPathIdentity {
+    param([string]$Path)
+    $normalized = ConvertTo-AIOHostWinREPath $Path
+    if (-not $normalized) { return '' }
+    try {
+        # FILE_FLAG_BACKUP_SEMANTICS solo aprovecha privilegios ya activados.
+        Enable-Privileges -Privileges @('SeBackupPrivilege')
+        Initialize-AIOHostWinREPathNative
+        return [AIOHostWinREPathNative]::Resolve($normalized).TrimEnd('\')
+    } catch {
+        # Una coincidencia de nombres o rutas inaccesibles no prueba identidad.
+        return ''
+    }
+}
+
+function Invoke-AIOHostWinREReAgent {
+    param([Parameter(Mandatory=$true)][string[]]$Arguments)
+    $systemFolder = 'System32'
+    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { $systemFolder = 'Sysnative' }
+    $exe = Join-Path $env:SystemRoot "$systemFolder\reagentc.exe"
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $global:LASTEXITCODE = $null
+    $lines = @(& $exe @Arguments 2>&1 | ForEach-Object { $_.ToString() })
+    $exitCode = $global:LASTEXITCODE
+    if ($null -eq $exitCode) { throw 'No se pudo ejecutar reagentc.exe del anfitrion.' }
+    [pscustomobject]@{ ExitCode=[int]$exitCode; Lines=$lines }
+}
+
+function Get-AIOHostWinREAgentDocument {
+    $xmlPath = Join-Path $env:SystemRoot 'System32\Recovery\ReAgent.xml'
+    if (-not (Test-Path -LiteralPath $xmlPath -PathType Leaf)) { return $null }
+    $document = New-Object System.Xml.XmlDocument
+    $document.XmlResolver = $null
+    $document.LoadXml((Get-Content -LiteralPath $xmlPath -Raw -ErrorAction Stop))
+    if ($null -eq $document.SelectSingleNode('/WindowsRE')) { throw 'ReAgent.xml no contiene la configuracion WindowsRE esperada.' }
+    return ,$document
+}
+
+function Get-AIOHostWinREMountHint {
+    # Este dato solo elige ReAgentC DESPUES de confirmar el archivo en DISM.
+    $document = Get-AIOHostWinREAgentDocument
+    if ($null -eq $document) { return '' }
+    return ConvertTo-AIOHostWinREPath ([string]$document.WindowsRE.WinreMount.path)
+}
+
+function Get-AIOHostWinRELocationPaths {
+    param([Parameter(Mandatory=$true)][System.Xml.XmlElement]$Location)
+    # Los GUID de ReAgent.xml identifican DISCOS, no nombres Volume{GUID}.
+    # En MBR, id es la firma del disco; offset identifica su particion.
+    $relative = $Location.GetAttribute('path').Replace('/', '\')
+    if ([string]::IsNullOrWhiteSpace($relative) -or $relative.StartsWith('\\') -or
+        $relative -match '[:*?"<>|\x00-\x1f]' -or $relative -match '(?:^|\\)\.\.?(?:\\|$)') { return }
+    $relative = $relative.Trim('\')
+    if (-not $relative) { return }
+    if (-not $relative.EndsWith('\winre.wim', [StringComparison]::OrdinalIgnoreCase) -and $relative -ine 'winre.wim') {
+        $relative += '\winre.wim'
+    }
+    $diskGuid = [guid]::Empty
+    $offset = [uint64]0
+    if (-not [guid]::TryParse($Location.GetAttribute('guid'), [ref]$diskGuid) -or
+        -not [uint64]::TryParse($Location.GetAttribute('offset'), [Globalization.NumberStyles]::None,
+            [Globalization.CultureInfo]::InvariantCulture, [ref]$offset) -or $offset -eq 0) { return }
+    if ($diskGuid -ne [guid]::Empty) {
+        $disks = @(Get-Disk -ErrorAction Stop | Where-Object {
+            $candidateGuid = [guid]::Empty
+            ([string]$_.PartitionStyle -in @('GPT','2')) -and
+                [guid]::TryParse([string]$_.Guid, [ref]$candidateGuid) -and $candidateGuid -eq $diskGuid
+        })
+    } else {
+        $signature = [uint32]0
+        if (-not [uint32]::TryParse($Location.GetAttribute('id'), [Globalization.NumberStyles]::None,
+            [Globalization.CultureInfo]::InvariantCulture, [ref]$signature) -or $signature -eq 0) { return }
+        $disks = @(Get-Disk -ErrorAction Stop | Where-Object {
+            ([string]$_.PartitionStyle -in @('MBR','1')) -and $_.Signature -eq $signature
+        })
+    }
+    if ($disks.Count -gt 1) { throw 'Varios discos coinciden con ReAgent.xml. No se puede confirmar el origen de WinRE.' }
+    if ($disks.Count -eq 0) { return }
+    $diskNumber = [uint32]0
+    if (-not [uint32]::TryParse([string]$disks[0].Number, [ref]$diskNumber)) { return }
+    $partitions = @(Get-Partition -DiskNumber $diskNumber -ErrorAction Stop | Where-Object {
+        $_.DiskNumber -eq $diskNumber -and $_.Offset -eq $offset
+    })
+    if ($partitions.Count -gt 1) { throw 'Varias particiones coinciden con ReAgent.xml. No se puede confirmar el origen de WinRE.' }
+    if ($partitions.Count -eq 0) { return }
+    $roots = @($partitions[0].AccessPaths)
+    # GLOBALROOT permite consultar una particion sin asignarle letra ni montarla.
+    $partitionNumber = [uint32]0
+    if ([uint32]::TryParse([string]$partitions[0].PartitionNumber, [ref]$partitionNumber) -and $partitionNumber -gt 0) {
+        $roots += "\\?\GLOBALROOT\device\harddisk$diskNumber\partition$partitionNumber\"
+    }
+    @($roots | ForEach-Object {
+        if (-not [string]::IsNullOrWhiteSpace($_)) {
+            $path = ConvertTo-AIOHostWinREPath (([string]$_).TrimEnd('\') + '\' + $relative)
+            if ($path) { $path }
+        }
+    } | Sort-Object -Unique)
+}
+
+function Get-AIOHostWinREConfiguration {
+    if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw 'No se conoce SystemRoot del anfitrion.' }
+    $query = Invoke-AIOHostWinREReAgent -Arguments @('/info')
+    if ($query.ExitCode -ne 0) { throw "reagentc /info fallo (codigo $($query.ExitCode))." }
+    $locations = @($query.Lines | ForEach-Object {
+        # Acepta, entre otros, Windows RE location / Ubicacion de Windows RE.
+        # No confundir Recovery image location (otra imagen) con Windows RE.
+        if ($_ -match '^\s*[^:]*Windows\s*RE[^:]*:\s*(?<location>.*?)\s*$') {
+            $path = ConvertTo-AIOHostWinREPath $matches['location']
+            if ($path) { $path }
+        }
+    } | Sort-Object -Unique)
+    if ($locations.Count -gt 1) { throw 'reagentc /info devolvio varias ubicaciones de Windows RE; no se elegira una por suposicion.' }
+    $registeredPath = ''
+    if ($locations.Count -eq 1) {
+        $registeredPath = $locations[0]
+        if (-not $registeredPath.EndsWith('\winre.wim', [StringComparison]::OrdinalIgnoreCase)) { $registeredPath += '\winre.wim' }
+    }
+    $registeredPaths = @()
+    $registeredKeys = @()
+    if ($registeredPath) {
+        $registeredPaths += $registeredPath
+        $key = Get-AIOHostWinREPathIdentity $registeredPath
+        if ($key) { $registeredKeys += $key }
+    }
+    $document = Get-AIOHostWinREAgentDocument
+    $mountHint = ''
+    if ($null -ne $document) {
+        $mountHint = ConvertTo-AIOHostWinREPath ([string]$document.WindowsRE.WinreMount.path)
+        foreach ($name in @('WinreLocation', 'ImageLocation')) {
+            $nodes = @($document.SelectNodes("/WindowsRE/$name"))
+            if ($nodes.Count -gt 1) { throw "ReAgent.xml contiene varios nodos $name; el origen es ambiguo." }
+            if ($nodes.Count -eq 0) { continue }
+            $paths = @(Get-AIOHostWinRELocationPaths -Location $nodes[0])
+            $keys = @($paths | ForEach-Object { Get-AIOHostWinREPathIdentity $_ } | Where-Object { $_ } | Sort-Object -Unique)
+            if ($keys.Count -gt 1) { throw "Las rutas de la particion de $name resuelven a archivos diferentes. Se conserva el montaje." }
+            $registeredPaths += $paths
+            $registeredKeys += $keys
+        }
+    }
+    $registeredPaths = @($registeredPaths | Sort-Object -Unique)
+    $registeredKeys = @($registeredKeys | Sort-Object -Unique)
+    $stagedPath = ConvertTo-AIOHostWinREPath (Join-Path $env:SystemRoot 'System32\Recovery\winre.wim')
+    [pscustomobject]@{
+        RegisteredPath  = $registeredPath
+        RegisteredKey   = if ($registeredKeys.Count) { $registeredKeys[0] } else { '' }
+        RegisteredPaths = $registeredPaths
+        RegisteredKeys  = $registeredKeys
+        StagedPath      = $stagedPath
+        StagedKey       = Get-AIOHostWinREPathIdentity $stagedPath
+        ReAgentMount    = $mountHint
+    }
+}
+
+function Get-AIOHostWinREMountMatch {
+    param([Parameter(Mandatory=$true)]$Mount, [Parameter(Mandatory=$true)]$Configuration)
+    $mountPath = ConvertTo-AIOHostWinREPath $Mount.MountDir
+    $imagePath = ConvertTo-AIOHostWinREPath $Mount.ImageFile
+    $imageKey = Get-AIOHostWinREPathIdentity $Mount.ImageFile
+    $registered = $imageKey -and (@($Configuration.RegisteredKeys) -icontains $imageKey)
+    $staged = $imageKey -and $Configuration.StagedKey -and $imageKey -ieq $Configuration.StagedKey
+    $hintMatches = $mountPath -and $Configuration.ReAgentMount -and $mountPath -ieq $Configuration.ReAgentMount
+    [pscustomobject]@{
+        Confirmed  = [bool]($registered -or $staged)
+        Suspected  = [bool]($hintMatches -or ([string]$Mount.ImageFile -match '(?i)(?:^|[\\/])winre\.wim$') -or
+            ($imagePath -and $imagePath -in (@($Configuration.RegisteredPaths) + @($Configuration.StagedPath))))
+        UseReAgent = [bool](($registered -or $staged) -and $hintMatches -and $Mount.ImageIndex -eq 1)
+        ImageKey   = $imageKey
+        MountPath  = $mountPath
+    }
+}
+
+function Test-AIOHostWinREProtectedMount {
+    param([string]$Path, $Mount = $null)
+    if ($Script:AIOHostWinRECheckFailed) { return $true }
+    # Tambien excluir un WinRE que aparezca entre la comprobacion y la recuperacion.
+    # El nombre solo sirve para CONSERVAR; nunca autoriza un desmontaje.
+    if ($null -ne $Mount -and [string]$Mount.ImageFile -match '(?i)(?:^|[\\/])winre\.wim$') { return $true }
+    $normalized = ConvertTo-AIOHostWinREPath $Path
+    return [bool]($normalized -and $Script:AIOHostWinREProtectedMounts -icontains $normalized)
+}
+
+function Read-AIOHostWinREUnmountChoice {
+    param([Parameter(Mandatory=$true)]$Mount)
+    if ($Mount.ReadWrite -eq 'Yes') {
+        Write-Host '  [1] Guardar cambios y desmontar (/Commit)' -ForegroundColor Green
+        Write-Host '  [2] Descartar TODOS los cambios pendientes y desmontar (/Discard)' -ForegroundColor Yellow
+    } else {
+        Write-Host '  [1] Desmontar la imagen de solo lectura' -ForegroundColor Green
+    }
+    Write-Host '  [3] Conservar montado (Enter = conservar)' -ForegroundColor Cyan
+    while ($true) {
+        $choice = ([string](Read-Host 'Selecciona una opcion' -ErrorAction Stop)).Trim()
+        if ($choice -eq '' -or $choice -eq '3') { return 'Keep' }
+        if ($choice -eq '1') {
+            if ($Mount.ReadWrite -eq 'Yes') { return 'Commit' }
+            return 'Discard' # DISM exige Discard para cerrar una imagen de solo lectura.
+        }
+        if ($choice -eq '2' -and $Mount.ReadWrite -eq 'Yes') { return 'Discard' }
+        Write-Host 'Opcion no valida. No se ha modificado el montaje.' -ForegroundColor Yellow
+    }
+}
+
+function Dismount-AIOHostWinREBeforeMenu {
+    $Script:AIOHostWinREProtectedMounts = @()
+    $Script:AIOHostWinRECheckFailed = $false
+    $Script:AIOHostWinREAttentionRequired = $false
+    try {
+        $mounts = @(Get-AIOMountedImages)
+        if ($mounts.Count -eq 0) { return }
+        $configuration = Get-AIOHostWinREConfiguration
+    } catch {
+        $Script:AIOHostWinRECheckFailed = $true
+        $Script:AIOHostWinREAttentionRequired = $true
+        Write-Warning "No se pudo verificar el WinRE del host. Se omite la recuperacion automatica de montajes: $($_.Exception.Message)"
+        Write-Log -LogLevel WARN -Message "HostWinRECheck: Comprobacion incompleta; montajes intactos. $($_.Exception.Message)"
+        return
+    }
+
+    foreach ($mount in $mounts) {
+        try {
+            $match = Get-AIOHostWinREMountMatch -Mount $mount -Configuration $configuration
+            if (-not $match.Confirmed -and -not $match.Suspected) { continue }
+            if (-not $match.MountPath) { throw 'DISM devolvio una carpeta de montaje no valida.' }
+            $Script:AIOHostWinREProtectedMounts += $match.MountPath
+            if (-not $match.Confirmed) {
+                $Script:AIOHostWinREAttentionRequired = $true
+                Write-Warning "No se confirmo que '$($mount.ImageFile)' pertenezca al host. Se conserva '$($mount.MountDir)' y no se recupera automaticamente."
+                Write-Log -LogLevel WARN -Message "HostWinRECheck: Origen no confirmado; se conserva '$($mount.MountDir)' ($($mount.ImageFile))."
+                continue
+            }
+            Write-Host "`n[!] WinRE del anfitrion confirmado:" -ForegroundColor Yellow
+            Write-Host "    Archivo : $($mount.ImageFile)" -ForegroundColor Gray
+            Write-Host "    Montaje : $($mount.MountDir) | Indice: $($mount.ImageIndex) | Estado: $($mount.Status)" -ForegroundColor Gray
+            if ($mount.Status -ne 'OK' -or $mount.ReadWrite -notin @('Yes','No') -or $mount.ImageIndex -lt 1) {
+                $Script:AIOHostWinREAttentionRequired = $true
+                Write-Warning 'El montaje requiere revision manual. Se conserva sin intentar reparar ni descartar cambios.'
+                Write-Log -LogLevel WARN -Message "HostWinRECheck: Se conserva '$($mount.MountDir)'; estado/permisos/indice no aptos para desmontaje."
+                continue
+            }
+            $choice = Read-AIOHostWinREUnmountChoice -Mount $mount
+            if ($choice -eq 'Keep') {
+                $Script:AIOHostWinREAttentionRequired = $true
+                Write-Log -LogLevel INFO -Message "HostWinRECheck: Usuario conserva '$($mount.MountDir)'; excluido de recuperacion automatica."
+                continue
+            }
+
+            # Otra herramienta puede haber cambiado la carpeta durante la pregunta.
+            # Revalidar inventario, origen del host, indice, permisos y metodo.
+            $current = Get-AIOMountForPath -Mounts @(Get-AIOMountedImages) -Path $mount.MountDir
+            if ($null -eq $current) {
+                Write-Host 'El montaje ya no figura en DISM; no se ejecutara ningun desmontaje.' -ForegroundColor Gray
+                continue
+            }
+            $freshConfig = Get-AIOHostWinREConfiguration
+            $fresh = Get-AIOHostWinREMountMatch -Mount $current -Configuration $freshConfig
+            if (-not $fresh.Confirmed -or $fresh.ImageKey -ine $match.ImageKey -or
+                $fresh.MountPath -ine $match.MountPath -or $fresh.UseReAgent -ne $match.UseReAgent -or
+                $current.ImageIndex -ne $mount.ImageIndex -or $current.ReadWrite -ne $mount.ReadWrite -or
+                $current.Status -ne 'OK' -or -not (Test-Path -LiteralPath $current.MountDir -PathType Container)) {
+                throw 'El montaje o la configuracion de WinRE cambio. Se cancelo el desmontaje para no actuar sobre otra imagen.'
+            }
+
+            Write-Host "[+] Desmontando WinRE del host (/$choice)..." -ForegroundColor Cyan
+            Write-Log -LogLevel ACTION -Message "HostWinRECheck: Usuario eligio /$choice para '$($current.MountDir)' ($($current.ImageFile))."
+            # No descargar colmenas ajenas ni usar Cleanup-Mountpoints. Si otro
+            # proceso mantiene archivos abiertos, conservar el error y el montaje.
+            if ($fresh.UseReAgent) {
+                $result = Invoke-AIOConsoleSystemTool -Tool 'reagentc.exe' -Arguments @('/unmountre','/path',$current.MountDir,"/$choice")
+            } else {
+                $result = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments @('/Unmount-Image',"/MountDir:$($current.MountDir)","/$choice",'/English')
+            }
+
+            # El codigo de salida no reemplaza a la comprobacion del inventario.
+            $remaining = Get-AIOMountForPath -Mounts @(Get-AIOMountedImages) -Path $current.MountDir
+            if ($result.ExitCode -ne 0) { throw "El desmontaje devolvio el codigo $($result.ExitCode). No se reintentara con otro metodo ni se descartaran cambios automaticamente." }
+            if ($null -ne $remaining) { throw 'DISM sigue registrando la carpeta. El desmontaje no se considera confirmado.' }
+            if ($fresh.UseReAgent -and (Get-AIOHostWinREMountHint) -ieq $match.MountPath) {
+                throw 'DISM ya no registra la carpeta, pero ReAgent.xml conserva el montaje. Se requiere revision manual.'
+            }
+            Write-Host '[OK] Desmontaje del WinRE del host verificado.' -ForegroundColor Green
+            Write-Log -LogLevel INFO -Message "HostWinRECheck: /$choice completado y ausencia en DISM verificada: '$($current.MountDir)'."
+        } catch {
+            # No declarar exito ni permitir que las rutas posteriores adopten
+            # imagenes cuyo estado/origen no se pudo comprobar en esta sesion.
+            $Script:AIOHostWinRECheckFailed = $true
+            $Script:AIOHostWinREAttentionRequired = $true
+            Write-Warning "No se confirmo el desmontaje de '$($mount.MountDir)': $($_.Exception.Message)"
+            Write-Log -LogLevel ERROR -Message "HostWinRECheck: Se suspende la recuperacion automatica. $($_.Exception.Message)"
+            return
+        }
+    }
+}
+
+
 # =================================================================
 #  Verificacion de Montaje Existente
 # =================================================================
@@ -3709,13 +4220,17 @@ $Script:IMAGE_MOUNTED = 0; $Script:WIM_FILE_PATH = $null; $Script:MOUNTED_INDEX 
 
 Write-Host "Verificando imagenes montadas..." -ForegroundColor Gray
 
+# --- PASO 0: COMPROBAR WINRE DEL HOST Y ELEGIR QUE HACER CON SUS CAMBIOS ---
+Dismount-AIOHostWinREBeforeMenu
+
 # --- PASO 1: DETECCION WIM/ESD (DISM) ---
 try {
     $mounts = @(Get-AIOMountedImages)
     # Asociar ruta, archivo, indice y estado del MISMO bloque de DISM.
     # Solo retomar la carpeta configurada; no apropiarse de montajes de Info WIM.
     $current = Get-AIOMountForPath -Mounts $mounts -Path $Script:MOUNT_DIR
-    if ($null -ne $current -and $current.Status -eq 'OK' -and $current.ReadWrite -eq 'Yes' -and
+    if (-not (Test-AIOHostWinREProtectedMount -Path $Script:MOUNT_DIR -Mount $current) -and
+        $null -ne $current -and $current.Status -eq 'OK' -and $current.ReadWrite -eq 'Yes' -and
         $current.ImageIndex -gt 0 -and -not [string]::IsNullOrWhiteSpace($current.ImageFile) -and
         (Test-Path -LiteralPath $current.MountDir -PathType Container)) {
         $Script:IMAGE_MOUNTED = 1
@@ -3730,7 +4245,7 @@ try {
 
 # --- PASO 2: DETECCION VHD/VHDX (Powershell Storage) ---
 # Solo buscamos VHD si no encontramos un WIM montado (Prioridad WIM)
-if ($Script:IMAGE_MOUNTED -eq 0) {
+if ($Script:IMAGE_MOUNTED -eq 0 -and -not $Script:AIOHostWinRECheckFailed) {
     try {
         # 1. Obtener discos virtuales
         # Buscamos discos cuyo BusType sea virtual o el modelo indique que lo es
@@ -3780,7 +4295,7 @@ if ($Script:IMAGE_MOUNTED -eq 0) {
 
 # --- REPORTE FINAL ---
 if ($Script:IMAGE_MOUNTED -eq 0) {
-    Write-Log -LogLevel INFO -Message "No se encontraron imagenes montadas previamente."
+    Write-Log -LogLevel INFO -Message "No se recupero ninguna imagen previa para edicion."
 } elseif ($Script:IMAGE_MOUNTED -eq 1) {
     Write-Host "Imagen WIM encontrada: $($Script:WIM_FILE_PATH)" -ForegroundColor Yellow
     Write-Host "Indice: $($Script:MOUNTED_INDEX) | Montada en: $($Script:MOUNT_DIR)" -ForegroundColor Yellow
@@ -3802,11 +4317,12 @@ Check-And-Repair-Mounts
 # =============================================
 #  Punto de Entrada: Iniciar el Menu Principal
 # =============================================
-# REGISTRO DE EVENTO DE SALIDA (Para capturar cierre de ventana "X")
+# EVENTO DE SALIDA CONTROLADA POR POWERSHELL.
+# No se dispara al cerrar la ventana con "X". La limpieza normal esta en finally.
 $OnExitScript = {
     # Solo intentamos desmontar si detectamos que se quedaron montados
     if (Test-Path "Registry::HKLM\OfflineSystem") {
-        Write-Host "`n[EVENTO SALIDA] Detectado cierre inesperado. Limpiando Hives..." -ForegroundColor Red
+        Write-Host "`n[EVENTO SALIDA] Finalizando la sesion. Limpiando Hives..." -ForegroundColor Red
         # Invocamos la logica de desmontaje directamente (sin llamar a la funcion para evitar conflictos de scope)
         $hives = @("HKLM\OfflineSystem", "HKLM\OfflineSoftware", "HKLM\OfflineComponents", "HKLM\OfflineDefaultUser", "HKLM\OfflineUser", "HKLM\OfflineUserClasses")
         foreach ($h in $hives) { 
@@ -3883,11 +4399,16 @@ finally {
     # ESTO SE EJECUTA SIEMPRE: Ya sea que salgas bien, por error, o con CTRL+C
     Write-Host "`n[SISTEMA] Finalizando y asegurando limpieza..." -ForegroundColor DarkGray
     
-    # 1. Asegurar descarga de Hives
-    Unmount-Hives
-    
-    # 2. Desregistrar el evento para no dejar basura en la sesion de PS
-    Unregister-Event -SourceIdentifier PowerShell.Exiting -ErrorAction SilentlyContinue
-    
+    try {
+        # No ocultar el error si alguna colmena sigue cargada.
+        Unmount-Hives
+    } finally {
+        Unregister-Event -SourceIdentifier PowerShell.Exiting -Force -ErrorAction SilentlyContinue
+    }
     Write-Log -LogLevel INFO -Message "Cierre de sesion completado."
+}
+} finally {
+    # Se ejecuta incluso si falla Unmount-Hives, el evento o el arranque.
+    # La liberacion es idempotente para las rutas que ya cerraron su handle.
+    Release-SingleInstanceMutex
 }
