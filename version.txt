@@ -1,3 +1,11 @@
+1.5.13
+====================================================
+- Inicio: comprobacion del WinRE del equipo antes de recuperar imagenes montadas. Un montaje de DISM se considera WinRE del equipo solo si reagentc /info y ReAgent.xml confirman el mismo archivo real (no por nombre). Se muestra el archivo, el montaje, el indice y el estado, y se permite guardar los cambios (/Commit), descartarlos (/Discard) o conservar el montaje (Enter). Nunca desmonta si el origen no se confirma o la configuracion cambio durante la consulta; tras desmontar verifica que DISM ya no lo registre y que ReAgent.xml no conserve el montaje. Los montajes conservados se excluyen de la recuperacion automatica y el menu principal muestra un aviso.
+- Dashboard: deteccion de entorno mejorada. Distingue Windows, WinPE, WinRE e Instalador de Windows (Setup) combinando el Registro offline, los metadatos del indice WIM montado y los archivos caracteristicos (winpeshl, wpeinit, recenv, setup.exe). Muestra Rol y Deteccion, prioriza el contenido montado si el nombre del WIM discrepa, no atribuye version comercial a WinPE/WinRE y evita las consultas de edicion de DISM en entornos PE.
+- Instancia unica: si no se puede adquirir el bloqueo global, el programa no continua para proteger las imagenes montadas y las colmenas offline. Se contempla el bloqueo abandonado tras un cierre forzoso y se libera en todas las salidas, incluidos los errores de inicio.
+- Privilegios y comandos del sistema: la activacion de privilegios usa una implementacion nativa propia, reintenta los fallos y los informa. dism.exe y reagentc.exe del equipo se ejecutan desde la carpeta correcta del sistema (Sysnative en procesos de 32 bits), con argumentos protegidos y conservando el progreso de DISM en consola.
+====================================================
+
 1.5.12
 ====================================================
 - Editar Indices: nueva opcion Integrar y ordenar indices (Modulo-IntegrarIndices.ps1). Combina indices de varias fuentes WIM/ESD en un nuevo WIM. Los indices se agrupan automaticamente por arquitectura (x86, x64, ARM64, con separadores visuales) y Subir/Bajar ordena solo dentro de cada grupo; el orden de la tabla Orden final es la numeracion resultante. Los duplicados reciben sufijo numerico, se puede marcar un indice WinPE como arranque y elegir compresion LZX, XPRESS o ninguna.
