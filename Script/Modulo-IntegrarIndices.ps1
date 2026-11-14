@@ -1,6 +1,56 @@
-﻿#requires -Version 5.1
-# Integracion y orden de indices. Extension de AdminImagenOffline, GPLv3.
-# No modifica fuentes ni el estado de montaje global. Carga sin efectos laterales.
+﻿# =================================================================
+#  Modulo-IntegrarIndices
+#
+#  CONTENIDO   : Show-AIOIndexIntegrator (GUI) y sus funciones de apoyo
+#                (lectura del catalogo de indices, plan de salida, grupos por
+#                arquitectura, metadatos por indice, validacion,
+#                compatibilidad y exportacion con wimlib)
+#  DEPENDENCIAS DEL NUCLEO (heredadas via dot-source):
+#    - $Script:IMAGE_MOUNTED  : estado de montaje (1 = WIM); solo se consulta
+#    - $Script:WIM_FILE_PATH  : ruta de la imagen montada; se usa para rechazar
+#                               una fuente que este montada en la aplicacion
+#  DEPENDENCIAS DEL MODULO:
+#    - Metadata-Comun.ps1     : se carga al inicio con dot-source; aporta el
+#                               perfil de Windows, las plantillas de edicion,
+#                               la validacion y el editor de metadatos
+#  DEPENDENCIAS EXTERNAS:
+#    - wimlib-imagex.exe      : en Tools\wimlib o en PATH (lectura, exportacion
+#                               y verificacion de los WIM)
+#  CARGA       : . "$PSScriptRoot\Modulo-IntegrarIndices.ps1"
+#
+#  NOTA: Esta funcion NO requiere imagen montada ($Script:IMAGE_MOUNTED).
+#  Las fuentes WIM/ESD se abren solo para lectura y nunca se modifican; el
+#  modulo no cambia el estado de montaje global y es autocontenido (usa su
+#  propio registro .log junto al destino en lugar de Write-Log). Carga sin
+#  efectos laterales.
+#
+#  NO modificar las firmas de funcion; el nucleo las invoca por nombre.
+#
+# ==============================================================================
+# Copyright (C) 2026 SOFTMAXTER
+#
+# DUAL LICENSING NOTICE:
+# This software is dual-licensed. By default, AdminImagenOffline is 
+# distributed under the GNU General Public License v3.0 (GPLv3).
+# 
+# 1. OPEN SOURCE (GPLv3):
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details: <https://www.gnu.org/licenses/>.
+#
+# 2. COMMERCIAL LICENSE:
+# If you wish to integrate this software into a proprietary/commercial product, 
+# distribute it without revealing your source code, or require commercial 
+# support, you must obtain a commercial license from the original author.
+#
+# Please contact softmaxter@hotmail.com for commercial licensing inquiries.
+# ==============================================================================
 
 . (Join-Path $PSScriptRoot 'Metadata-Comun.ps1')
 

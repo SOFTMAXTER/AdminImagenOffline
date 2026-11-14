@@ -1,6 +1,51 @@
-﻿#requires -Version 5.1
-# Logica compartida por Metadata e IntegrarIndices. AdminImagenOffline, GPLv3.
-# La carga solo declara funciones; no abre ventanas ni modifica imagenes.
+﻿# =================================================================
+#  Metadata-Comun
+#
+#  CONTENIDO   : Get-AIOWimImageProfile, Get-AIOWimEditionChoices,
+#                Get-AIOWimMetadataTemplate, Assert-AIOWimMetadata y
+#                Show-AIOWimMetadataDraftEditor (logica de metadatos
+#                compartida por Modulo-Metadata y Modulo-IntegrarIndices)
+#  DEPENDENCIAS DEL NUCLEO: ninguna (no usa variables $Script: ni Write-Log)
+#  DEPENDENCIAS EXTERNAS:
+#    - Catalogo de ediciones (Catalogos\Ediciones.ps1, Modulo-Ediciones.ps1 o
+#      Ediciones.ps1, junto a este archivo): provee Get-WindowsEditionMetadata
+#      y solo se carga al aplicar una plantilla; sin el, los metadatos se
+#      pueden introducir manualmente
+#  CARGA       : . (Join-Path $PSScriptRoot 'Metadata-Comun.ps1')
+#                (desde Modulo-Metadata.ps1 y Modulo-IntegrarIndices.ps1)
+#
+#  NOTA: No lleva el prefijo Modulo-, por lo que el nucleo no lo carga por su
+#  cuenta; lo cargan los modulos que lo usan. Al cargarse solo declara
+#  funciones: no abre ventanas ni modifica imagenes. El editor de borrador
+#  solo devuelve datos al aceptar; cancelar nunca modifica la imagen.
+#
+#  NO modificar las firmas de funcion; los modulos las invocan por nombre.
+#
+# ==============================================================================
+# Copyright (C) 2026 SOFTMAXTER
+#
+# DUAL LICENSING NOTICE:
+# This software is dual-licensed. By default, AdminImagenOffline is 
+# distributed under the GNU General Public License v3.0 (GPLv3).
+# 
+# 1. OPEN SOURCE (GPLv3):
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details: <https://www.gnu.org/licenses/>.
+#
+# 2. COMMERCIAL LICENSE:
+# If you wish to integrate this software into a proprietary/commercial product, 
+# distribute it without revealing your source code, or require commercial 
+# support, you must obtain a commercial license from the original author.
+#
+# Please contact softmaxter@hotmail.com for commercial licensing inquiries.
+# ==============================================================================
 
 function Get-AIOWimImageProfile {
     param([object]$Image)
