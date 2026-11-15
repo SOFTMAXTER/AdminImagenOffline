@@ -4198,6 +4198,11 @@ function Dismount-AIOHostWinREBeforeMenu {
             if ($fresh.UseReAgent -and (Get-AIOHostWinREMountHint) -ieq $match.MountPath) {
                 throw 'DISM ya no registra la carpeta, pero ReAgent.xml conserva el montaje. Se requiere revision manual.'
             }
+            # Liberar solo esta ruta una vez verificadas todas las condiciones.
+            # Los montajes conservados o pendientes siguen protegidos.
+            $Script:AIOHostWinREProtectedMounts = @(
+                $Script:AIOHostWinREProtectedMounts | Where-Object { $_ -ine $match.MountPath }
+            )
             Write-Host '[OK] Desmontaje del WinRE del host verificado.' -ForegroundColor Green
             Write-Log -LogLevel INFO -Message "HostWinRECheck: /$choice completado y ausencia en DISM verificada: '$($current.MountDir)'."
         } catch {
