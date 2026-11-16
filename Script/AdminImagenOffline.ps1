@@ -1737,6 +1737,124 @@ function Updates-Languages-Menu {
     }
 }
 
+# Clasificacion conservadora: un proceso terminado no equivale a un analisis valido.
+function Get-AIOSfcAssessment {
+    param(
+        [AllowNull()][object]$ExitCode,
+        [bool]$LogReadSucceeded,
+        [int]$Batches,
+        [int]$CompletedBatches,
+        [int]$FailureCount,
+        [int]$ChangeCount,
+        [string]$ExecutionError = ''
+    )
+    $status = 'Indeterminate'; $success = $false; $level = 'WARN'; $color = 'Yellow'
+    $message = 'Resultado no confirmado: falta el codigo de salida o un log de verificacion completo.'
+    if ($ExecutionError) {
+        $status = 'Failed'; $level = 'ERROR'; $color = 'Red'
+        $message = "No se pudo completar o supervisar SFC: $ExecutionError"
+    } elseif ($null -ne $ExitCode -and [int]$ExitCode -ne 0) {
+        $status = 'Failed'; $level = 'ERROR'; $color = 'Red'
+        $message = "SFC termino con codigo $ExitCode. Revisa la salida y el log detallado."
+    } elseif ($null -ne $ExitCode -and $LogReadSucceeded -and $Batches -gt 0 -and $CompletedBatches -eq $Batches) {
+        if ($FailureCount -gt 0) {
+            $status = 'ReviewRequired'
+            $message = 'SFC registro incidencias de reparacion; se requiere revisar el detalle antes de continuar.'
+        } elseif ($ChangeCount -gt 0) {
+            $status = 'CompletedWithChanges'; $success = $true
+            $message = 'SFC finalizo con eventos de reparacion o cambios. Consulta el detalle.'
+        } else {
+            $status = 'NoIssuesReported'; $success = $true; $level = 'INFO'; $color = 'Green'
+            $message = 'Verificacion completa sin incidencias de integridad registradas.'
+        }
+    }
+    [pscustomobject]@{ Status=$status; Success=$success; LogLevel=$level; Color=$color; Message=$message }
+}
+
+function Get-AIODismHealthState {
+    param([string]$Text)
+    # /English hace estables estos mensajes incluso en anfitriones en espanol.
+    if ($Text -match '(?i)component store (?:cannot be repaired|is not repairable)') { return 'NonRepairable' }
+    if ($Text -match '(?i)component store is repairable') { return 'Repairable' }
+    if ($Text -match '(?i)no component store corruption detected') { return 'Healthy' }
+    return 'Unknown'
+}
+
+function Invoke-AIOImageHealthCheck {
+    param(
+        [Parameter(Mandatory=$true)][string]$MountDir,
+        [Parameter(Mandatory=$true)][ValidateSet('CheckHealth','ScanHealth')][string]$Mode
+    )
+    $healthLogDir = if ($script:logDir -and (Test-Path -LiteralPath $script:logDir -PathType Container)) {
+        $script:logDir
+    } else { [IO.Path]::GetTempPath() }
+    $stamp = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
+    $healthLog = Join-Path $healthLogDir "DISM_${Mode}_${stamp}.log"
+    $consoleLog = Join-Path $healthLogDir "DISM_${Mode}_${stamp}_salida.log"
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    $progressLine = @{ Active = $false; Width = 0 }
+    $exitCode = $null; $healthState = 'Unknown'; $runError = ''
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /$Mode; Imagen='$MountDir'; Log='$healthLog'."
+    try {
+        if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw 'SystemRoot no disponible.' }
+        $systemFolder = if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { 'Sysnative' } else { 'System32' }
+        $exe = Join-Path $env:SystemRoot "$systemFolder\dism.exe"
+        $argsDism = @("/Image:$MountDir", '/Cleanup-Image', "/$Mode", '/English', "/LogPath:$healthLog")
+        # Recoger stdout/stderr y el codigo inmediatamente; no heredar LASTEXITCODE de otra operacion.
+        $global:LASTEXITCODE = $null
+        $PSNativeCommandUseErrorActionPreference = $false
+        & $exe @argsDism 2>&1 | ForEach-Object {
+            $lineText = [string]$_
+            [void]$lines.Add($lineText)
+            # DISM usa retornos de carro para actualizar su barra. Al capturar
+            # la salida, PowerShell entrega esas actualizaciones por separado.
+            foreach ($displayLine in ($lineText -split "`r`n|`r|`n")) {
+                if ($displayLine -match '^\s*\[[^\]\r\n]*\d+(?:[.,]\d+)?%[^\]\r\n]*\]\s*$') {
+                    $bar = $displayLine.Trim()
+                    $availableWidth = 79
+                    try {
+                        $consoleWidth = $Host.UI.RawUI.WindowSize.Width
+                        if ($consoleWidth -gt 1) { $availableWidth = $consoleWidth - 1 }
+                    } catch {}
+                    # No ocupar la ultima columna: evitar el salto automatico.
+                    if ($bar.Length -gt $availableWidth) { $bar = $bar.Substring(0, $availableWidth) }
+                    $renderWidth = [Math]::Min($availableWidth, [Math]::Max($progressLine.Width, $bar.Length))
+                    Write-Host ("`r" + $bar.PadRight($renderWidth)) -NoNewline
+                    $progressLine.Active = $true
+                    $progressLine.Width = $renderWidth
+                } else {
+                    # Separar el diagnostico de la ultima actualizacion de la barra.
+                    if ($progressLine.Active) {
+                        if ([string]::IsNullOrWhiteSpace($displayLine)) { continue }
+                        Write-Host ''
+                        $progressLine.Active = $false
+                        $progressLine.Width = 0
+                    }
+                    Write-Host $displayLine
+                }
+            }
+        }
+        $exitCode = $global:LASTEXITCODE
+        if ($null -eq $exitCode) { throw 'DISM no proporciono codigo de salida.' }
+        if ($exitCode -in @(0, 3010)) { $healthState = Get-AIODismHealthState -Text ($lines -join "`n") }
+    } catch {
+        $runError = $_.Exception.Message
+        Write-Log -LogLevel ERROR -Message "LIMPIEZA: DISM /$Mode fallo: $runError"
+    } finally {
+        if ($progressLine.Active) { Write-Host '' }
+        $sw.Stop()
+    }
+    try { [IO.File]::WriteAllLines($consoleLog, $lines.ToArray(), [Text.Encoding]::UTF8) }
+    catch { Write-Log -LogLevel WARN -Message "No se pudo guardar la salida de DISM: $($_.Exception.Message)" }
+    $success = (-not $runError -and $null -ne $exitCode -and $exitCode -in @(0, 3010) -and $healthState -ne 'Unknown')
+    $exitText = if ($null -eq $exitCode) { 'No disponible' } else { [string]$exitCode }
+    $level = if (-not $success) { 'ERROR' } elseif ($healthState -eq 'Healthy') { 'INFO' } else { 'WARN' }
+    Write-Log -LogLevel $level -Message "LIMPIEZA: DISM /$Mode terminado (ExitCode=$exitText, Estado=$healthState, Tiempo=$($sw.Elapsed.ToString()), Log='$healthLog', Salida='$consoleLog')."
+    Write-Host "   Estado: $healthState | Codigo: $exitText | Log: $healthLog"
+    [pscustomobject]@{ Success=$success; ExitCode=$exitCode; ImageHealthState=$healthState; LogPath=$healthLog; ConsoleLogPath=$consoleLog }
+}
+
 function Limpieza-Menu {
  
 	# --- Funcion auxiliar interna para el fallback de RestoreHealth ---
@@ -1934,7 +2052,7 @@ function Limpieza-Menu {
         } else {
             [System.IO.Path]::GetTempPath()
         }
-        $sfcStamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $sfcStamp = (Get-Date -Format 'yyyyMMdd_HHmmss_fff') + '_' + [guid]::NewGuid().ToString('N').Substring(0, 8)
         $sfcLogPath = Join-Path -Path $sfcLogDir -ChildPath "SFC_Offline_${sfcStamp}.log"
 
         # Si la ruta contiene espacios y termina en '\', duplicar la barra final para que '\"' no escape la comilla en el parser C de sfc.exe
@@ -1956,8 +2074,21 @@ function Limpieza-Menu {
         $spinIdx = 0
         $liveSeen = New-Object System.Collections.Generic.HashSet[string]
 
+        $sfcProc = $null
+        $sfcStarted = $false
+        $sfcExit = $null
+        $sfcExecutionError = ''
         try {
-            $sfcProc = Start-Process -FilePath "sfc.exe" -ArgumentList $sfcCmdArgs -NoNewWindow -PassThru -ErrorAction Stop
+            # Process.Start conserva el handle del hijo hasta leer ExitCode.
+            # Evita depender del objeto devuelto por Start-Process sin -Wait.
+            $sfcProc = New-Object System.Diagnostics.Process
+            $systemFolder = if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { 'Sysnative' } else { 'System32' }
+            $sfcProc.StartInfo.FileName = Join-Path $env:SystemRoot "$systemFolder\sfc.exe"
+            $sfcProc.StartInfo.Arguments = $sfcCmdArgs
+            $sfcProc.StartInfo.UseShellExecute = $false
+            $sfcProc.StartInfo.CreateNoWindow = $false
+            $sfcStarted = $sfcProc.Start()
+            if (-not $sfcStarted) { throw 'No se pudo iniciar sfc.exe.' }
 
             # Esperar a que sfc.exe imprima su encabezado y cree el log antes de dibujar el indicador (evita lineas de actividad huerfanas)
             $startWait = [System.Diagnostics.Stopwatch]::StartNew()
@@ -2045,19 +2176,29 @@ function Limpieza-Menu {
             Clear-SfcLiveLine
             $sw.Stop()
             Write-Host "   [+] Analisis SFC finalizado | Tiempo: $($sw.Elapsed.ToString('mm\:ss'))" -ForegroundColor Cyan
+            $sfcProc.WaitForExit()
             $sfcExit = $sfcProc.ExitCode
+            if ($null -eq $sfcExit) { throw 'SFC no proporciono codigo de salida.' }
         }
         catch {
+            $sfcExecutionError = $_.Exception.Message
+            Write-Log -LogLevel ERROR -Message "LIMPIEZA: Error de ejecucion/supervision SFC: $sfcExecutionError"
+            # Un fallo visual o de supervision no debe iniciar un segundo SFC.
+            if ($sfcStarted) {
+                try { $sfcProc.WaitForExit(); $sfcExit = $sfcProc.ExitCode } catch {}
+            }
+        }
+        finally {
             $sw.Stop()
-            Write-Log -LogLevel WARN -Message "LIMPIEZA: Fallback a ejecucion directa de sfc.exe: $($_.Exception.Message)"
-            SFC /scannow /offbootdir="$sfcBoot" /offwindir="$sfcWin" /offlogfile="$sfcLogPath"
-            $sfcExit = $LASTEXITCODE
+            if ($null -ne $sfcProc) { $sfcProc.Dispose() }
         }
 
         # Analisis completo post-ejecucion sobre el archivo /offlogfile ya cerrado por sfc.exe
         $totalBatches = 0
         $totalComponents = 0
-        $repairQueueCount = -1
+        $repairQueueCount = $null
+        $completedBatches = 0
+        $sfcLogReadSucceeded = $false
         $wcpVersion = ""
         $srRepairEntries = New-Object System.Collections.Generic.List[string]
         $hashMismatchEntries = New-Object System.Collections.Generic.List[string]
@@ -2080,6 +2221,9 @@ function Limpieza-Menu {
                         if ($srBody -match '^Verifying\s+(\d+)\b') {
                             $totalBatches++
                             $totalComponents += [int]$Matches[1]
+                        }
+                        elseif ($srBody -eq 'Verify complete') {
+                            $completedBatches++
                         }
                         elseif ($srBody -match '^Repairing\s+(\d+)\s+components') {
                             $repairQueueCount = [int]$Matches[1]
@@ -2104,11 +2248,22 @@ function Limpieza-Menu {
                         }
                     }
                 }
+                $sfcLogReadSucceeded = $true
             }
             catch {
                 Write-Log -LogLevel WARN -Message "LIMPIEZA: Error al analizar '$sfcLogPath': $($_.Exception.Message)"
+                $sfcLogReadSucceeded = $false
             }
         }
+
+        $failureCount = @($srRepairEntries | Where-Object { $_ -match 'Cannot repair|Could not reproject|also corrupted|Repair failed' }).Count
+        $changeCount = $srRepairEntries.Count + $hashMismatchEntries.Count + $overlapEntries.Count
+        if ($null -ne $repairQueueCount -and $repairQueueCount -gt 0) { $changeCount += $repairQueueCount }
+        $sfcAssessment = Get-AIOSfcAssessment -ExitCode $sfcExit -LogReadSucceeded $sfcLogReadSucceeded `
+            -Batches $totalBatches -CompletedBatches $completedBatches -FailureCount $failureCount `
+            -ChangeCount $changeCount -ExecutionError $sfcExecutionError
+        $repairQueueText = if ($null -eq $repairQueueCount) { 'No reportada' } else { [string]$repairQueueCount }
+        $sfcExitText = if ($null -eq $sfcExit) { 'No disponible' } else { [string]$sfcExit }
 
         $totalElapsed = $sw.Elapsed.ToString("mm\:ss")
         Write-Host "`n   =======================================================" -ForegroundColor DarkCyan
@@ -2120,6 +2275,9 @@ function Limpieza-Menu {
         Write-Host "   - Tiempo de ejecucion     : $totalElapsed" -ForegroundColor Gray
         $batchTxt = if ($totalBatches -ne $totalComponents) { " (en $totalBatches lotes CSI)" } else { "" }
         Write-Host "   - Componentes verificados : $totalComponents$batchTxt" -ForegroundColor Gray
+        Write-Host "   - Codigo de salida        : $sfcExitText" -ForegroundColor Gray
+        Write-Host "   - Cola de reparacion      : $repairQueueText" -ForegroundColor Gray
+        Write-Host "   - Resultado               : $($sfcAssessment.Message)" -ForegroundColor $sfcAssessment.Color
 
         if ($hashMismatchEntries.Count -gt 0) {
             Write-Host "   - Archivos modificados/danados detectados por Hash ($($hashMismatchEntries.Count)):" -ForegroundColor Yellow
@@ -2140,8 +2298,8 @@ function Limpieza-Menu {
                 Write-Log -LogLevel ACTION -Message "SFC_OFFLINE_SR: $srItem"
             }
         }
-        elseif ($repairQueueCount -eq 0) {
-            Write-Host "   - Archivos con hash corrupto : 0 (Todos los hashes coinciden con WinSxS)" -ForegroundColor Green
+        elseif ($null -ne $repairQueueCount -and $repairQueueCount -eq 0) {
+            Write-Host "   - Componentes en cola de reparacion [SR]: 0" -ForegroundColor Gray
             if ($overlapEntries.Count -gt 0) {
                 Write-Host "   - Ajustes de metadatos CSI   : $($overlapEntries.Count) directorio(s) con propiedad/SDDL solapada corregidos:" -ForegroundColor Yellow
                 foreach ($ovItem in ($overlapEntries | Select-Object -First 8)) {
@@ -2153,11 +2311,11 @@ function Limpieza-Menu {
                 }
             }
             else {
-                Write-Host "   - Detalle: SFC verifico los $totalComponents componentes sin encontrar archivos alterados (reparacion de descriptores/primitivas internas)." -ForegroundColor Gray
+                Write-Host "   - Detalle: sin eventos adicionales de reparacion en el log." -ForegroundColor Gray
             }
         }
         elseif ($repairQueueCount -gt 0) {
-            Write-Host "   - Componentes reparados en cola [SR]: $repairQueueCount" -ForegroundColor Yellow
+            Write-Host "   - Componentes en cola [SR] (no confirma reparacion): $repairQueueCount" -ForegroundColor Yellow
         }
 
         if (Test-Path -LiteralPath $sfcLogPath -PathType Leaf) {
@@ -2169,12 +2327,12 @@ function Limpieza-Menu {
         Write-Host "   =======================================================" -ForegroundColor DarkCyan
         Write-Host ""
 
-        Write-Log -LogLevel INFO -Message "LIMPIEZA: SFC Offline completado en $totalElapsed (ExitCode=$sfcExit, wcp=$wcpVersion, Lotes=$totalBatches, Componentes=$totalComponents, ColaReparacion=$repairQueueCount, HashMismatch=$($hashMismatchEntries.Count), AccionesSR=$($srRepairEntries.Count), Overlaps=$($overlapEntries.Count), Log='$sfcLogPath')."
+        Write-Log -LogLevel $sfcAssessment.LogLevel -Message "LIMPIEZA: SFC Offline terminado en $totalElapsed (Estado=$($sfcAssessment.Status), ExitCode=$sfcExitText, wcp=$wcpVersion, Lotes=$totalBatches, LotesCompletos=$completedBatches, Componentes=$totalComponents, ColaReparacion=$repairQueueText, HashMismatch=$($hashMismatchEntries.Count), AccionesSR=$($srRepairEntries.Count), Overlaps=$($overlapEntries.Count), Log='$sfcLogPath')."
 
         if (Get-Command Request-AIODashboardRefreshIfDegraded -ErrorAction SilentlyContinue) {
             Request-AIODashboardRefreshIfDegraded
         }
-        return $true
+        return $sfcAssessment.Success
     }
 
 	while ($true) {
@@ -2208,13 +2366,13 @@ function Limpieza-Menu {
             "1" {
                 Write-Host "`n[+] Verificando salud..." -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /CheckHealth..."
-                DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /CheckHealth
+                Invoke-AIOImageHealthCheck -MountDir $Script:MOUNT_DIR -Mode CheckHealth | Out-Null
                 Pause
             }
             "2" {
                 Write-Host "`n[+] Escaneando corrupcion..." -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /ScanHealth..."
-                DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /ScanHealth
+                Invoke-AIOImageHealthCheck -MountDir $Script:MOUNT_DIR -Mode ScanHealth | Out-Null
                 Pause
             }
             "3" {
@@ -2256,26 +2414,15 @@ function Limpieza-Menu {
 
                 # --- PASO 1 ---
                 Write-Host "`n[1/5] Verificando salud rapida (CheckHealth)..." -ForegroundColor Yellow
-                DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /CheckHealth
+                Invoke-AIOImageHealthCheck -MountDir $Script:MOUNT_DIR -Mode CheckHealth | Out-Null
 
                 # --- PASO 2 ---
                 Write-Host "`n[2/5] Escaneando a fondo (ScanHealth)..." -ForegroundColor Yellow
-                $imageState = "Unknown"
-                
-                try {
-                    $scanResult = Repair-WindowsImage -Path $Script:MOUNT_DIR -ScanHealth -ErrorAction Stop
-                    $imageState = $scanResult.ImageHealthState
-                    
-                    Write-Host "   Diagnostico: " -NoNewline
-                    switch ($imageState) {
-                        "Healthy"       { Write-Host "SALUDABLE (No requiere reparacion)" -ForegroundColor Green }
-                        "Repairable"    { Write-Host "DANADA (Reparable)" -ForegroundColor Cyan }
-                        "NonRepairable" { Write-Host "IRREPARABLE (Critico)" -ForegroundColor Red }
-                    }
-                }
-                catch {
-                    Write-Warning "Cmdlet nativo no disponible. Usando DISM clasico..."
-                    DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /ScanHealth
+                $scanResult = Invoke-AIOImageHealthCheck -MountDir $Script:MOUNT_DIR -Mode ScanHealth
+                $imageState = $scanResult.ImageHealthState
+                if (-not $scanResult.Success) {
+                    Write-Warning 'No se pudo confirmar el resultado de ScanHealth. Se detiene la secuencia.'
+                    Pause; continue
                 }
 
                 # --- LOGICA DE DECISION (PASO 3) ---
@@ -2296,7 +2443,11 @@ function Limpieza-Menu {
 
                 # --- PASO 4 ---
                 Write-Host "`n[4/5] Verificando archivos (SFC)..." -ForegroundColor Yellow
-                Invoke-AIOOfflineSfcScan -MountDir $Script:MOUNT_DIR | Out-Null
+                $sfcOk = Invoke-AIOOfflineSfcScan -MountDir $Script:MOUNT_DIR
+                if (-not $sfcOk) {
+                    Write-Warning 'SFC no confirmo un resultado satisfactorio. Se detiene la secuencia antes de limpiar componentes.'
+                    Pause; continue
+                }
 
                 # --- PASO 5 ---
                 Write-Host "`n[5/5] Analizando/Limpiando componentes..." -ForegroundColor Yellow
@@ -2341,7 +2492,9 @@ function Import-OfflineReg {
         [string]$FilePath,
 
         [Parameter(Mandatory=$true, ParameterSetName='Content')]
-        [string]$RegContent
+        [string]$RegContent,
+
+        [switch]$PassThru
     )
 
     $logSource = if ($PSCmdlet.ParameterSetName -eq 'Content') { '[Payload en memoria]' } else { $FilePath }
@@ -2682,7 +2835,17 @@ function Import-OfflineReg {
         throw "Import-OfflineReg: $errors errores durante inyeccion. Revisa el log para detalle."
     }
     
-    Write-Log -LogLevel INFO -Message "Import-OfflineReg: OK — $keysWritten claves afectadas, $valuesWritten valores inyectados."
+    $importStatus = if ($componentsBlocked -gt 0) { 'CompletedWithOmissions' } else { 'Completed' }
+    $importLevel = if ($componentsBlocked -gt 0) { 'WARN' } else { 'INFO' }
+    Write-Log -LogLevel $importLevel -Message "Import-OfflineReg: $importStatus — $keysWritten claves afectadas, $valuesWritten valores inyectados, $componentsBlocked secciones bloqueadas."
+    if ($PassThru) {
+        [pscustomobject]@{
+            Status = $importStatus
+            KeysWritten = $keysWritten
+            ValuesWritten = $valuesWritten
+            BlockedSections = $componentsBlocked
+        }
+    }
 }
 
 function Mount-Hives {
@@ -2931,8 +3094,8 @@ function Unmount-Hives {
                     # La API requiere solo el nombre de la subclave (ej: "OfflineSystem")
                     $subKeyToUnload = $hive -replace "(?i)^HKLM\\", ""
                     
-                    # Aseguramos privilegios críticos (SeRestorePrivilege, SeBackupPrivilege)
-                    Enable-Privileges 
+                    # RegUnLoadKey requiere solo restauracion y respaldo.
+                    Enable-Privileges -Privileges @('SeBackupPrivilege', 'SeRestorePrivilege')
                     
                     $nativeResult = [NativeRegistry]::RegUnLoadKey([NativeRegistry]::HKEY_LOCAL_MACHINE, $subKeyToUnload)
                     
@@ -3067,7 +3230,6 @@ function Translate-OfflinePath {
 
 # --- UTILIDAD: ACTIVAR PRIVILEGIOS DE TOKEN (SeTakeOwnership / SeRestore) ---
 function Initialize-AIOPrivilegeNative {
-    # Nombre propio para no reutilizar una version antigua de TokenManipulator.
     if (([System.Management.Automation.PSTypeName]'AIOPrivilegeNative').Type) { return }
     Add-Type -TypeDefinition @'
 using System;

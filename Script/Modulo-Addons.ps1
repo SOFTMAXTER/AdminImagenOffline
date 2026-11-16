@@ -89,16 +89,27 @@ function Expand-AddonArchive {
     }
 }
 
+# Resultado estructurado opcional; sin -PassThru se conserva la salida de texto.
+function New-AIOAddonResult {
+    param([string]$Message, [int]$BlockedSections = 0, [switch]$PassThru)
+    $status = if ($BlockedSections -gt 0) { 'CompletedWithOmissions' } else { 'Completed' }
+    if ($BlockedSections -gt 0) { $Message += " [Con omisiones: $BlockedSections secciones de registro protegidas]" }
+    if ($PassThru) {
+        [pscustomobject]@{ Status=$status; Message=$Message; BlockedSections=$BlockedSections }
+    } else { $Message }
+}
+
 # --- MOTOR PRINCIPAL: Inyector de Addons ---
 function Install-OfflineAddon {
-    param([string]$FilePath, [int]$WimIndex = 1)
+    param([string]$FilePath, [int]$WimIndex = 1, [switch]$PassThru)
     
     $ext = [System.IO.Path]::GetExtension($FilePath).ToLower()
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($FilePath)
     
     if ($ext -eq '.reg') {
-        Import-OfflineReg -FilePath $FilePath
-        return "Registro inyectado exitosamente."
+        $regResult = Import-OfflineReg -FilePath $FilePath -PassThru
+        $message = "Registro procesado: $($regResult.KeysWritten) claves, $($regResult.ValuesWritten) valores."
+        return (New-AIOAddonResult -Message $message -BlockedSections $regResult.BlockedSections -PassThru:$PassThru)
     }
 
     if ($ext -match '\.(wim|tpk|bpk)$') {
@@ -139,16 +150,18 @@ function Install-OfflineAddon {
             }
 
             # --- FASE B: Inyección de Registro ---
+            $blockedSections = 0
             $regFiles = Get-ChildItem -Path $tempExtract -Filter "*.reg" -Recurse
             foreach ($reg in $regFiles) {
                 Write-Log -LogLevel ACTION -Message "Inyectando registro adjunto: $($reg.Name)"
-                Import-OfflineReg -FilePath $reg.FullName
+                $regResult = Import-OfflineReg -FilePath $reg.FullName -PassThru
+                $blockedSections += $regResult.BlockedSections
             }
 
             $msg = "Inyectado: "
             if ($hasFiles) { $msg += "[Archivos] " }
             if ($regFiles) { $msg += "[Registro] " }
-            return $msg.Trim()
+            return (New-AIOAddonResult -Message $msg.Trim() -BlockedSections $blockedSections -PassThru:$PassThru)
 
         } finally {
             # Limpieza absoluta garantizada
@@ -265,7 +278,8 @@ function Invoke-DeltaPackActions {
 function Install-DeltaPackPackage {
     param(
         [Parameter(Mandatory=$true)][string]$PackagePath,
-        [int]$WimIndex = 1
+        [int]$WimIndex = 1,
+        [switch]$PassThru
     )
 
     $manifest = Get-DeltaPackManifest -PackagePath $PackagePath
@@ -289,6 +303,7 @@ function Install-DeltaPackPackage {
     }
 
     $hasWim = $false; $hasReg = $false; $hasDeletions = $false; $hasActions = $false
+    $blockedSections = 0
 
     # --- PASO 1 (deployment.order): Aplicar WIM ---
     $wimRel = $manifest.outputs.wimFile
@@ -388,7 +403,8 @@ function Install-DeltaPackPackage {
     if ($regRel) {
         $regFull = Join-Path $PackagePath $regRel
         if (Test-Path -LiteralPath $regFull) {
-            Import-OfflineReg -FilePath $regFull
+            $regResult = Import-OfflineReg -FilePath $regFull -PassThru
+            $blockedSections += $regResult.BlockedSections
             $hasReg = $true
         } else {
             Write-Log -LogLevel WARN -Message "DeltaPack [$fullName]: outputs.regFile ('$regRel') no encontrado en el paquete."
@@ -408,7 +424,7 @@ function Install-DeltaPackPackage {
     if ($hasActions)   { $msg += "[Actions] " }
     if ($hasDeletions) { $msg += "[Eliminaciones] " }
     if ($hasReg)       { $msg += "[Registro] " }
-    return $msg.Trim()
+    return (New-AIOAddonResult -Message $msg.Trim() -BlockedSections $blockedSections -PassThru:$PassThru)
 }
 
 # --- INTERFAZ GRÁFICA DEL GESTOR DE ADDONS ---
@@ -659,7 +675,7 @@ function Show-Addons-GUI {
             $btnRemoveItem.Enabled = $false
             $btnAddFiles.Enabled   = $false
             $form.Cursor           = [System.Windows.Forms.Cursors]::WaitCursor
-            $errors = 0; $success = 0; $skipped = 0
+            $errors = 0; $success = 0; $skipped = 0; $withOmissions = 0; $totalBlockedSections = 0
 
             try {
                 # Capturamos la arquitectura de la UI (1=x86, 2=x64, 3=ARM64 dentro del .wim/.tpk/.bpk)
@@ -751,16 +767,24 @@ function Show-Addons-GUI {
                         try {
                             # Motor correspondiente segun el tipo de addon en cola (archivo suelto vs. paquete DeltaPack)
                             if ($item.Tag -is [pscustomobject] -and $item.Tag.Kind -eq 'DeltaPack') {
-                                $resultado = Install-DeltaPackPackage -PackagePath $item.Tag.Path -WimIndex $selectedIndex
+                                $resultado = Install-DeltaPackPackage -PackagePath $item.Tag.Path -WimIndex $selectedIndex -PassThru
                             } else {
-                                $resultado = Install-OfflineAddon -FilePath $item.Tag -WimIndex $selectedIndex
+                                $resultado = Install-OfflineAddon -FilePath $item.Tag -WimIndex $selectedIndex -PassThru
                             }
 
-                            $item.Text = "COMPLETADO"
-                            $item.SubItems[2].Text = $resultado
-                            $item.ForeColor = $ColorCompletado
-                            $success++
-                            Write-Log -LogLevel INFO -Message "AddonInjector: Completado. Motor devolvio: $resultado"
+                            $item.SubItems[2].Text = $resultado.Message
+                            if ($resultado.Status -eq 'CompletedWithOmissions') {
+                                $item.Text = "COMPLETADO CON OMISIONES"
+                                $item.ForeColor = $ColorOmitido
+                                $withOmissions++
+                                $totalBlockedSections += $resultado.BlockedSections
+                                Write-Log -LogLevel WARN -Message "AddonInjector: Completado con omisiones. $($resultado.Message)"
+                            } else {
+                                $item.Text = "COMPLETADO"
+                                $item.ForeColor = $ColorCompletado
+                                $success++
+                                Write-Log -LogLevel INFO -Message "AddonInjector: Completado. $($resultado.Message)"
+                            }
                         } catch {
                             $item.Text = "ERROR"
                             $item.SubItems[2].Text = $_.Exception.Message
@@ -777,7 +801,7 @@ function Show-Addons-GUI {
                     }
                 }
 
-                Write-Log -LogLevel ACTION -Message "AddonInjector: Ciclo de inyeccion finalizado. Exitos: $success | Errores: $errors | Omitidos (Arch): $skipped"
+                Write-Log -LogLevel ACTION -Message "AddonInjector: Ciclo de inyeccion finalizado. Exitos sin omisiones: $success | Con omisiones: $withOmissions | Secciones bloqueadas: $totalBlockedSections | Errores: $errors | Omitidos (Arch): $skipped"
 
                 try {
                     Restore-AllOfflineSDDL
@@ -785,7 +809,8 @@ function Show-Addons-GUI {
                     Write-Log -LogLevel WARN -Message "AddonInjector: Fallo al restaurar SDDL tras la inyeccion - $($_.Exception.Message)"
                 }
 
-                [System.Windows.Forms.MessageBox]::Show("Inyeccion de Addons finalizada.`n`nExitos: $success`nErrores: $errors`nOmitidos (Arch): $skipped", "Reporte de Operacion", 'OK', 'Information')
+                $reportIcon = if ($errors -gt 0) { 'Error' } elseif ($withOmissions -gt 0) { 'Warning' } else { 'Information' }
+                [System.Windows.Forms.MessageBox]::Show("Inyeccion de Addons finalizada.`n`nExitos sin omisiones: $success`nCompletados con omisiones: $withOmissions`nSecciones protegidas no importadas: $totalBlockedSections`nErrores: $errors`nOmitidos (Arch): $skipped", "Reporte de Operacion", 'OK', $reportIcon)
             } catch {
                 Write-Log -LogLevel ERROR -Message "AddonInjector: Error inesperado durante el ciclo de inyeccion - $($_.Exception.Message)"
                 [System.Windows.Forms.MessageBox]::Show("Ocurrio un error inesperado durante la inyeccion:`n`n$($_.Exception.Message)", "Error", 'OK', 'Error') | Out-Null
