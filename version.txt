@@ -1,3 +1,13 @@
+1.5.14
+====================================================
+- Limpieza: la secuencia completa verifica cada paso (CheckHealth, ScanHealth, RestoreHealth, SFC, analisis del almacen y StartComponentCleanup) por su codigo de salida y se detiene en el primer paso fallido, cancelado o no confirmado, sin llegar a limpiar componentes. El codigo 3010 se trata como operacion completada con reinicio requerido y se informa al final.
+- Limpieza: AnalyzeComponentStore usa el dism.exe del sistema con /English y conserva codigo de salida, log de DISM y salida de consola en la carpeta de logs. La recomendacion de limpieza (Yes/No) se interpreta de forma estricta: un resultado ausente, ambiguo o no reconocido ya no equivale a No y detiene la secuencia antes de limpiar.
+- Limpieza: RestoreHealth y StartComponentCleanup se ejecutan mediante el ejecutor comun del sistema con argumentos protegidos (rutas con espacios, fuentes WIM/ESD). El reintento con fuente local (/LimitAccess) valida primero la consulta de indices del WIM y registra los errores; StartComponentCleanup conserva /ScratchDir y la eleccion de /ResetBase.
+- Limpieza: la barra de progreso de DISM en CheckHealth y ScanHealth se dibuja en una sola linea que se actualiza, ajustada al ancho de la consola, en lugar de repetirse decenas de veces.
+- Guardar como nuevo WIM: el nombre y la descripcion por defecto se toman de los metadatos del Dashboard (edicion efectiva normalizada para Windows 10/11, Cloud, Server y WinPE) y de la descripcion exacta del catalogo, sin releer el Registro offline ni requerir haber abierto otro menu.
+- Montaje y Cambio de Edicion: los comandos DISM del modulo de montaje (consulta de imagenes y Cleanup-Mountpoints) usan el dism.exe nativo (Sysnative en procesos de 32 bits) y la consulta de ediciones de destino usa /English para no depender del idioma del equipo.
+====================================================
+
 1.5.13
 ====================================================
 - Inicio: comprobacion del WinRE del equipo antes de recuperar imagenes montadas. Un montaje de DISM se considera WinRE del equipo solo si reagentc /info y ReAgent.xml confirman el mismo archivo real (no por nombre). Se muestra el archivo, el montaje, el indice y el estado, y se permite guardar los cambios (/Commit), descartarlos (/Discard) o conservar el montaje (Enter). Nunca desmonta si el origen no se confirma o la configuracion cambio durante la consulta; tras desmontar verifica que DISM ya no lo registre y que ReAgent.xml no conserve el montaje. Los montajes conservados se excluyen de la recuperacion automatica y el menu principal muestra un aviso.
