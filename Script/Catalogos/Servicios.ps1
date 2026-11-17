@@ -1,4 +1,4 @@
-# --- CATALOGO CENTRAL DE SERVICIOS ---
+﻿# --- CATALOGO CENTRAL DE SERVICIOS ---
 # Define todos los servicios gestionables, su proposito, categoria y estado por defecto.
 # Esto hace que la funcion sea facilmente extensible.
 $script:ServiceCatalog = @(

@@ -1,4 +1,4 @@
-# --- CATALOGO DE APLICACIONES (BLOATWARE VS SEGURAS) ---
+﻿# --- CATALOGO DE APLICACIONES (BLOATWARE VS SEGURAS) ---
 # Define las listas de apps para la herramienta de limpieza.
 
 $script:AppLists = @{
