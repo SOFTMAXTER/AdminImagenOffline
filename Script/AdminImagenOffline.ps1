@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.13
+    1.5.14
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.13"
+$script:Version = "1.5.14"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1420,7 +1420,7 @@ function Cambio-Edicion-Menu {
 
     $targetEditions = @()
     try {
-        $dismTargets = dism /Image:$Script:MOUNT_DIR /Get-TargetEditions 2>$null
+        $dismTargets = dism /Image:$Script:MOUNT_DIR /Get-TargetEditions /English 2>$null
         $dismTargets | Select-String "Target Edition :" | ForEach-Object {
             $line = ($_.Line -split ':', 2)[1].Trim()
             if ($line) { $targetEditions += $line }
@@ -1855,6 +1855,55 @@ function Invoke-AIOImageHealthCheck {
     [pscustomobject]@{ Success=$success; ExitCode=$exitCode; ImageHealthState=$healthState; LogPath=$healthLog; ConsoleLogPath=$consoleLog }
 }
 
+function Invoke-AIOComponentStoreAnalysis {
+    param([Parameter(Mandatory=$true)][string]$MountDir)
+
+    $analysisLogDir = if ($script:logDir -and (Test-Path -LiteralPath $script:logDir -PathType Container)) {
+        $script:logDir
+    } else { [IO.Path]::GetTempPath() }
+    $stamp = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
+    $analysisLog = Join-Path $analysisLogDir "DISM_AnalyzeComponentStore_${stamp}.log"
+    $consoleLog = Join-Path $analysisLogDir "DISM_AnalyzeComponentStore_${stamp}_salida.log"
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    $exitCode = $null; $cleanupRecommended = 'Unknown'; $runError = ''
+    try {
+        if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw 'SystemRoot no disponible.' }
+        $systemFolder = if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { 'Sysnative' } else { 'System32' }
+        $exe = Join-Path $env:SystemRoot "$systemFolder\dism.exe"
+        $argsDism = @("/Image:$MountDir", '/Cleanup-Image', '/AnalyzeComponentStore', '/English', "/LogPath:$analysisLog")
+        # Capturar stderr tambien en Windows PowerShell 5.1; el codigo decide el resultado.
+        $ErrorActionPreference = 'Continue'
+        $PSNativeCommandUseErrorActionPreference = $false
+        $global:LASTEXITCODE = $null
+        & $exe @argsDism 2>&1 | ForEach-Object {
+            $lineText = [string]$_
+            [void]$lines.Add($lineText)
+            Write-Host $lineText
+        }
+        $exitCode = $global:LASTEXITCODE
+        if ($null -eq $exitCode) { throw 'DISM no proporciono codigo de salida.' }
+        if ($exitCode -notin @(0, 3010)) { throw "DISM /AnalyzeComponentStore termino con codigo $exitCode." }
+
+        # Un resultado ausente, ambiguo o no reconocido nunca equivale a "No".
+        $recommendations = [regex]::Matches(($lines -join "`n"), '(?im)^[ \t]*Component Store Cleanup Recommended[ \t]*:[ \t]*(Yes|No)[ \t]*\r?$')
+        if ($recommendations.Count -ne 1) { throw 'No se pudo interpretar una recomendacion unica de limpieza (Yes/No).' }
+        $cleanupRecommended = $recommendations[0].Groups[1].Value
+    } catch {
+        $runError = $_.Exception.Message
+    }
+    try { [IO.File]::WriteAllLines($consoleLog, $lines.ToArray(), [Text.Encoding]::UTF8) }
+    catch { Write-Log -LogLevel WARN -Message "No se pudo guardar la salida del analisis DISM: $($_.Exception.Message)" }
+    $success = (-not $runError -and $null -ne $exitCode -and $exitCode -in @(0, 3010) -and $cleanupRecommended -in @('Yes', 'No'))
+    $exitText = if ($null -eq $exitCode) { 'No disponible' } else { [string]$exitCode }
+    $level = if ($success) { 'INFO' } else { 'ERROR' }
+    Write-Log -LogLevel $level -Message "LIMPIEZA: AnalyzeComponentStore (ExitCode=$exitText, Recomendacion=$cleanupRecommended, Error='$runError', Log='$analysisLog', Salida='$consoleLog')."
+    Write-Host "   Recomendacion: $cleanupRecommended | Codigo: $exitText | Log: $analysisLog"
+    if (-not $success) {
+        Write-Warning "Analisis no confirmado: $runError Salida: $consoleLog"
+    }
+    [pscustomobject]@{ Success=$success; ExitCode=$exitCode; CleanupRecommended=$cleanupRecommended; LogPath=$analysisLog; ConsoleLogPath=$consoleLog }
+}
+
 function Limpieza-Menu {
  
 	# --- Funcion auxiliar interna para el fallback de RestoreHealth ---
@@ -1867,8 +1916,14 @@ function Limpieza-Menu {
         Write-Host "`n[+] Ejecutando DISM /RestoreHealth..." -ForegroundColor Yellow
         Write-Log -LogLevel ACTION -Message "LIMPIEZA: Ejecutando DISM /RestoreHealth..."
 
-        DISM /Image:$MountDir /Cleanup-Image /RestoreHealth
-        $exitCode = $LASTEXITCODE
+        $exitCode = $null
+        try {
+            $restoreResult = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments @("/Image:$MountDir", '/Cleanup-Image', '/RestoreHealth')
+            $exitCode = $restoreResult.ExitCode
+        } catch {
+            Write-Warning "No se pudo ejecutar RestoreHealth: $($_.Exception.Message)"
+            Write-Log -LogLevel ERROR -Message "LIMPIEZA: Error ejecutando RestoreHealth: $($_.Exception.Message)"
+        }
 
         if ($exitCode -notin @(0, 3010)) {
             Write-Host "[ADVERTENCIA] DISM /RestoreHealth no pudo reparar la imagen (Codigo: $exitCode)." -ForegroundColor Red
@@ -1883,35 +1938,41 @@ function Limpieza-Menu {
 
                 if ($sourceWimPath) {
                     Write-Host "`n[+] Analizando indices del WIM seleccionado..." -ForegroundColor Yellow
-                    dism /get-wiminfo /wimfile:"$sourceWimPath"
-
-                    [int]$sourceIndex = 0
-                    $inputIndex = Read-Host "`nIntroduce el numero de INDICE que coincide con tu edicion de Windows"
-
-                    if ([int]::TryParse($inputIndex, [ref]$sourceIndex) -and $sourceIndex -gt 0) {
-                        Write-Host "`n[+] Reintentando reparacion forzando la fuente local (/LimitAccess)..." -ForegroundColor Yellow
-                        Write-Log -LogLevel ACTION -Message "LIMPIEZA: Reintentando RestoreHealth con /LimitAccess y Source WIM."
-
-                        $ext = [System.IO.Path]::GetExtension($sourceWimPath).ToUpper()
-                        $sourceType = if ($ext -eq ".ESD") { "ESD" } else { "WIM" }
-
-                        $safeMountDir = $MountDir.TrimEnd('\')
-                        $safeSource = $sourceWimPath.TrimEnd('\')
-
-                        $dismArgs = "/Image:`"$safeMountDir`" /Cleanup-Image /RestoreHealth /Source:${sourceType}:`"$safeSource`":$sourceIndex /LimitAccess"
-
-                        $proc = Start-Process "dism.exe" -ArgumentList $dismArgs -Wait -NoNewWindow -PassThru
-                        $exitCode = $proc.ExitCode
-
-                        if ($exitCode -in @(0, 3010)) {
-                            Write-Host "[OK] DISM /RestoreHealth reparo la imagen exitosamente usando la fuente WIM." -ForegroundColor Green
-                            Write-Log -LogLevel INFO -Message "LIMPIEZA: RestoreHealth exitoso con fuente WIM."
-                        } else {
-                            Write-Host "[ERROR] La reparacion fallo de nuevo con fuente WIM (Codigo: $exitCode)." -ForegroundColor Red
-                            Write-Log -LogLevel ERROR -Message "LIMPIEZA: RestoreHealth fallo con fuente WIM (Codigo: $exitCode)."
+                    try {
+                        $sourceInfo = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments @('/Get-WimInfo', "/WimFile:$sourceWimPath")
+                        if ($null -eq $sourceInfo.ExitCode -or $sourceInfo.ExitCode -notin @(0, 3010)) {
+                            throw "No se pudieron consultar los indices del WIM (Codigo: $($sourceInfo.ExitCode))."
                         }
-                    } else {
-                        Write-Warning "Indice no valido. Omitiendo reintento."
+
+                        [int]$sourceIndex = 0
+                        $inputIndex = Read-Host "`nIntroduce el numero de INDICE que coincide con tu edicion de Windows"
+
+                        if ([int]::TryParse($inputIndex, [ref]$sourceIndex) -and $sourceIndex -gt 0) {
+                            Write-Host "`n[+] Reintentando reparacion forzando la fuente local (/LimitAccess)..." -ForegroundColor Yellow
+                            Write-Log -LogLevel ACTION -Message "LIMPIEZA: Reintentando RestoreHealth con /LimitAccess y Source WIM."
+
+                            $ext = [System.IO.Path]::GetExtension($sourceWimPath).ToUpper()
+                            $sourceType = if ($ext -eq ".ESD") { "ESD" } else { "WIM" }
+
+                            $dismArgs = @("/Image:$MountDir", '/Cleanup-Image', '/RestoreHealth', "/Source:${sourceType}:${sourceWimPath}:$sourceIndex", '/LimitAccess')
+                            $exitCode = $null
+                            $restoreResult = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments $dismArgs
+                            $exitCode = $restoreResult.ExitCode
+
+                            if ($exitCode -in @(0, 3010)) {
+                                Write-Host "[OK] DISM /RestoreHealth reparo la imagen exitosamente usando la fuente WIM." -ForegroundColor Green
+                                Write-Log -LogLevel INFO -Message "LIMPIEZA: RestoreHealth exitoso con fuente WIM."
+                            } else {
+                                Write-Host "[ERROR] La reparacion fallo de nuevo con fuente WIM (Codigo: $exitCode)." -ForegroundColor Red
+                                Write-Log -LogLevel ERROR -Message "LIMPIEZA: RestoreHealth fallo con fuente WIM (Codigo: $exitCode)."
+                            }
+                        } else {
+                            Write-Warning "Indice no valido. Omitiendo reintento."
+                        }
+                    } catch {
+                        $exitCode = $null
+                        Write-Warning "No se pudo completar la reparacion con fuente WIM: $($_.Exception.Message)"
+                        Write-Log -LogLevel ERROR -Message "LIMPIEZA: Error en fallback RestoreHealth: $($_.Exception.Message)"
                     }
                 } else {
                     Write-Warning "No se selecciono un archivo WIM."
@@ -1928,6 +1989,8 @@ function Limpieza-Menu {
             }
         }
         if (-not $IsSequence) { Pause }
+        # Devolver solo el resultado: la salida nativa se muestra en la consola.
+        [pscustomobject]@{ Success=($null -ne $exitCode -and $exitCode -in @(0, 3010)); ExitCode=$exitCode }
     }
 
     function Invoke-AIOOfflineSfcScan {
@@ -2376,7 +2439,7 @@ function Limpieza-Menu {
                 Pause
             }
             "3" {
-                Invoke-RestoreHealthWithFallback -MountDir $Script:MOUNT_DIR
+                Invoke-RestoreHealthWithFallback -MountDir $Script:MOUNT_DIR | Out-Null
             }
             "4" {
                 Invoke-AIOOfflineSfcScan -MountDir $Script:MOUNT_DIR | Out-Null
@@ -2414,7 +2477,12 @@ function Limpieza-Menu {
 
                 # --- PASO 1 ---
                 Write-Host "`n[1/5] Verificando salud rapida (CheckHealth)..." -ForegroundColor Yellow
-                Invoke-AIOImageHealthCheck -MountDir $Script:MOUNT_DIR -Mode CheckHealth | Out-Null
+                $checkResult = Invoke-AIOImageHealthCheck -MountDir $Script:MOUNT_DIR -Mode CheckHealth
+                if (-not $checkResult.Success) {
+                    Write-Warning 'CheckHealth no confirmo un resultado valido. Se detiene la secuencia.'
+                    Pause; continue
+                }
+                $sequenceRestartRequired = ($checkResult.ExitCode -eq 3010)
 
                 # --- PASO 2 ---
                 Write-Host "`n[2/5] Escaneando a fondo (ScanHealth)..." -ForegroundColor Yellow
@@ -2424,6 +2492,7 @@ function Limpieza-Menu {
                     Write-Warning 'No se pudo confirmar el resultado de ScanHealth. Se detiene la secuencia.'
                     Pause; continue
                 }
+                $sequenceRestartRequired = $sequenceRestartRequired -or ($scanResult.ExitCode -eq 3010)
 
                 # --- LOGICA DE DECISION (PASO 3) ---
                 if ($imageState -eq "NonRepairable") {
@@ -2438,7 +2507,13 @@ function Limpieza-Menu {
                 }
                 else {
                     Write-Host "`n[3/5] Reparando imagen..." -ForegroundColor Yellow
-                    Invoke-RestoreHealthWithFallback -MountDir $Script:MOUNT_DIR -IsSequence
+                    $restoreResult = Invoke-RestoreHealthWithFallback -MountDir $Script:MOUNT_DIR -IsSequence
+                    if (-not $restoreResult.Success) {
+                        Write-Warning 'RestoreHealth no confirmo una reparacion satisfactoria. Se detiene la secuencia antes de ejecutar SFC y limpiar componentes.'
+                        Write-Log -LogLevel ERROR -Message 'LIMPIEZA: Secuencia detenida por reparacion fallida o cancelada.'
+                        Pause; continue
+                    }
+                    $sequenceRestartRequired = $sequenceRestartRequired -or ($restoreResult.ExitCode -eq 3010)
                 }
 
                 # --- PASO 4 ---
@@ -2451,29 +2526,46 @@ function Limpieza-Menu {
 
                 # --- PASO 5 ---
                 Write-Host "`n[5/5] Analizando/Limpiando componentes..." -ForegroundColor Yellow
-                $cleanupRecommended = "No"
-                try {
-                    $analysis = DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /AnalyzeComponentStore
-                    $recommendLine = $analysis | Select-String "Component Store Cleanup Recommended"
-                    if ($recommendLine -and ($recommendLine.Line -split ':', 2)[1].Trim() -eq "Yes") { $cleanupRecommended = "Yes" }
-                } catch { Write-Warning "No se pudo analizar el almacen de componentes." }
+                $analysisResult = Invoke-AIOComponentStoreAnalysis -MountDir $Script:MOUNT_DIR
+                if (-not $analysisResult.Success) {
+                    Write-Warning 'No se pudo confirmar la recomendacion de limpieza. Se detiene la secuencia sin limpiar componentes.'
+                    Pause; continue
+                }
+                $cleanupRecommended = $analysisResult.CleanupRecommended
+                $sequenceRestartRequired = $sequenceRestartRequired -or ($analysisResult.ExitCode -eq 3010)
 
                 if ($cleanupRecommended -eq "Yes" -or $imageState -eq "Unknown") {
                     Write-Host "Procediendo con la limpieza..." -ForegroundColor Cyan;
                     
-                    # --- NUEVA LOGICA DE SECUENCIA: Aplicar elección de /ResetBase ---
+                    $cleanupArgs = @("/Image:$Script:MOUNT_DIR", '/Cleanup-Image', '/StartComponentCleanup', "/ScratchDir:$Script:Scratch_DIR")
+                    # Se conserva la decision existente sobre cuando aplicar /ResetBase.
                     if ($resetBaseFlag) {
                         Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Ejecutando limpieza CON /ResetBase."
-                        DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /StartComponentCleanup /ResetBase /ScratchDir:$Script:Scratch_DIR
+                        $cleanupArgs += '/ResetBase'
                     } else {
                         Write-Log -LogLevel ACTION -Message "LIMPIEZA: (5/5) Ejecutando limpieza SIN /ResetBase."
-                        DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /StartComponentCleanup /ScratchDir:$Script:Scratch_DIR
+                    }
+                    try {
+                        $cleanupResult = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments $cleanupArgs
+                        if ($null -eq $cleanupResult.ExitCode -or $cleanupResult.ExitCode -notin @(0, 3010)) {
+                            throw "DISM /StartComponentCleanup termino con codigo $($cleanupResult.ExitCode)."
+                        }
+                        Write-Log -LogLevel INFO -Message "LIMPIEZA: StartComponentCleanup completado (ExitCode=$($cleanupResult.ExitCode))."
+                        $sequenceRestartRequired = $sequenceRestartRequired -or ($cleanupResult.ExitCode -eq 3010)
+                    } catch {
+                        Write-Warning "Fallo la limpieza de componentes: $($_.Exception.Message) Se detiene la secuencia."
+                        Write-Log -LogLevel ERROR -Message "LIMPIEZA: Secuencia detenida por error en StartComponentCleanup: $($_.Exception.Message)"
+                        Pause; continue
                     }
                 } else {
                     Write-Host "La limpieza del almacen de componentes no es estrictamente necesaria (Omitida)." -ForegroundColor Green;
                 }
                 
                 Write-Host "`n[OK] Secuencia completada." -ForegroundColor Green
+                Write-Log -LogLevel INFO -Message "LIMPIEZA: Secuencia completada con resultados verificados. ReinicioRequerido=$sequenceRestartRequired."
+                if ($sequenceRestartRequired) {
+                    Write-Warning 'DISM devolvio 3010 (operacion completada; reinicio requerido).'
+                }
                 Pause
             }
             "V" { return }

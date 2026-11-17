@@ -364,7 +364,7 @@ function Install-DeltaPackPackage {
 
                 Enable-Privileges
                 $safeMountDir = $Script:MOUNT_DIR.TrimEnd('\', '/')
-                $roboArgs = "`"$tempExtract`" `"$safeMountDir`" /E /B /IS /IT $xdArg /R:0 /W:0 /NJH /NJS /NDL /NC /NS /NP"
+                $roboArgs = "`"$tempExtract`" `"$safeMountDir`" /E /B /IS /IT /R:0 /W:0 /NJH /NJS /NDL /NC /NS /NP"
                 $proc = Start-Process robocopy.exe -ArgumentList $roboArgs -Wait -PassThru -WindowStyle Hidden
                 if ($proc.ExitCode -ge 8) {
                     throw "Robocopy fallo desplegando el WIM de '$fullName' en $safeMountDir (Codigo: $($proc.ExitCode))."

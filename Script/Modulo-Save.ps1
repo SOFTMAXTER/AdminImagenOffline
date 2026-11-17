@@ -132,50 +132,51 @@ function Save-Changes {
 
         # =========================================================
         #  Auto-Detección de Edición y Petición de Metadatos
-        #  (Lee el registro offline en vivo, detectando si el usuario 
-        #  cambio la edicion durante esta sesion).
+        #  (Reutiliza la edicion efectiva del Dashboard y la descripcion
+        #  del catalogo central, sin depender de haber abierto otro menu).
         # =========================================================
         Write-Host "`n--- Obteniendo metadatos del sistema operativo ---" -ForegroundColor Yellow
         $defaultName = "Custom Image"
         $defaultDesc = "Imagen personalizada creada con AdminImagenOffline el $(Get-Date -Format 'yyyy-MM-dd')"
-        $softwareHive = "$Script:MOUNT_DIR\Windows\System32\config\SOFTWARE"
-
-        if (Test-Path -LiteralPath $softwareHive) {
-            $tempHive = "HKLM\TempWimSoft_$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
-            try {
-                reg load $tempHive $softwareHive 2>$null | Out-Null
-                
-                if ($LASTEXITCODE -eq 0) {
-                    $regData = Get-ItemProperty -Path "Registry::$tempHive\Microsoft\Windows NT\CurrentVersion" -ErrorAction SilentlyContinue
-                    
-                    if ($regData) {
-                        if ($regData.EditionID -and (Get-Command Get-WindowsEditionMetadata -ErrorAction SilentlyContinue)) {
-                            $metadata = Get-WindowsEditionMetadata -QueryString $regData.EditionID
-                            $defaultName = $metadata.Name
-                            $defaultDesc = $metadata.Description
-                            if ($regData.CurrentBuildNumber -ge 22000) {
-                                $defaultName = $defaultName -replace "Windows ", "Windows 11 "
-                            } else {
-                                $defaultName = $defaultName -replace "Windows ", "Windows 10 "
-                            }
-                        } elseif ($regData.ProductName) {
-                            $defaultName = $regData.ProductName
-                            if ($regData.CurrentBuildNumber -ge 22000) {
-                                $defaultName = $defaultName -replace "Windows 10", "Windows 11"
-                            }
-                        }
-                    }
+        # Reutiliza los metadatos del Dashboard (nombre efectivo segun build y edicion,
+        # ya normalizado para Windows 10/11, Cloud, Server y WinPE). Una cache valida
+        # evita otra lectura de SOFTWARE; ForceMenuRefresh solicita actualizarla.
+        $dashMeta = $null
+        try {
+            if (Get-Command Get-AIOCachedDashboardMetadata -ErrorAction SilentlyContinue) {
+                $dashMeta = Get-AIOCachedDashboardMetadata -MountState $Script:IMAGE_MOUNTED -MountPath $Script:MOUNT_DIR `
+                    -ImagePath $Script:WIM_FILE_PATH -Index $Script:MOUNTED_INDEX -ForceRefresh:$Script:ForceMenuRefresh
+                $dashName = if ($null -ne $dashMeta) { ([string]$dashMeta.Name).Trim() } else { '' }
+                if ($dashName -and $dashName -notmatch '^No disponible$|nombre no disponible|edicion no disponible') {
+                    $defaultName = $dashName
                 }
-            } catch {
-                Write-Log -LogLevel WARN -Message "SaveManager: No se pudo auto-detectar la edicion en el registro offline."
-            } finally {
-                # Garantizado incluso si lanza excepcion: evita que SOFTWARE quede bloqueado para DISM
-                reg unload $tempHive 2>$null | Out-Null
-                [GC]::Collect()
             }
+        } catch {
+            Write-Log -LogLevel WARN -Message "SaveManager: No se pudo auto-detectar la edicion con los metadatos del Dashboard: $($_.Exception.Message)"
         }
 
-        # Fallback historico si la colmena falla pero la imagen WIM base tiene info
+        # El nombre proviene del Dashboard; la descripcion se conserva literalmente
+        # del catalogo, usando la edicion efectiva y una coincidencia exacta.
+        # Cargar aqui el catalogo no requiere haber abierto Cambio-Edicion-Menu.
+        try {
+            $effectiveEdition = if ($null -ne $dashMeta) { ([string]$dashMeta.Edition).Trim() } else { '' }
+            if ($effectiveEdition -and $effectiveEdition -ne 'No disponible') {
+                $catalogPath = Join-Path $PSScriptRoot 'Catalogos\Ediciones.ps1'
+                if (Test-Path -LiteralPath $catalogPath -PathType Leaf) {
+                    . $catalogPath
+                    $catalogEntry = $script:EditionCatalog | Where-Object {
+                        $_.EditionID -ieq $effectiveEdition
+                    } | Select-Object -First 1
+                    if ($null -ne $catalogEntry -and -not [string]::IsNullOrWhiteSpace([string]$catalogEntry.Description)) {
+                        $defaultDesc = [string]$catalogEntry.Description
+                    }
+                }
+            }
+        } catch {
+            Write-Log -LogLevel WARN -Message "SaveManager: No se pudo leer la descripcion del catalogo; se conserva la descripcion generica. $($_.Exception.Message)"
+        }
+
+        # Fallback historico si los metadatos no estan disponibles pero la imagen WIM base tiene info
         if ($defaultName -eq "Custom Image") {
             try {
                 $info = Get-WindowsImage -ImagePath $Script:WIM_FILE_PATH -Index $Script:MOUNTED_INDEX -ErrorAction SilentlyContinue
@@ -187,7 +188,8 @@ function Save-Changes {
         $IMAGE_NAME = Read-Host "Ingrese el NOMBRE para la imagen interna (Enter = '$defaultName')"
         if ([string]::IsNullOrWhiteSpace($IMAGE_NAME)) { $IMAGE_NAME = $defaultName }
 
-        $IMAGE_DESC = Read-Host "Ingrese la DESCRIPCION (Enter = Auto-generada)"
+        Write-Host "Descripcion predeterminada: $defaultDesc" -ForegroundColor Gray
+        $IMAGE_DESC = Read-Host "Ingrese la DESCRIPCION (Enter = conservar la predeterminada)"
         if ([string]::IsNullOrWhiteSpace($IMAGE_DESC)) { $IMAGE_DESC = $defaultDesc }
         
         Write-Host "`n[+] Capturando estado actual a nuevo WIM..." -ForegroundColor Yellow

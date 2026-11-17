@@ -46,6 +46,17 @@
 # =============================================
 #  FUNCIONES DE ACCION (Montaje/Desmontaje)
 # =============================================
+# dism.exe nativo del anfitrion. En un proceso de 32 bits sobre Windows de 64 bits,
+# System32 se redirige a SysWOW64; Sysnative evita ese redireccionamiento.
+function Get-AIOMountNativeDismPath {
+    $systemFolder = if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { 'Sysnative' } else { 'System32' }
+    if (-not [string]::IsNullOrWhiteSpace($env:SystemRoot)) {
+        $exe = Join-Path $env:SystemRoot "$systemFolder\dism.exe"
+        if (Test-Path -LiteralPath $exe -PathType Leaf) { return $exe }
+    }
+    return 'dism.exe'
+}
+
 # Consultas DISM: conservar por separado el texto y el codigo de salida.
 # /English hace que el analisis no dependa del idioma del Windows anfitrion.
 function Invoke-AIOMountDismQuery {
@@ -54,7 +65,8 @@ function Invoke-AIOMountDismQuery {
     $ErrorActionPreference = 'Continue'
     $PSNativeCommandUseErrorActionPreference = $false
     $global:LASTEXITCODE = $null
-    $lines = @(& dism.exe @Arguments /English 2>&1 | ForEach-Object { $_.ToString() })
+    $dismExe = Get-AIOMountNativeDismPath
+    $lines = @(& $dismExe @Arguments /English 2>&1 | ForEach-Object { $_.ToString() })
     $exitCode = $global:LASTEXITCODE
     if ($null -eq $exitCode) { throw 'No se pudo ejecutar dism.exe.' }
     [pscustomobject]@{ ExitCode = [int]$exitCode; Lines = $lines }
@@ -225,7 +237,8 @@ function Repair-InvalidMounts {
         $global:LASTEXITCODE = $null
         $PSNativeCommandUseErrorActionPreference = $false
         $cleanupOutput = New-Object 'System.Collections.Generic.List[string]'
-        & dism.exe /Cleanup-Mountpoints /English "/LogPath:$(Join-Path $reportDir 'Limpieza.log')" 2>&1 | ForEach-Object {
+        $dismExe = Get-AIOMountNativeDismPath
+        & $dismExe /Cleanup-Mountpoints /English "/LogPath:$(Join-Path $reportDir 'Limpieza.log')" 2>&1 | ForEach-Object {
             $line = $_.ToString(); [void]$cleanupOutput.Add($line); Write-Host $line
         }
         $report.CleanupExitCode = $global:LASTEXITCODE
