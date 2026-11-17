@@ -1865,6 +1865,7 @@ function Invoke-AIOComponentStoreAnalysis {
     $analysisLog = Join-Path $analysisLogDir "DISM_AnalyzeComponentStore_${stamp}.log"
     $consoleLog = Join-Path $analysisLogDir "DISM_AnalyzeComponentStore_${stamp}_salida.log"
     $lines = New-Object 'System.Collections.Generic.List[string]'
+    $progressLine = @{ Active = $false; Width = 0 }
     $exitCode = $null; $cleanupRecommended = 'Unknown'; $runError = ''
     try {
         if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw 'SystemRoot no disponible.' }
@@ -1878,7 +1879,32 @@ function Invoke-AIOComponentStoreAnalysis {
         & $exe @argsDism 2>&1 | ForEach-Object {
             $lineText = [string]$_
             [void]$lines.Add($lineText)
-            Write-Host $lineText
+            # Conservar todas las actualizaciones en el log, pero dibujar la barra
+            # en una sola linea, igual que en Invoke-AIOImageHealthCheck.
+            foreach ($displayLine in ($lineText -split "`r`n|`r|`n")) {
+                if ($displayLine -match '^\s*\[[^\]\r\n]*\d+(?:[.,]\d+)?%[^\]\r\n]*\]\s*$') {
+                    $bar = $displayLine.Trim()
+                    $availableWidth = 79
+                    try {
+                        $consoleWidth = $Host.UI.RawUI.WindowSize.Width
+                        if ($consoleWidth -gt 1) { $availableWidth = $consoleWidth - 1 }
+                    } catch {}
+                    # Evitar el salto automatico y borrar restos de barras mas largas.
+                    if ($bar.Length -gt $availableWidth) { $bar = $bar.Substring(0, $availableWidth) }
+                    $renderWidth = [Math]::Min($availableWidth, [Math]::Max($progressLine.Width, $bar.Length))
+                    Write-Host ("`r" + $bar.PadRight($renderWidth)) -NoNewline
+                    $progressLine.Active = $true
+                    $progressLine.Width = $renderWidth
+                } else {
+                    if ($progressLine.Active) {
+                        if ([string]::IsNullOrWhiteSpace($displayLine)) { continue }
+                        Write-Host ''
+                        $progressLine.Active = $false
+                        $progressLine.Width = 0
+                    }
+                    Write-Host $displayLine
+                }
+            }
         }
         $exitCode = $global:LASTEXITCODE
         if ($null -eq $exitCode) { throw 'DISM no proporciono codigo de salida.' }
@@ -1890,6 +1916,8 @@ function Invoke-AIOComponentStoreAnalysis {
         $cleanupRecommended = $recommendations[0].Groups[1].Value
     } catch {
         $runError = $_.Exception.Message
+    } finally {
+        if ($progressLine.Active) { Write-Host '' }
     }
     try { [IO.File]::WriteAllLines($consoleLog, $lines.ToArray(), [Text.Encoding]::UTF8) }
     catch { Write-Log -LogLevel WARN -Message "No se pudo guardar la salida del analisis DISM: $($_.Exception.Message)" }
@@ -2448,7 +2476,14 @@ function Limpieza-Menu {
             "5" {
                 Write-Host "`n[+] Analizando componentes..." -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /AnalyzeComponentStore..."
-                DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /AnalyzeComponentStore
+                $analysisResult = Invoke-AIOComponentStoreAnalysis -MountDir $Script:MOUNT_DIR
+                if ($analysisResult.Success) {
+                    $recommendationText = if ($analysisResult.CleanupRecommended -eq 'Yes') { 'Si' } else { 'No' }
+                    Write-Host "[OK] Analisis completado. Limpieza recomendada: $recommendationText." -ForegroundColor Green
+                    if ($analysisResult.ExitCode -eq 3010) {
+                        Write-Warning 'DISM devolvio 3010 (operacion completada; reinicio requerido).'
+                    }
+                }
                 Pause
             }
             "6" {
@@ -2456,15 +2491,29 @@ function Limpieza-Menu {
                 
                 # --- NUEVA LOGICA: Preguntar por /ResetBase ---
                 $useResetBase = Read-Host "`nDeseas incluir el parametro /ResetBase?`n[ADVERTENCIA] Esto ahorra espacio, pero no podras desinstalar actualizaciones previas (S/N)"
-                
+
+                $cleanupArgs = @("/Image:$Script:MOUNT_DIR", '/Cleanup-Image', '/StartComponentCleanup', "/ScratchDir:$Script:Scratch_DIR")
                 if ($useResetBase -match '^(s|S)$') {
                     Write-Host "`nEjecutando limpieza CON /ResetBase..." -ForegroundColor Cyan
                     Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /StartComponentCleanup /ResetBase..."
-                    DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /StartComponentCleanup /ResetBase /ScratchDir:$Script:Scratch_DIR
+                    $cleanupArgs += '/ResetBase'
                 } else {
                     Write-Host "`nEjecutando limpieza estandar SIN /ResetBase..." -ForegroundColor Cyan
                     Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /StartComponentCleanup (Sin ResetBase)..."
-                    DISM /Image:$Script:MOUNT_DIR /Cleanup-Image /StartComponentCleanup /ScratchDir:$Script:Scratch_DIR
+                }
+                try {
+                    $cleanupResult = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments $cleanupArgs
+                    if ($null -eq $cleanupResult.ExitCode -or $cleanupResult.ExitCode -notin @(0, 3010)) {
+                        throw "DISM /StartComponentCleanup termino con codigo $($cleanupResult.ExitCode)."
+                    }
+                    Write-Host '[OK] Limpieza de componentes completada.' -ForegroundColor Green
+                    Write-Log -LogLevel INFO -Message "LIMPIEZA: Limpieza manual completada (ExitCode=$($cleanupResult.ExitCode))."
+                    if ($cleanupResult.ExitCode -eq 3010) {
+                        Write-Warning 'DISM devolvio 3010 (operacion completada; reinicio requerido).'
+                    }
+                } catch {
+                    Write-Warning "Fallo la limpieza de componentes: $($_.Exception.Message)"
+                    Write-Log -LogLevel ERROR -Message "LIMPIEZA: Error en limpieza manual: $($_.Exception.Message)"
                 }
                 Pause
             }
@@ -2534,7 +2583,8 @@ function Limpieza-Menu {
                 $cleanupRecommended = $analysisResult.CleanupRecommended
                 $sequenceRestartRequired = $sequenceRestartRequired -or ($analysisResult.ExitCode -eq 3010)
 
-                if ($cleanupRecommended -eq "Yes" -or $imageState -eq "Unknown") {
+                # ScanHealth ya detiene la secuencia si el estado es Unknown.
+                if ($cleanupRecommended -eq "Yes") {
                     Write-Host "Procediendo con la limpieza..." -ForegroundColor Cyan;
                     
                     $cleanupArgs = @("/Image:$Script:MOUNT_DIR", '/Cleanup-Image', '/StartComponentCleanup', "/ScratchDir:$Script:Scratch_DIR")

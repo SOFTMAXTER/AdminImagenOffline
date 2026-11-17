@@ -188,7 +188,8 @@ function Save-Changes {
         $IMAGE_NAME = Read-Host "Ingrese el NOMBRE para la imagen interna (Enter = '$defaultName')"
         if ([string]::IsNullOrWhiteSpace($IMAGE_NAME)) { $IMAGE_NAME = $defaultName }
 
-        Write-Host "Descripcion predeterminada: $defaultDesc" -ForegroundColor Gray
+        Write-Host "Descripcion predeterminada: " -ForegroundColor Cyan -NoNewline
+        Write-Host $defaultDesc -ForegroundColor Gray
         $IMAGE_DESC = Read-Host "Ingrese la DESCRIPCION (Enter = conservar la predeterminada)"
         if ([string]::IsNullOrWhiteSpace($IMAGE_DESC)) { $IMAGE_DESC = $defaultDesc }
         
