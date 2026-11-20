@@ -104,6 +104,84 @@ function Show-OEMBranding-GUI {
         }
     }
 
+    function Get-OemImageMetadata {
+        $build   = 0
+        $edition = ""
+        $dispVer = ""
+        $osName  = ""
+        $fromDashboard = $false
+        $fromRegistry  = $false
+
+        if ($null -ne $Script:AIODashboardCache -and $null -ne $Script:AIODashboardCache.Data) {
+            $dash = $Script:AIODashboardCache.Data
+            $rawVer = if ($null -ne $dash.Version) { ([string]$dash.Version).Trim() } else { '' }
+            if ($rawVer -match '^\d+\.\d+\.(\d+)') {
+                $build = [int]$Matches[1]
+                $fromDashboard = $true
+            }
+            $rawEd = if ($null -ne $dash.Edition) { ([string]$dash.Edition).Trim() } else { '' }
+            if ($rawEd -and $rawEd -notmatch '(?i)no disponible') {
+                $edition = $rawEd
+                $fromDashboard = $true
+            }
+            $rawDisp = if ($null -ne $dash.DisplayVersion) { ([string]$dash.DisplayVersion).Trim() } else { '' }
+            if ($rawDisp -and $rawDisp -notmatch '(?i)no disponible|no aplica') {
+                $dispVer = $rawDisp
+                $fromDashboard = $true
+            }
+            $rawName = if ($null -ne $dash.Name) { ([string]$dash.Name).Trim() } else { '' }
+            if ($rawName -and $rawName -notmatch '(?i)no disponible') {
+                if ($dispVer -and $rawName -notlike "*$dispVer*") {
+                    $osName = "$rawName ($dispVer)"
+                } else {
+                    $osName = $rawName
+                }
+                $fromDashboard = $true
+            }
+        }
+
+        if ($build -le 0 -or [string]::IsNullOrWhiteSpace($edition) -or [string]::IsNullOrWhiteSpace($dispVer)) {
+            $regCurrentVer = "HKLM:\OfflineSoftware\Microsoft\Windows NT\CurrentVersion"
+            $verData       = Get-ItemProperty -Path $regCurrentVer -ErrorAction SilentlyContinue
+            if ($verData) {
+                if ($build -le 0 -and $null -ne $verData.CurrentBuildNumber) {
+                    $build = [int]$verData.CurrentBuildNumber
+                    $fromRegistry = $true
+                }
+                if ([string]::IsNullOrWhiteSpace($edition) -and $null -ne $verData.EditionID) {
+                    $edition = [string]$verData.EditionID
+                    $fromRegistry = $true
+                }
+                if ([string]::IsNullOrWhiteSpace($dispVer) -and $null -ne $verData.DisplayVersion) {
+                    $dispVer = [string]$verData.DisplayVersion
+                    $fromRegistry = $true
+                }
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($edition)) { $edition = "Desconocida" }
+
+        if ([string]::IsNullOrWhiteSpace($osName)) {
+            $osName = if     ($build -ge 26100) { "Windows 11 24H2+" }
+                      elseif ($build -ge 22621) { "Windows 11 22H2/23H2" }
+                      elseif ($build -ge 22000) { "Windows 11 21H2" }
+                      elseif ($build -ge 19041) { if ($dispVer) { "Windows 10 ($dispVer)" } else { "Windows 10 (Build $build)" } }
+                      else                      { "Build $build" }
+        }
+
+        $source = if ($fromDashboard -and $fromRegistry) { "Dashboard + Registro offline" }
+                  elseif ($fromDashboard)                { "Dashboard" }
+                  else                                   { "Registro offline" }
+
+        return [pscustomobject]@{
+            Build          = $build
+            Edition        = $edition
+            DisplayVersion = $dispVer
+            OsName         = $osName
+            Source         = $source
+        }
+    }
+
     # ------------------------------------------------------------------
     # 2. Construccion del formulario
     # ------------------------------------------------------------------
@@ -403,23 +481,11 @@ function Show-OEMBranding-GUI {
         $form.Refresh()
         Write-Log -LogLevel INFO -Message "OEM_Branding: Precargando datos y analizando imagen (Motor Nativo)..."
 
-        $regCurrentVer = "HKLM:\OfflineSoftware\Microsoft\Windows NT\CurrentVersion"
-        $verData       = Get-ItemProperty -Path $regCurrentVer -ErrorAction SilentlyContinue
-
-        if ($verData) {
-            $build   = if ($null -ne $verData.CurrentBuildNumber) { [int]$verData.CurrentBuildNumber } else { 0 }
-            $edition = if ($null -ne $verData.EditionID)          { $verData.EditionID }               else { "Desconocida" }
-            $dispVer = if ($null -ne $verData.DisplayVersion)     { $verData.DisplayVersion }          else { "" }
-
-            $osName = if     ($build -ge 26100) { "Windows 11 24H2+" }
-                      elseif ($build -ge 22621) { "Windows 11 22H2/23H2" }
-                      elseif ($build -ge 22000) { "Windows 11 21H2" }
-                      elseif ($build -ge 19041) { "Windows 10 ($dispVer)" }
-                      else                      { "Build $build" }
-
-            $editionCategory = Get-EditionCategory -EditionId $edition
-
-            $lblOsInfo.Text = "Detectado: $osName | Edicion: $edition ($editionCategory) | Build: $build"
+        $imgMeta = Get-OemImageMetadata
+        if ($imgMeta.Build -gt 0 -or $imgMeta.Edition -ne "Desconocida") {
+            $editionCategory = Get-EditionCategory -EditionId $imgMeta.Edition
+            $lblOsInfo.Text  = "Detectado: $($imgMeta.OsName) | Edicion: $($imgMeta.Edition) ($editionCategory) | Build: $($imgMeta.Build)"
+            Write-Log -LogLevel INFO -Message "OEM_Branding: Metadatos de imagen obtenidos desde $($imgMeta.Source) ($($imgMeta.OsName) | Edicion: $($imgMeta.Edition) | Build: $($imgMeta.Build))."
         }
 
         # Precargar OEMInformation
@@ -532,31 +598,17 @@ function Show-OEMBranding-GUI {
         Write-Log -LogLevel ACTION -Message "OEM_Branding: Iniciando motor de inyeccion nativo Zero-GPO."
 
         try {
-            $editionId     = "Desconocida"
-            $buildNumber   = 0
-            $dispVerEngine = ""
-
-            $verData = Get-ItemProperty -Path "HKLM:\OfflineSoftware\Microsoft\Windows NT\CurrentVersion" -ErrorAction SilentlyContinue
-
-            if ($verData) {
-                if ($null -ne $verData.EditionID)          { $editionId      = $verData.EditionID }
-                if ($null -ne $verData.CurrentBuildNumber) { $buildNumber    = [int]$verData.CurrentBuildNumber }
-                if ($null -ne $verData.DisplayVersion)     { $dispVerEngine  = $verData.DisplayVersion }
-            }
+            $imgMeta       = Get-OemImageMetadata
+            $editionId     = $imgMeta.Edition
+            $buildNumber   = $imgMeta.Build
+            $dispVerEngine = $imgMeta.DisplayVersion
 
             $isW11        = $buildNumber -ge 22000
             $isW11_22H2p  = $buildNumber -ge 22621
             $isW11_24H2p  = $buildNumber -ge 26100
-            
-            $editionCategory = Get-EditionCategory -EditionId $editionId
 
-            $osLabel = if     ($isW11_24H2p) { "W11 24H2+" }
-                       elseif ($isW11_22H2p) { "W11 22H2/23H2" }
-                       elseif ($isW11)       { "W11 21H2" }
-                       elseif ($buildNumber -ge 19041) {
-                           if ($dispVerEngine) { "W10 ($dispVerEngine)" } else { "W10 (Build $buildNumber)" }
-                       }
-                       else { "W10 (Build $buildNumber)" }
+            $editionCategory = Get-EditionCategory -EditionId $editionId
+            $osLabel         = $imgMeta.OsName
 
             $lblStatus.Text = "Aplicando para $osLabel ($editionId)..."
             $form.Refresh()

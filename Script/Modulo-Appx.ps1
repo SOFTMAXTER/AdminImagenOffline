@@ -378,6 +378,8 @@ public static class AIOAppxIdentityNative {
 
     function Get-AppxQueueAction($Data) {
         if ($script:appxBatchBlocked) { return 'BLOQUEADO' }
+        if ($Data.CompatCode -eq 'BUNDLE') { return 'BUNDLE INCOMPLETO' }
+        if ($Data.CompatCode -eq 'OS')     { return 'INCOMPATIBLE (OS)' }
         $pfn = $Data.PackageFamilyName
         if (-not $pfn) { return 'ERROR IDENTIDAD' }
         if (-not $script:appCache.ContainsKey($pfn)) { return 'INSTALAR' }
@@ -396,7 +398,7 @@ public static class AIOAppxIdentityNative {
             '^INSTALAR' { return [Drawing.Color]::Yellow }
             '^ACTUALIZAR' { return [Drawing.Color]::Cyan }
             '^REPARAR' { return [Drawing.Color]::Orange }
-            '^(ERROR|BLOQUEADO)' { return [Drawing.Color]::Salmon }
+            '^(ERROR|BLOQUEADO|INCOMPATIBLE|BUNDLE INCOMPLETO)' { return [Drawing.Color]::Salmon }
             default { return [Drawing.Color]::Gray }
         }
     }
@@ -639,31 +641,52 @@ public static class AIOAppxIdentityNative {
             }
         }
 
-        # Variable temporal de coleccion para evitar problemas de alcance en funciones anidadas.
-        $oldCollector = $script:__appxDepCollector
+        function Add-TargetDeviceFamiliesFromXml([string]$XmlText) {
+            if ([string]::IsNullOrWhiteSpace($XmlText)) { return }
+            $tdfElements = [regex]::Matches($XmlText, '(?is)<(?:\w+:)?TargetDeviceFamily\b[^>]*/?>')
+            foreach ($m in $tdfElements) {
+                $tdfName   = Get-AppxXmlAttributeValue -Text $m.Value -AttrName 'Name'
+                $minVerStr = Get-AppxXmlAttributeValue -Text $m.Value -AttrName 'MinVersion'
+                if ([string]::IsNullOrWhiteSpace($minVerStr)) { continue }
+                if ($tdfName -and $tdfName -notmatch '(?i)^(Windows\.Desktop|Windows\.Universal|Windows\.Core)$') { continue }
+                try {
+                    $v = [version]$minVerStr
+                    $script:__appxTdfCollector += [PSCustomObject]@{ Name = $tdfName; MinVersion = $v }
+                } catch {}
+            }
+        }
+
+        # Variables temporales de coleccion para evitar problemas de alcance en funciones anidadas.
+        $oldCollector    = $script:__appxDepCollector
+        $oldTdfCollector = $script:__appxTdfCollector
         $script:__appxDepCollector = @()
+        $script:__appxTdfCollector = @()
+        $isBundle        = $false
+        $validInnerCount = 0
+        $missingPayloads = @()
+        $corruptPayloads = @()
 
         try {
             $outerZip = [System.IO.Compression.ZipFile]::OpenRead($filePath)
 
             $bundleXml = Read-ZipEntryText -Zip $outerZip -EntryNamePattern 'AppxBundleManifest\.xml$'
             if ($bundleXml) {
+                $isBundle = $true
                 $manifestReadCount++
 
-                # Algunos bundles declaran dependencias en el bundle manifest; se agregan si existen.
+                # Algunos bundles declaran dependencias o TargetDeviceFamily en el bundle manifest.
                 Add-DependenciesFromXml -XmlText $bundleXml -SourceName 'AppxBundleManifest.xml'
+                Add-TargetDeviceFamiliesFromXml -XmlText $bundleXml
 
                 $appPackages = @(Get-BundleApplicationPackages -BundleXml $bundleXml |
                     Where-Object { Test-AppxArchCompatible $_.Arch } |
                     Sort-Object @{ Expression = { Get-AppxArchRank $_.Arch }; Ascending = $true })
 
                 # Leer solo los paquetes de aplicacion relevantes para la arquitectura de la imagen.
-                # Si hay varios con el mismo mejor rango, se leen todos para no perder dependencias especificas.
                 if ($appPackages.Count -gt 0) {
                     $bestRank = Get-AppxArchRank $appPackages[0].Arch
                     $appPackages = @($appPackages | Where-Object { (Get-AppxArchRank $_.Arch) -eq $bestRank })
                 } else {
-                    # Ultimo recurso dentro de bundles: buscar cualquier paquete app/msix, pero no activar fallback amplio.
                     $appPackages = @()
                 }
 
@@ -672,8 +695,9 @@ public static class AIOAppxIdentityNative {
                         Where-Object { $_.FullName -ieq $appPkg.FileName -or $_.FullName -match ([regex]::Escape($appPkg.FileName) + '$') } |
                         Select-Object -First 1
 
-                    if (-not $innerEntry) {
-                        Write-Log -LogLevel WARN -Message "AppxInjector: Bundle '$([System.IO.Path]::GetFileName($filePath))' referencia '$($appPkg.FileName)', pero no se encontro dentro del paquete."
+                    if (-not $innerEntry -or $innerEntry.Length -le 0) {
+                        $missingPayloads += $appPkg.FileName
+                        Write-Log -LogLevel WARN -Message "AppxInjector: Bundle '$([System.IO.Path]::GetFileName($filePath))' referencia '$($appPkg.FileName)', pero no contiene su payload interno."
                         continue
                     }
 
@@ -688,9 +712,16 @@ public static class AIOAppxIdentityNative {
                             $innerManifest = Read-ZipEntryText -Zip $innerZip -EntryNamePattern 'AppxManifest\.xml$'
                             if ($innerManifest) {
                                 $manifestReadCount++
+                                $validInnerCount++
                                 Add-DependenciesFromXml -XmlText $innerManifest -SourceName $appPkg.FileName
+                                Add-TargetDeviceFamiliesFromXml -XmlText $innerManifest
+                            } else {
+                                $corruptPayloads += $appPkg.FileName
                             }
                         } finally { $innerZip.Dispose() }
+                    } catch {
+                        $corruptPayloads += $appPkg.FileName
+                        Write-Log -LogLevel WARN -Message "AppxInjector: Payload interno invalido '$($appPkg.FileName)' en '$([System.IO.Path]::GetFileName($filePath))' - $($_.Exception.Message)"
                     } finally {
                         $innerStream.Dispose()
                         $memStream.Dispose()
@@ -701,6 +732,7 @@ public static class AIOAppxIdentityNative {
                 if ($xmlStr) {
                     $manifestReadCount++
                     Add-DependenciesFromXml -XmlText $xmlStr -SourceName 'AppxManifest.xml'
+                    Add-TargetDeviceFamiliesFromXml -XmlText $xmlStr
                 }
             }
         } catch {
@@ -708,7 +740,9 @@ public static class AIOAppxIdentityNative {
         } finally {
             if ($null -ne $outerZip) { $outerZip.Dispose() }
             $depEntries = @($script:__appxDepCollector)
+            $tdfEntries = @($script:__appxTdfCollector)
             $script:__appxDepCollector = $oldCollector
+            $script:__appxTdfCollector = $oldTdfCollector
         }
 
         $uniqueDeps = @(
@@ -717,10 +751,38 @@ public static class AIOAppxIdentityNative {
                 Sort-Object Name, MinVersion, Publisher -Unique
         )
 
+        # Evaluacion previa de compatibilidad: payload interno del bundle y TargetDeviceFamily MinVersion.
+        $compatCode  = ''
+        $compatError = ''
+        $minOsVersion = $null
+        if ($tdfEntries.Count -gt 0) {
+            $desktopEntries = @($tdfEntries | Where-Object { $_.Name -ieq 'Windows.Desktop' })
+            $evalEntries = if ($desktopEntries.Count -gt 0) { $desktopEntries } else { $tdfEntries }
+            $minOsVersion = ($evalEntries | Sort-Object MinVersion | Select-Object -First 1).MinVersion
+        }
+
+        if ($isBundle -and $validInnerCount -eq 0) {
+            $compatCode = 'BUNDLE'
+            if ($missingPayloads.Count -gt 0) {
+                $compatError = "Bundle incompleto (flat bundle o descarga parcial): falta el payload interno '$($missingPayloads -join ', ')' para $($script:imgArch)."
+            } elseif ($corruptPayloads.Count -gt 0) {
+                $compatError = "Bundle danado: no se pudo leer el manifiesto interno de '$($corruptPayloads -join ', ')'."
+            } else {
+                $compatError = "El bundle no contiene ningun sub-paquete de aplicacion compatible con $($script:imgArch)."
+            }
+        } elseif ($null -ne $minOsVersion -and $script:imgBuild -gt 0 -and $minOsVersion.Build -gt $script:imgBuild) {
+            $compatCode  = 'OS'
+            $reqLabel    = if ($minOsVersion.Build -ge 22000) { 'Windows 11' } else { "Windows build $($minOsVersion.Build)" }
+            $compatError = "Requiere $reqLabel (MinVersion $minOsVersion); la imagen montada es build $($script:imgBuild)."
+        }
+
         return @{
             Success           = ($manifestReadCount -gt 0)
             ManifestReadCount = $manifestReadCount
             Deps              = $uniqueDeps
+            MinOsVersion      = $minOsVersion
+            CompatCode        = $compatCode
+            CompatError       = $compatError
         }
     }
 
@@ -788,8 +850,13 @@ public static class AIOAppxIdentityNative {
 
 
     # Agrega un paquete analizado al ListView con accion heuristica (INSTALAR/ACTUALIZAR/REPARAR/OMITIR)
-    function Add-UwpToQueue ($MainPkg, $Meta, [array]$Deps, $LicensePath) {
-        $action = Get-AppxQueueAction $Meta
+    function Add-UwpToQueue ($MainPkg, $Meta, [array]$Deps, $LicensePath, [string]$CompatCode = '', [string]$CompatError = '') {
+        $actionInput = [PSCustomObject]@{
+            PackageFamilyName = $Meta.PackageFamilyName
+            Version           = $Meta.Version
+            CompatCode        = $CompatCode
+        }
+        $action = Get-AppxQueueAction $actionInput
         $color = Get-AppxActionColor $action
 
         $newVersion = $Meta.Version
@@ -823,6 +890,8 @@ public static class AIOAppxIdentityNative {
             Family       = $Meta.Family
             PackageFamilyName = $Meta.PackageFamilyName
             IdentityError = $Meta.IdentityError
+            CompatCode   = $CompatCode
+            CompatError  = $CompatError
             Version      = $newVersion
             VersionStr   = $Meta.VersionStr
             Arch         = $Meta.Arch
@@ -839,6 +908,10 @@ public static class AIOAppxIdentityNative {
         $newItem.SubItems.Add($MainPkg.FullName)                      | Out-Null
         $newItem.Tag = $appData
         if ($action -eq 'ERROR IDENTIDAD') { $newItem.ToolTipText = $Meta.IdentityError }
+        elseif ($CompatError) {
+            $newItem.ToolTipText = $CompatError
+            Write-Log -LogLevel WARN -Message "AppxInjector: [$action] $($MainPkg.Name) -> $CompatError"
+        }
 
         $lvAppQueue.Items.Add($newItem) | Out-Null
     }
@@ -905,7 +978,8 @@ public static class AIOAppxIdentityNative {
                         $fwMeta    = Get-CachedMeta $bestFw
                         $fwFiles = @(Get-ChildItem -LiteralPath $bestFw.DirectoryName -File -ErrorAction SilentlyContinue)
                         $fwLicPath = Resolve-AppxLicensePath -Files $fwFiles -Meta $fwMeta
-                        Add-UwpToQueue -MainPkg $bestFw -Meta $fwMeta -Deps @() -LicensePath $fwLicPath
+                        $fwManifest = Get-AppxManifestDependencies -filePath $bestFw.FullName
+                        Add-UwpToQueue -MainPkg $bestFw -Meta $fwMeta -Deps @() -LicensePath $fwLicPath -CompatCode $fwManifest.CompatCode -CompatError $fwManifest.CompatError
                     }
                 } else {
                     # Seleccion del paquete principal: bundle > archivo por arquitectura
@@ -1060,7 +1134,7 @@ public static class AIOAppxIdentityNative {
 
                     $licPath = Resolve-AppxLicensePath -Files $dirFiles -Meta $realMeta
 
-                    Add-UwpToQueue -MainPkg $mainPkg -Meta $realMeta -Deps $validatedDeps -LicensePath $licPath
+                    Add-UwpToQueue -MainPkg $mainPkg -Meta $realMeta -Deps $validatedDeps -LicensePath $licPath -CompatCode $manifestRead.CompatCode -CompatError $manifestRead.CompatError
                 }
             }
         } catch {
@@ -1119,18 +1193,54 @@ public static class AIOAppxIdentityNative {
                 return
             }
 
-            # 3. Detectar arquitectura de la imagen
-            if      (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysArm32"))    { $script:imgArch = "arm64" }
-            elseif (-not (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysWOW64"))) { $script:imgArch = "x86" }
-            else    { $script:imgArch = "x64" }
+            # 3. Obtener arquitectura, build y etiqueta del OS desde la cache del Dashboard (con fallback local)
+            $dashArch    = $null
+            $dashBuild   = 0
+            $dashOsLabel = $null
+            if ($null -ne $Script:AIODashboardCache -and $null -ne $Script:AIODashboardCache.Data) {
+                $dashMeta = $Script:AIODashboardCache.Data
+                $rawArch  = if ($null -ne $dashMeta.Architecture) { ([string]$dashMeta.Architecture).Trim() } else { '' }
+                switch -Regex ($rawArch) {
+                    '^(x64|amd64)$' { $dashArch = 'x64' }
+                    '^x86$'         { $dashArch = 'x86' }
+                    '^arm64$'       { $dashArch = 'arm64' }
+                }
+                $rawVer = if ($null -ne $dashMeta.Version) { ([string]$dashMeta.Version).Trim() } else { '' }
+                if ($rawVer -match '^\d+\.\d+\.(\d+)') {
+                    $dashBuild = [int]$Matches[1]
+                }
+                $rawName = if ($null -ne $dashMeta.Name) { ([string]$dashMeta.Name).Trim() } else { '' }
+                $rawDisp = if ($null -ne $dashMeta.DisplayVersion) { ([string]$dashMeta.DisplayVersion).Trim() } else { '' }
+                if ($rawName -and $rawName -notmatch '(?i)no disponible') {
+                    if ($rawDisp -and $rawDisp -notmatch '(?i)no disponible|no aplica' -and $rawName -notlike "*$rawDisp*") {
+                        $dashOsLabel = "$rawName ($rawDisp)"
+                    } else {
+                        $dashOsLabel = $rawName
+                    }
+                }
+            }
 
-            # 4. Leer build del OS desde el registro offline
-            $regCurVer = "HKLM:\OfflineSoftware\Microsoft\Windows NT\CurrentVersion"
-            if (Test-Path $regCurVer) {
-                try {
-                    $vd = Get-ItemProperty -Path $regCurVer -ErrorAction SilentlyContinue
-                    if ($null -ne $vd.CurrentBuildNumber) { $script:imgBuild = [int]$vd.CurrentBuildNumber }
-                } catch {}
+            if ($dashArch) {
+                $script:imgArch = $dashArch
+            } elseif (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysArm32")) {
+                $script:imgArch = "arm64"
+            } elseif (-not (Test-Path (Join-Path $Script:MOUNT_DIR "Windows\SysWOW64"))) {
+                $script:imgArch = "x86"
+            } else {
+                $script:imgArch = "x64"
+            }
+
+            # 4. Build del OS: prioridad cache del Dashboard; fallback al registro offline
+            if ($dashBuild -gt 0) {
+                $script:imgBuild = $dashBuild
+            } else {
+                $regCurVer = "HKLM:\OfflineSoftware\Microsoft\Windows NT\CurrentVersion"
+                if (Test-Path $regCurVer) {
+                    try {
+                        $vd = Get-ItemProperty -Path $regCurVer -ErrorAction SilentlyContinue
+                        if ($null -ne $vd.CurrentBuildNumber) { $script:imgBuild = [int]$vd.CurrentBuildNumber }
+                    } catch {}
+                }
             }
 
             try {
@@ -1147,11 +1257,17 @@ public static class AIOAppxIdentityNative {
             # Esto evita que el cierre tarde varios segundos o que DISM encuentre handles abiertos.
             Invoke-AppxSafeUnmount -Reason "lectura inicial de build/deprovisioned"
 
-            $osLabel = if     ($script:imgBuild -ge 26100) { "W11 24H2+" }
-                       elseif ($script:imgBuild -ge 22621) { "W11 22H2/23H2" }
-                       elseif ($script:imgBuild -ge 22000) { "W11 21H2" }
-                       elseif ($script:imgBuild -ge 19041) { "W10 22H2" }
-                       else                                { "Build $($script:imgBuild)" }
+            $osLabel = if ($dashOsLabel) {
+                           $dashOsLabel
+                       } elseif ($script:imgBuild -ge 26100) { "W11 24H2+" }
+                       elseif ($script:imgBuild -ge 22621)   { "W11 22H2/23H2" }
+                       elseif ($script:imgBuild -ge 22000)   { "W11 21H2" }
+                       elseif ($script:imgBuild -ge 19041)   { "W10 22H2" }
+                       else                                  { "Build $($script:imgBuild)" }
+
+            if ($dashArch -or $dashBuild -gt 0 -or $dashOsLabel) {
+                Write-Log -LogLevel INFO -Message "AppxInjector: Metadatos de imagen reutilizados desde cache del Dashboard ($osLabel | $($script:imgArch) | Build $($script:imgBuild))."
+            }
 
             # 5. Actualizar UI
             $lblOsInfo.Text      = "Imagen: $osLabel | Arquitectura: $($script:imgArch) | Build: $($script:imgBuild)"

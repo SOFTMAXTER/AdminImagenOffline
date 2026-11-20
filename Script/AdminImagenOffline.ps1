@@ -1075,6 +1075,7 @@ function Mount-Save-Menu {
         Write-Host ""
         if ($Script:IMAGE_MOUNTED -eq 1) {
             Write-Host "   [2] Recargar WIM (descartar cambios del montaje)"
+			Write-Host ""
         }
         if ($Script:IMAGE_MOUNTED -gt 0) {
             Write-Host " [ GUARDADO ]" -ForegroundColor Yellow
@@ -4180,21 +4181,21 @@ function Invoke-AIOConsoleSystemTool {
     try {
         # El hijo hereda la consola incluso si el caller captura este resultado.
         # No redirigir stdout/stderr: DISM conserva su progreso en la misma linea.
+        # Usar siempre Process.Start + WaitForExit sobre el PID directo de la herramienta
+        # (evita que Start-Process -Wait quede colgado esperando procesos auxiliares como wimserv.exe).
+        $start = New-Object System.Diagnostics.ProcessStartInfo
+        $start.FileName = $exe
+        $start.Arguments = $commandLine
+        $start.UseShellExecute = $false
+        $process = [Diagnostics.Process]::Start($start)
+        if ($null -eq $process) { throw "No se pudo iniciar $Tool." }
         if ($WaitForToolOnly) {
-            # Remount puede terminar mientras un proceso auxiliar sigue vivo. Conservar
-            # el handle del proceso que iniciamos y leer su propio codigo de salida.
-            $start = New-Object System.Diagnostics.ProcessStartInfo
-            $start.FileName = $exe
-            $start.Arguments = $commandLine
-            $start.UseShellExecute = $false
-            $process = [Diagnostics.Process]::Start($start)
-            if ($null -eq $process) { throw "No se pudo iniciar $Tool." }
-            Write-Log -LogLevel INFO -Message "MountRepair: $Tool iniciado, PID=$($process.Id)."
+            Write-Log -LogLevel INFO -Message "ConsoleTool: $Tool iniciado, PID=$($process.Id)."
             while (-not $process.WaitForExit(30000)) {
                 Write-Host "Esperando a $Tool (PID $($process.Id))..." -ForegroundColor DarkGray
             }
         } else {
-            $process = Start-Process -FilePath $exe -ArgumentList $commandLine -NoNewWindow -Wait -PassThru -ErrorAction Stop
+            $process.WaitForExit()
         }
         if ($null -eq $process -or $null -eq $process.ExitCode) { throw "No se obtuvo el codigo de salida de $Tool." }
         [pscustomobject]@{ ExitCode = [int]$process.ExitCode }

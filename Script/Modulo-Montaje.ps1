@@ -1115,7 +1115,7 @@ function Reload-Image {
         $Script:AIODashboardCache = $null
         $Script:CachedControlSet = $null
         $Script:ForceMenuRefresh = $false
-        $result = Invoke-AIOConsoleSystemTool -Tool dism.exe -Arguments @('/Mount-Image',"/ImageFile:$Script:WIM_FILE_PATH","/Index:$Script:MOUNTED_INDEX","/MountDir:$Script:MOUNT_DIR")
+        $result = Invoke-AIOConsoleSystemTool -Tool dism.exe -WaitForToolOnly -Arguments @('/Mount-Image',"/ImageFile:$Script:WIM_FILE_PATH","/Index:$Script:MOUNTED_INDEX","/MountDir:$Script:MOUNT_DIR")
         if ($result.ExitCode -ne 0) { throw "Error al volver a montar el WIM: $($result.ExitCode)" }
         $Script:IMAGE_MOUNTED = 1
         Write-Host '[OK] WIM recargado.' -ForegroundColor Green
