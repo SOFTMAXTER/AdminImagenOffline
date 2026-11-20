@@ -1,5 +1,5 @@
 
-# AdminImagenOffline V1.5.14 by SOFTMAXTER
+# AdminImagenOffline V1.5.15 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -9,15 +9,16 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.14 (Changelog)
+## 🆕 Novedades en la Versión 1.5.15 (Changelog)
 
-* **Secuencia completa de Limpieza con resultados verificados**: Cada paso (CheckHealth, ScanHealth, RestoreHealth, SFC, análisis del almacén y StartComponentCleanup) se comprueba por su código de salida y la secuencia se detiene en el primer paso fallido, cancelado o no confirmado, sin llegar a limpiar componentes. La limpieza de componentes de la secuencia solo se ejecuta cuando el análisis la recomienda (`Yes`). El código 3010 se trata como operación completada con reinicio requerido y se informa al final.
-* **Análisis del almacén de componentes con diagnóstico**: `AnalyzeComponentStore` usa el `dism.exe` del sistema con `/English` y conserva el código de salida, el log de DISM y la salida de consola en la carpeta de logs. La recomendación de limpieza (`Yes`/`No`) se interpreta de forma estricta: un resultado ausente, ambiguo o no reconocido ya no equivale a "No" y detiene la secuencia antes de limpiar.
-* **RestoreHealth y limpieza de componentes más robustos**: Se ejecutan mediante el ejecutor común del sistema con los argumentos protegidos (rutas con espacios y fuentes WIM/ESD). El reintento con fuente local (`/LimitAccess`) valida primero la consulta de índices del WIM y registra cualquier error, y `StartComponentCleanup` conserva `/ScratchDir` y la elección de `/ResetBase`.
-* **Barra de progreso de DISM legible**: En CheckHealth, ScanHealth y el análisis del almacén de componentes la barra de progreso se dibuja en una sola línea que se actualiza en lugar de repetirse decenas de veces, ajustada al ancho de la consola.
-* **Analizar y Limpiar Componentes manuales verificados**: La opción de análisis muestra la recomendación de limpieza (Sí/No) a partir del resultado confirmado de DISM, y la opción de limpieza usa el ejecutor del sistema con los argumentos protegidos, conserva `/ScratchDir` y la elección de `/ResetBase`, verifica el código de salida, registra los errores e informa si DISM pide reiniciar (3010).
-* **Guardar como nuevo WIM con nombre por defecto coherente**: El nombre y la descripción propuestos se toman de los metadatos del Dashboard (edición efectiva, normalizada para Windows 10/11, Cloud, Server y WinPE) y de la descripción exacta del catálogo, sin volver a leer el Registro offline ni requerir haber abierto otro menú.
-* **Montaje y Cambio de Edición**: Los comandos DISM del módulo de montaje (consulta de imágenes y `Cleanup-Mountpoints`) usan el `dism.exe` nativo (`Sysnative` en procesos de 32 bits), y la consulta de ediciones de destino usa `/English` para no depender del idioma del equipo.
+* **Generador WiOS de Autounattend**: Se incluye `Tools\WiOS-Autounattend-Generator.html` (*WiOS · Autounattend Generator 2.0*) y el módulo Unattend añade el botón **Abrir generador (WiOS)** en la pestaña de importación externa, que lo abre en el navegador y avisa si el archivo no se encuentra.
+* **Guardar como nuevo WIM verificado**: La captura se escribe primero en un archivo temporal `.captura-<GUID>.wim` junto al destino. Antes de publicarla se comprueba que contenga un único índice con el nombre esperado, que el indicador de arranque coincida y que el directorio de destino no haya cambiado; la copia anterior se conserva si existía y el temporal se elimina siempre. `/Bootable` se aplica solo si el índice montado es el índice de arranque del WIM de origen, y se rechaza guardar dentro del montaje o sobre el WIM de origen.
+* **Montaje y recarga más seguros**: *Recargar WIM* solo aparece con un WIM montado y comprueba que la sesión registrada en DISM coincide con el WIM seleccionado antes de desmontar y volver a montar; en un VHD avisa de que los cambios son inmediatos. Al iniciar solo se recupera una sesión VHD registrada por la herramienta y verificada por identidad, y la selección manual de partición se revalida. La recuperación con `Remount-Image` espera al proceso iniciado, informa cada 30 segundos y comprueba que la imagen y el índice no cambiaron ni estén protegidos (WinRE del equipo).
+* **Extracción de ISO reforzada**: La carpeta de extracción debe ser distinta de la raíz, del programa y de la ISO. El contenido se copia con `Robocopy` a una subcarpeta única (`<ISO>_aammdd_hhmm`) con barra de progreso por bytes, se retiran los atributos de solo lectura y, si ocurre un error, se indica la carpeta parcial.
+* **Despliegue a VHD / Disco Físico con verificaciones de seguridad**: Antes de borrar se revalida el disco externo por su identificador único y su estado de protección, y se comprueba que la imagen de origen (WIM, ESD o SWM, incluidas cadenas de VHD) no resida en el disco que se va a borrar. Las letras de partición destino se verifican (nunca de arranque o sistema), el destino VHD debe terminar en `.vhd` o `.vhdx` y, si ya existe, solo se reemplaza tras confirmar y verificar el nuevo disco virtual con `Test-VHD`.
+* **DeltaPack con verificación estricta**: El paquete debe tener un único manifiesto; las rutas relativas se validan (sin componentes no permitidos ni puntos de reanálisis en el paquete o el montaje), las listas SHA-256 deben estar completas y sin duplicados, las eliminaciones se comprueban contra el plan (tipo y cantidad) y el *Scratch* debe estar fuera de la imagen offline. Un paquete sin contenido aplicable se rechaza.
+* **Editar Índices**: Al exportar o eliminar, el índice indicado debe figurar en el inventario del archivo; un valor inexistente se rechaza antes de ejecutar DISM.
+* **Licencia**: El archivo `LICENSE` pasa de MIT al texto de la GNU GPLv3, coherente con el modelo de doble licencia descrito al final de este documento.
 
 ## Características Principales
 
@@ -58,6 +59,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
     ├── Tools/
     │   ├── oscdimg.exe
     │   ├── SetLockScreen.zip
+    │   ├── WiOS-Autounattend-Generator.html
     │   └── wimlib/                <-- wimlib-imagex.exe (verificación e incorporación de winre.wim, integración de índices y ajuste de CREATIONTIME)
     └── Script/
         ├── AdminImagenOffline.ps1
@@ -116,8 +118,8 @@ Este es el núcleo de la herramienta. Controla el ciclo de vida del montaje de l
 
 * **Montar / Guardar / Desmontar Imagen:** Submenú unificado con el ciclo de vida completo del montaje:
 
-  * **Montar Imagen:** Selecciona un archivo `.wim`, `.esd` (solo lectura/exportación) o disco virtual (`.vhd`/`.vhdx`). Incluye la opción **"Extraer desde una ISO"**, que monta la ISO, vacía de forma segura una carpeta de extracción temporal y vuelca el contenido usando `Robocopy` a máxima velocidad. Con discos virtuales (VHD), el script escanea inteligentemente saltándose las particiones EFI/Recovery, localiza la partición de Windows, le asigna una letra de unidad dinámica y la monta. **Importante:** los cambios en un VHD se guardan en tiempo real.
-  * **Recargar Imagen:** Desmonta y vuelve a montar para descartar cambios sin salir del flujo.
+  * **Montar Imagen:** Selecciona un archivo `.wim`, `.esd` (solo lectura/exportación) o disco virtual (`.vhd`/`.vhdx`). Incluye la opción **"Extraer desde una ISO"**, que monta la ISO, vacía de forma segura una carpeta de extracción temporal y vuelca el contenido usando `Robocopy` a máxima velocidad. Con discos virtuales (VHD), el script escanea inteligentemente saltándose las particiones EFI/Recovery, localiza la partición de Windows, le asigna una letra de unidad dinámica y la monta. **Importante:** los cambios en un VHD se guardan en tiempo real. La carpeta de extracción debe ser distinta de la raíz, del programa y de la ISO; el contenido se copia a una subcarpeta única con barra de progreso.
+  * **Recargar WIM:** Desmonta y vuelve a montar un WIM para descartar cambios sin salir del flujo, tras comprobar que la sesión de DISM corresponde a ese WIM. No aplica a los VHD, cuyos cambios son inmediatos.
   * **Guardar Cambios:** Sobrescribir el índice actual, agregarlos como un nuevo índice (*Append*) o exportarlos a un archivo `.wim` completamente nuevo (*Save As*). Al guardar como nuevo WIM, el nombre y la descripción por defecto salen de los metadatos del Dashboard.
   * **Guardar y Desmontar (Commit) / Desmontar sin Guardar:** Si hay bloqueos de registro, el script fuerza un `[GC]::Collect()` (recolección de basura en .NET) para liberar *handles* huérfanos antes de desmontar, evitando corrupciones.
 * **Editar Info/Metadatos:** Cambia el nombre interno y la descripción de la imagen (ej. de "Windows 10 Pro" a "Mi Custom OS").
@@ -137,7 +139,7 @@ Diseñado para preparar la distribución y el despliegue final de tu sistema per
 * **Editar boot.wim:** Pregunta qué índice editar (detecta el de instalación por su nombre) y permite inyectar controladores de almacenamiento para que equipos modernos (con tecnologías Intel RST o VMD) reconozcan los discos duros durante la instalación, o inyectar DaRT. En el índice de instalación (Setup) abre además una **GUI de Setup y fondos** con Setup Legacy (`/legacy` en `winpeshl.ini`), estilo Windows 10 (renombra `setupprep.exe` en el índice y en el medio completo), bypass de TPM, Secure Boot y RAM (`LabConfig` offline) y fondo de instalación personalizado con vista previa. Cada cambio conserva un respaldo reversible y se verifica antes del *Commit*: al volver, `T` y `S` guardan y `T` y `N` descartan todo, incluidos los cambios externos al `boot.wim`.
 * **Gestionar WinRE (Entorno de Recuperación):** Localiza `winre.wim` en Windows (y en las particiones *Recovery* si la imagen es un VHD/VHDX), lo copia a una sesión aislada en el *Scratch* verificada por SHA-256, lo monta, permite inyectar Addons o Drivers y, al guardar, hace *Commit*, reexporta con `/Export-Image /Bootable` (recompresión máxima, ahorrando cientos de megabytes de "peso muerto"), verifica la imagen final en solo lectura y la publica en `Windows\System32\Recovery` con respaldo, comprobando contenido, ACL, propietario y atributos, con reversión automática si algo falla.
 * **Crear ISO Booteable:** Genera de manera eficiente un archivo ISO listo para ser empleado en herramientas como Rufus o Ventoy, asegurando compatibilidad integral con sistemas UEFI y BIOS Legacy.
-* **Despliegue a VHD / Disco Físico:** Aplica directamente tu imagen de Windows (WIM, ESD o conjunto SWM, seleccionando su primera parte) a una unidad de almacenamiento externa o a un disco virtual, particionando y configurando los sectores de arranque de manera totalmente automatizada. Incluye la opción **Compact OS** para reducir el espacio ocupado por Windows 10/11 cliente (a costa de más tiempo de despliegue y uso de CPU). Puedes cancelar el proceso en cualquier momento (se limpia el destino creado) y el tiempo total queda registrado.
+* **Despliegue a VHD / Disco Físico:** Aplica directamente tu imagen de Windows (WIM, ESD o conjunto SWM, seleccionando su primera parte) a una unidad de almacenamiento externa o a un disco virtual, particionando y configurando los sectores de arranque de manera totalmente automatizada. Incluye la opción **Compact OS** para reducir el espacio ocupado por Windows 10/11 cliente (a costa de más tiempo de despliegue y uso de CPU). Puedes cancelar el proceso en cualquier momento (se limpia el destino creado) y el tiempo total queda registrado. Antes de borrar revalida el disco destino y comprueba que la imagen de origen no esté en él.
 
 ### [ 4 ] Actualizaciones e Idiomas (Servicing)
 Menú unificado para los dos motores de servicing offline:
@@ -169,7 +171,7 @@ Gestión de todo lo que se ejecuta o se preinstala dentro de la imagen:
 
 ### [ 8 ] OOBE y Marca (Branding)
 
-* **Automatización OOBE (Unattend.xml):** Genera respuestas XML para instalaciones desatendidas, omitiendo pantallas molestas, configurando redes, cuentas de usuario, contraseñas que nunca expiran y ajustes de la barra de tareas.
+* **Automatización OOBE (Unattend.xml):** Genera respuestas XML para instalaciones desatendidas, omitiendo pantallas molestas, configurando redes, cuentas de usuario, contraseñas que nunca expiran y ajustes de la barra de tareas. Incluye un botón para abrir el generador **WiOS** (`Tools\WiOS-Autounattend-Generator.html`) desde la pestaña de importación externa.
 * **OEM Branding:** Personaliza fondos de pantalla predeterminados, la pantalla de bloqueo y la información del fabricante (Soporte) en las propiedades del sistema, permite bloquear permanentemente los fondos de pantalla y pantallas de bloqueo aplicados mediante políticas del sistema, junto con un escalado perfecto de las imágenes de perfil para Windows 11.
 
 ### [ 9 ] Limpieza y Reparación
@@ -210,7 +212,7 @@ Este software realiza operaciones avanzadas que modifican archivos de imagen bas
 ## Autor y Colaboradores
 
 * **Autor Principal**: SOFTMAXTER
-* **Colaboradores**: [LatinserverEc](https://github.com/LatinserverEc) (Gracias por el feedback y el testing continuo).
+* **Colaboradores**: [LatinserverEc](https://github.com/LatinserverEc) (Gracias por el feedback y el testing continuo). Un agradecimiento especial por sus contribuciones, como el **Generador WiOS de Autounattend**, y por sus sugerencias constantes.
 * **Análisis y refinamiento de código**: Realizado en colaboración con inteligencia artificial para garantizar máxima calidad, seguridad SDDL, optimización de algoritmos y transición integral a interfaces gráficas nativas de Windows Forms.
 
 ---
