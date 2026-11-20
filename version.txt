@@ -7,7 +7,6 @@
 - Despliegue a VHD / Disco Fisico: antes de borrar se revalida el disco externo por su identificador unico y su estado de proteccion, y se comprueba que la imagen de origen (WIM, ESD o SWM, incluidas cadenas de VHD) no resida en el disco que se va a borrar. Las letras de particion destino se verifican (nunca de arranque o sistema), el destino VHD debe terminar en .vhd o .vhdx y, si ya existe, solo se reemplaza tras confirmar y verificar el nuevo disco virtual con Test-VHD.
 - DeltaPack: el paquete debe tener un unico manifiesto; las rutas relativas se validan (sin componentes no permitidos ni puntos de reanalisis en el paquete o el montaje), las listas SHA-256 deben estar completas y sin duplicados, las eliminaciones se comprueban contra el plan (tipo y cantidad) y el Scratch debe estar fuera de la imagen offline. Un paquete sin contenido aplicable se rechaza.
 - Editar Indices: al exportar o eliminar, el indice indicado debe figurar en el inventario del archivo; un valor inexistente se rechaza antes de ejecutar DISM.
-- Licencia: el archivo LICENSE pasa de MIT al texto de la GNU GPLv3, coherente con el modelo de doble licencia descrito en el README.
 ====================================================
 
 1.5.14
