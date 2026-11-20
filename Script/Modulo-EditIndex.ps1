@@ -42,6 +42,16 @@
 # =============================================
 #  FUNCIONES DE ACCION (Edicion de indices)
 # =============================================
+function Read-AIOExistingIndex {
+    param([string]$ImagePath)
+    $indexes = @(Get-AIOWimIndexes -ImagePath $ImagePath)
+    $selected = 0
+    if (-not [int]::TryParse((Read-Host 'Selecciona un indice de la lista'), [ref]$selected) -or $selected -notin $indexes) {
+        throw 'El indice no figura en el inventario del archivo.'
+    }
+    return $selected
+}
+
 function Export-Index {
     Clear-Host
     Write-Log -LogLevel INFO -Message "IndexManager: Iniciando modulo de exportacion de indices WIM."
@@ -83,10 +93,8 @@ function Export-Index {
     
     # MENSAJE DE ESPERA AÑADIDO AQUI
     Write-Host "Por favor, espere. DISM esta leyendo la estructura del archivo (Esto puede tardar unos segundos)..." -ForegroundColor Cyan
-    dism /get-wiminfo /wimfile:"$Script:WIM_FILE_PATH"
-    
-    $INDEX_TO_EXPORT = Read-Host "`nIngrese el numero de Indice que desea exportar"
-    # Validar que INDEX_TO_EXPORT sea un numero valido podria añadirse aqui
+    try { $INDEX_TO_EXPORT = Read-AIOExistingIndex -ImagePath $Script:WIM_FILE_PATH }
+    catch { Write-Warning $_.Exception.Message; Pause; return }
     Write-Log -LogLevel INFO -Message "IndexManager: Indice objetivo ingresado por el usuario -> [$INDEX_TO_EXPORT]"
 
     $wimFileObject = Get-Item -Path $Script:WIM_FILE_PATH
@@ -155,10 +163,8 @@ function Delete-Index {
     
     # MENSAJE DE ESPERA AÑADIDO AQUI
     Write-Host "Por favor, espere. DISM esta leyendo la estructura del archivo (Esto puede tardar unos segundos)..." -ForegroundColor Cyan
-    dism /get-wiminfo /wimfile:"$Script:WIM_FILE_PATH"
-    
-    $INDEX_TO_DELETE = Read-Host "`nIngrese el numero de Indice que desea eliminar"
-    # Validar que INDEX_TO_DELETE sea un numero valido podria añadirse aqui
+    try { $INDEX_TO_DELETE = Read-AIOExistingIndex -ImagePath $Script:WIM_FILE_PATH }
+    catch { Write-Warning $_.Exception.Message; Pause; return }
     Write-Log -LogLevel INFO -Message "IndexManager: Indice objetivo ingresado por el usuario -> [$INDEX_TO_DELETE]"
 
     $CONFIRM = Read-Host "Esta seguro que desea eliminar el Indice $INDEX_TO_DELETE de forma PERMANENTE? (S/N)"

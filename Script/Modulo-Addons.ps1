@@ -178,13 +178,16 @@ function Install-OfflineAddon {
 function Get-DeltaPackManifest {
     param([Parameter(Mandatory=$true)][string]$PackagePath)
 
-    $manifestFile = Get-ChildItem -Path $PackagePath -Filter "manifest_*.json" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    $files = @(Get-ChildItem -LiteralPath $PackagePath -Filter 'manifest_*.json' -File -ErrorAction Stop)
+    if ($files.Count -gt 1) { throw 'El paquete contiene varios manifiestos.' }
+    $manifestFile = $files | Select-Object -First 1
     if (-not $manifestFile) {
         throw "No se encontro 'manifest_*.json' en '$PackagePath'. No es un paquete DeltaPack Dual-Engine valido."
     }
 
+    $manifestPath = Resolve-AIODeltaChild $PackagePath $manifestFile.Name
     try {
-        $manifest = Get-Content -Path $manifestFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     } catch {
         throw "El manifest '$($manifestFile.Name)' no es un JSON valido: $($_.Exception.Message)"
     }
@@ -201,74 +204,139 @@ function Get-DeltaPackManifest {
     return $manifest
 }
 
-function Invoke-DeltaPackDeletions {
-    param([Parameter(Mandatory=$true)][string]$DeletionsPath)
+function Resolve-AIODeltaChild {
+    param([string]$Root,[string]$Relative)
+    if ([string]::IsNullOrWhiteSpace($Relative) -or $Relative -match '^[\\/]|[:*?"<>|\x00-\x1f]') {
+        throw "Nombre relativo de paquete invalido: '$Relative'."
+    }
+    $current = [IO.Path]::GetFullPath($Root)
+    $rootAttributes = [IO.File]::GetAttributes($current)
+    if (($rootAttributes -band [IO.FileAttributes]::ReparsePoint) -or -not ($rootAttributes -band [IO.FileAttributes]::Directory)) {
+        throw "Raiz de paquete o montaje no verificable: $Root"
+    }
+    $parts = @($Relative.TrimEnd('\','/') -split '[\\/]')
+    if ($parts.Count -gt 1 -and $parts[0] -eq '.') { $parts = @($parts | Select-Object -Skip 1) }
+    foreach ($name in $parts) {
+        if (-not $name -or $name -match '[ .]$|^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³]|CONIN\$|CONOUT\$)(?:\.|$)') {
+            throw "Componente de ruta no permitido: '$Relative'."
+        }
+        $current = [IO.Path]::Combine($current,$name)
+        try { $attributes = [IO.File]::GetAttributes($current) }
+        catch [System.IO.FileNotFoundException] { continue }
+        catch [System.IO.DirectoryNotFoundException] { continue }
+        if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Ruta redirigida en el paquete o montaje: $current" }
+    }
+    return $current
+}
 
-    $deletions = Get-Content -Path $DeletionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $applied = 0; $notFound = 0; $failed = 0
-
-    foreach ($entry in @($deletions.entries)) {
-        if ($entry.operation -ne 'delete') { continue }
-        $targetPath = Join-Path $Script:MOUNT_DIR $entry.path
-        try {
-            if (Test-Path -LiteralPath $targetPath) {
-                if ($entry.kind -eq 'directory') {
-                    Remove-Item -LiteralPath $targetPath -Recurse -Force -ErrorAction Stop
-                } else {
-                    Remove-Item -LiteralPath $targetPath -Force -ErrorAction Stop
-                }
-                $applied++
-                Write-Log -LogLevel INFO -Message "DeltaPackDeletions: Tombstone aplicado -> $($entry.path)"
-            } else {
-                $notFound++
-                Write-Log -LogLevel INFO -Message "DeltaPackDeletions: Ruta ya inexistente (omitido) -> $($entry.path)"
-            }
-        } catch {
-            $failed++
-            Write-Log -LogLevel ERROR -Message "DeltaPackDeletions: Fallo al eliminar '$($entry.path)': $($_.Exception.Message)"
+function Get-AIODeltaTree {
+    param([string]$Root)
+    $stack = New-Object 'System.Collections.Generic.Stack[IO.DirectoryInfo]'
+    $stack.Push([IO.DirectoryInfo]::new($Root))
+    while ($stack.Count) {
+        foreach ($entry in $stack.Pop().GetFileSystemInfos()) {
+            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Punto de reanalisis en el arbol: $($entry.FullName)" }
+            $entry
+            if ($entry -is [IO.DirectoryInfo]) { $stack.Push($entry) }
         }
     }
+}
 
-    Write-Log -LogLevel ACTION -Message "DeltaPackDeletions: Aplicadas=$applied Inexistentes=$notFound Fallidas=$failed (Total accionables: $($deletions.actionableEntryCount))"
-
-    if ($failed -gt 0) {
-        throw "$failed eliminacion(es) obligatorias del paquete (Deletions JSON) no se pudieron aplicar. Revisa el log."
+function Remove-AIODeltaScratch {
+    param([IO.DirectoryInfo]$Directory)
+    # No seguir enlaces, incluso al retirar una extraccion fallida bajo Windows PowerShell 5.1.
+    foreach ($item in $Directory.GetFileSystemInfos()) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { $item.Delete(); continue }
+        if ($item -is [IO.DirectoryInfo]) { Remove-AIODeltaScratch $item }
+        else { $item.IsReadOnly = $false; $item.Delete() }
     }
-    return $applied
+    $Directory.Delete()
+}
+
+function Assert-AIODeltaChecksums {
+    param([string]$List,[string]$Root,[string]$RequiredFile)
+    $seen = @{}
+    foreach ($line in (Get-Content -LiteralPath $List -Encoding UTF8 -ErrorAction Stop)) {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith('#')) { continue }
+        if ($line -notmatch '^([0-9a-f]{64})[ \t]+[*]?(.+)$') { throw "Entrada SHA-256 invalida en $List." }
+        $expected = $Matches[1]
+        $file = Resolve-AIODeltaChild $Root $Matches[2]
+        if ($seen.ContainsKey($file)) { throw "Entrada SHA-256 duplicada: $file" }
+        $seen[$file] = $true
+        if (-not [IO.File]::Exists($file) -or (Get-FileHash -LiteralPath $file -Algorithm SHA256 -ErrorAction Stop).Hash -ne $expected) {
+            throw "No se pudo verificar SHA-256 de '$file'."
+        }
+    }
+    if (-not $seen.Count -or ($RequiredFile -and -not $seen.ContainsKey($RequiredFile))) { throw "Lista de integridad incompleta: $List" }
+}
+
+function Get-AIODeltaDeletionTarget {
+    param($Entry)
+    $target = Resolve-AIODeltaChild $Script:MOUNT_DIR $Entry.path
+    if ($Entry.kind -notin @('file','directory')) { throw "Tipo de eliminacion no reconocido: $($Entry.kind)" }
+    if (Test-Path -LiteralPath $target -ErrorAction Stop) {
+        $item = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+        if ($item.PSIsContainer -ne ($Entry.kind -eq 'directory')) { throw "El tipo del destino difiere del plan: $target" }
+        if ($item.PSIsContainer) { Get-AIODeltaTree $target | Out-Null }
+    }
+    return $target
+}
+
+function Invoke-DeltaPackDeletions {
+    param([object[]]$Entries)
+    foreach ($entry in $Entries) {
+        $target = Get-AIODeltaDeletionTarget $entry
+        if (Test-Path -LiteralPath $target -ErrorAction Stop) {
+            if ($entry.kind -eq 'directory') {
+                # Retirar de las hojas hacia la raiz. Una entrada nueva hace fallar el borrado
+                # de la carpeta en vez de iniciar un recorrido recursivo no validado.
+                $children = @(Get-AIODeltaTree $target)
+                for ($i = $children.Count - 1; $i -ge 0; $i--) {
+                    $child = $children[$i]
+                    $relative = $child.FullName.Substring($Script:MOUNT_DIR.TrimEnd('\','/').Length + 1)
+                    $verified = Resolve-AIODeltaChild $Script:MOUNT_DIR $relative
+                    if ($child -is [IO.DirectoryInfo]) { [IO.Directory]::Delete($verified, $false) }
+                    else { Remove-Item -LiteralPath $verified -Force -ErrorAction Stop }
+                }
+                $target = Resolve-AIODeltaChild $Script:MOUNT_DIR $entry.path
+                [IO.Directory]::Delete($target, $false)
+            } else { Remove-Item -LiteralPath $target -Force -ErrorAction Stop }
+            Write-Log -LogLevel ACTION -Message "DeltaPack: eliminado $target"
+        }
+    }
 }
 
 function Invoke-DeltaPackActions {
     param(
-        [Parameter(Mandatory=$true)][string]$ActionsPath,
+        [Parameter(Mandatory=$true)]$Actions,
         [Parameter(Mandatory=$true)][ValidateSet('afterWimBeforeRegistry','afterRegistry')][string]$Phase
     )
 
-    $actions = Get-Content -Path $ActionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $phaseData = $actions.phases.$Phase
     if (-not $phaseData) { return }
 
     if ($Phase -eq 'afterWimBeforeRegistry') {
-        foreach ($drv in @($phaseData.driverPackages)) {
-            $infFull = Join-Path $Script:MOUNT_DIR $drv.infPath
+        foreach ($drv in $phaseData.driverPackages) {
+            $infFull = Resolve-AIODeltaChild $Script:MOUNT_DIR $drv.infPath
             if (Test-Path -LiteralPath $infFull) {
                 Write-Log -LogLevel ACTION -Message "DeltaPackActions: Registrando driver offline -> $($drv.infPath)"
-                $proc = Start-Process "dism.exe" -ArgumentList "/Image:`"$($Script:MOUNT_DIR.TrimEnd('\'))`" /Add-Driver /Driver:`"$infFull`" /ForceUnsigned" -Wait -NoNewWindow -PassThru
+                $proc = Invoke-AIOConsoleSystemTool -Tool dism.exe -Arguments @("/Image:$Script:MOUNT_DIR",'/Add-Driver',"/Driver:$infFull",'/ForceUnsigned')
                 if ($proc.ExitCode -ne 0) {
                     throw "DISM /Add-Driver fallo con codigo $($proc.ExitCode) para '$($drv.infPath)'."
                 }
             } else {
-                Write-Log -LogLevel WARN -Message "DeltaPackActions: INF de driver referenciado no encontrado tras aplicar el WIM: $($drv.infPath)"
+                throw "INF requerido ausente: $($drv.infPath)"
             }
         }
-        foreach ($cat in @($phaseData.protectedCatalogs)) {
+        foreach ($cat in $phaseData.protectedCatalogs) {
             Write-Log -LogLevel WARN -Message "DeltaPackActions: Catalogo/controlador protegido requiere revision manual (no automatizable): $($cat.path)"
         }
     }
     else {
-        foreach ($task in @($phaseData.scheduledTasks)) {
+        foreach ($task in $phaseData.scheduledTasks) {
             Write-Log -LogLevel INFO -Message "DeltaPackActions: Tarea programada pendiente de validacion post-arranque: $($task.taskFile)"
         }
-        foreach ($rp in @($phaseData.reparsePoints)) {
+        foreach ($rp in $phaseData.reparsePoints) {
             Write-Log -LogLevel INFO -Message "DeltaPackActions: Punto de reanalisis reportado por el paquete: $rp"
         }
     }
@@ -302,129 +370,93 @@ function Install-DeltaPackPackage {
         Write-Log -LogLevel WARN -Message "DeltaPack [$fullName]: Build de captura ($($manifest.compatibility.buildNumber)) difiere del build de la imagen montada ($($regData.CurrentBuildNumber)). Continuando (politica declarada: '$($manifest.compatibility.policy)')."
     }
 
-    $hasWim = $false; $hasReg = $false; $hasDeletions = $false; $hasActions = $false
+    $outputs = @{}
+    foreach ($key in @('wimFile','regFile','actionsFile','deletionsFile','checksumsFile','artifactChecksumsFile')) {
+        $relative = $manifest.outputs.$key
+        if ($null -eq $relative -or $relative -ceq '') { continue }
+        $file = Resolve-AIODeltaChild $PackagePath $relative
+        if (-not [IO.File]::Exists($file)) { throw "Recurso declarado ausente ($key): $relative" }
+        $outputs[$key] = $file
+    }
+    if ($outputs.artifactChecksumsFile) { Assert-AIODeltaChecksums $outputs.artifactChecksumsFile $PackagePath $outputs.wimFile }
+    if ($outputs.checksumsFile -and -not $outputs.wimFile) { throw 'Lista de payload declarada sin WIM.' }
+
+    $entries = @()
+    if ($outputs.deletionsFile) {
+        $deletions = Get-Content -LiteralPath $outputs.deletionsFile -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($null -eq $deletions.entries) { throw 'Lista de eliminaciones incompleta.' }
+        $entries = @($deletions.entries | Where-Object { $_.operation -eq 'delete' })
+        foreach ($entry in $entries) { $null = Get-AIODeltaDeletionTarget $entry }
+    }
+    if ($null -ne $manifest.deletions.actionableEntryCount -and $entries.Count -ne [int]$manifest.deletions.actionableEntryCount) {
+        throw 'El numero de eliminaciones del plan difiere del manifest.'
+    }
+    $actions = $null
+    $drivers = @()
+    if ($outputs.actionsFile) {
+        $actions = Get-Content -LiteralPath $outputs.actionsFile -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if (-not $actions.phases) { throw 'Plan de acciones sin fases.' }
+        $drivers = @($actions.phases.afterWimBeforeRegistry.driverPackages | Where-Object { $null -ne $_ })
+        foreach ($driver in $drivers) { $null = Resolve-AIODeltaChild $Script:MOUNT_DIR $driver.infPath }
+    }
+    if (-not ($outputs.wimFile -or $outputs.regFile -or $outputs.actionsFile -or $outputs.deletionsFile)) {
+        throw 'El paquete no declara contenido aplicable.'
+    }
+
+    $stage = $null
     $blockedSections = 0
-
-    # --- PASO 1 (deployment.order): Aplicar WIM ---
-    $wimRel = $manifest.outputs.wimFile
-    if ($wimRel) {
-        $wimFull = Join-Path $PackagePath $wimRel
-        if (Test-Path -LiteralPath $wimFull) {
-
-            # 1a. Integridad del artefacto WIM contra Artifacts_*.sha256
-            $artifactsRel = $manifest.outputs.artifactChecksumsFile
-            if ($artifactsRel) {
-                $artifactsFull = Join-Path $PackagePath $artifactsRel
-                if (Test-Path -LiteralPath $artifactsFull) {
-                    $line = Select-String -Path $artifactsFull -Pattern $wimRel -SimpleMatch | Select-Object -First 1
-                    if ($line -and $line.Line -match '^([0-9a-fA-F]{64})\s{2}') {
-                        $expectedHash = $Matches[1]
-                        $actualHash = (Get-FileHash -Path $wimFull -Algorithm SHA256).Hash
-                        if ($actualHash -ne $expectedHash) {
-                            throw "El hash SHA256 de '$wimRel' no coincide con '$artifactsRel'. El paquete puede estar corrupto o manipulado."
-                        }
-                        Write-Log -LogLevel INFO -Message "DeltaPack [$fullName]: Integridad del WIM verificada contra $artifactsRel."
-                    }
+    try {
+        if ($outputs.wimFile) {
+            $indexes = @(Get-AIOWimIndexes -ImagePath $outputs.wimFile)
+            $index = if ($indexes.Count -eq 1) { $indexes[0] } else { $WimIndex }
+            if ($index -notin $indexes) { throw "Indice WIM ausente: $index" }
+            $scratch = (Get-AIOFileIdentity $Script:Scratch_DIR).Path
+            $mount = (Get-AIOFileIdentity $Script:MOUNT_DIR).Path
+            if (Test-AIOPathWithin $scratch $mount) { throw 'Scratch debe estar fuera de la imagen offline.' }
+            $stage = (New-Item -ItemType Directory -Path (Join-Path $Script:Scratch_DIR ('DeltaPack_' + [Guid]::NewGuid().ToString('N'))) -ErrorAction Stop).FullName
+            $result = Invoke-AIOConsoleSystemTool -Tool dism.exe -Arguments @('/Apply-Image',"/ImageFile:$($outputs.wimFile)","/Index:$index","/ApplyDir:$stage")
+            if ($result.ExitCode -ne 0) { throw "Fallo al extraer el WIM (DISM $($result.ExitCode))." }
+            if ($outputs.checksumsFile) { Assert-AIODeltaChecksums $outputs.checksumsFile $stage }
+            # Verificar tanto el arbol extraido como cada ruta equivalente en el destino antes de copiar.
+            Get-AIODeltaTree $stage | ForEach-Object {
+                $relative = $_.FullName.Substring($stage.Length + 1)
+                $target = Resolve-AIODeltaChild $Script:MOUNT_DIR $relative
+                if ((Test-Path -LiteralPath $target) -and ([IO.Directory]::Exists($target) -ne ($_ -is [IO.DirectoryInfo]))) {
+                    throw "Tipo de archivo incompatible en la imagen: $relative"
                 }
             }
-
-            # 1b. Extraccion del payload + 1c. Verificacion opcional contra Checksums_*.sha256 + 1d. Despliegue con seguridad NTFS completa
-            $tempExtract = Join-Path $Script:Scratch_DIR "DeltaPack_$fullName`_$([System.Guid]::NewGuid().ToString('N').Substring(0,6))"
-            try {
-                $dismInfo = dism.exe /Get-WimInfo /WimFile:"$wimFull" /English | Select-String "Index :"
-                $indexCount = @($dismInfo).Count
-                $actualIndex = if ($indexCount -le 1) { 1 } else { $WimIndex }
-
-                New-Item -Path $tempExtract -ItemType Directory -Force | Out-Null
-                Write-Log -LogLevel ACTION -Message "DeltaPack [$fullName]: Extrayendo WIM (Indice $actualIndex)..."
-                $proc = Start-Process "dism.exe" -ArgumentList "/Apply-Image /ImageFile:`"$wimFull`" /Index:$actualIndex /ApplyDir:`"$tempExtract`"" -Wait -NoNewWindow -PassThru
-                if ($proc.ExitCode -ne 0) { throw "DISM /Apply-Image fallo al extraer '$wimRel' (Codigo: $($proc.ExitCode))." }
-
-                $checksumsRel = $manifest.outputs.checksumsFile
-                if ($checksumsRel) {
-                    $checksumsFull = Join-Path $PackagePath $checksumsRel
-                    if (Test-Path -LiteralPath $checksumsFull) {
-                        $mismatch = 0; $verified = 0
-                        Get-Content -Path $checksumsFull -Encoding UTF8 | ForEach-Object {
-                            if ($_ -match '^([0-9a-fA-F]{64})\s{2}(.+)$') {
-                                $expected = $Matches[1]; $relFile = $Matches[2].TrimEnd("`r")
-                                $absFile = Join-Path $tempExtract $relFile
-                                if (Test-Path -LiteralPath $absFile) {
-                                    $actual = (Get-FileHash -Path $absFile -Algorithm SHA256).Hash
-                                    if ($actual -eq $expected) { $verified++ } else { $mismatch++ }
-                                } else { $mismatch++ }
-                            }
-                        }
-                        Write-Log -LogLevel INFO -Message "DeltaPack [$fullName]: Checksums de payload verificados=$verified, discrepancias=$mismatch."
-                        if ($mismatch -gt 0) {
-                            Write-Log -LogLevel WARN -Message "DeltaPack [$fullName]: $mismatch archivo(s) no coinciden con $checksumsRel."
-                        }
-                    }
-                }
-
-                Enable-Privileges
-                $safeMountDir = $Script:MOUNT_DIR.TrimEnd('\', '/')
-                $roboArgs = "`"$tempExtract`" `"$safeMountDir`" /E /B /IS /IT /R:0 /W:0 /NJH /NJS /NDL /NC /NS /NP"
-                $proc = Start-Process robocopy.exe -ArgumentList $roboArgs -Wait -PassThru -WindowStyle Hidden
-                if ($proc.ExitCode -ge 8) {
-                    throw "Robocopy fallo desplegando el WIM de '$fullName' en $safeMountDir (Codigo: $($proc.ExitCode))."
-                }
-                $hasWim = $true
-            } finally {
-                if (Test-Path $tempExtract) { Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+        foreach ($driver in $drivers) {
+            $inf = Resolve-AIODeltaChild $Script:MOUNT_DIR $driver.infPath
+            if (-not [IO.File]::Exists($inf) -and (-not $stage -or -not [IO.File]::Exists((Resolve-AIODeltaChild $stage $driver.infPath)))) {
+                throw "INF requerido ausente: $($driver.infPath)"
             }
-        } else {
-            Write-Log -LogLevel WARN -Message "DeltaPack [$fullName]: outputs.wimFile ('$wimRel') no esta presente en el paquete (ej. omitido por tamaño). Se omite el despliegue de archivos."
+        }
+        if ($stage) {
+            Enable-Privileges
+            & robocopy.exe $stage $Script:MOUNT_DIR /E /B /IS /IT /XJ /R:0 /W:0 /NJH /NJS /NDL /NC /NS /NP | Out-Host
+            if ($LASTEXITCODE -notin (0..7)) { throw "Fallo al copiar el payload (Robocopy $LASTEXITCODE)." }
+        }
+        if ($actions) { Invoke-DeltaPackActions -Actions $actions -Phase 'afterWimBeforeRegistry' }
+        Invoke-DeltaPackDeletions -Entries $entries
+        if ($outputs.regFile) {
+            $reg = Import-OfflineReg -FilePath $outputs.regFile -PassThru
+            $blockedSections = $reg.BlockedSections
+        }
+        if ($actions) { Invoke-DeltaPackActions -Actions $actions -Phase 'afterRegistry' }
+    } finally {
+        if ($stage) {
+            try { Remove-AIODeltaScratch ([IO.DirectoryInfo]::new($stage)) }
+            catch { Write-Warning "Extraccion temporal pendiente en $stage. $($_.Exception.Message)" }
         }
     }
-
-    # --- PASO 2 (deployment.order): Actions afterWimBeforeRegistry, si existen ---
-    $actionsRel = $manifest.outputs.actionsFile
-    if ($actionsRel) {
-        $actionsFull = Join-Path $PackagePath $actionsRel
-        if (Test-Path -LiteralPath $actionsFull) {
-            Invoke-DeltaPackActions -ActionsPath $actionsFull -Phase 'afterWimBeforeRegistry'
-            $hasActions = $true
-        }
-    }
-
-    # --- PASO 3 (deployment.order): Entries accionables de Deletions JSON, si existen ---
-    $deletionsRel = $manifest.outputs.deletionsFile
-    if ($deletionsRel) {
-        $deletionsFull = Join-Path $PackagePath $deletionsRel
-        if ((Test-Path -LiteralPath $deletionsFull) -and $manifest.deletions.actionableEntryCount -gt 0) {
-            Invoke-DeltaPackDeletions -DeletionsPath $deletionsFull | Out-Null
-            $hasDeletions = $true
-        }
-    }
-
-    # --- PASO 4 (deployment.order): Importar REG ---
-    $regRel = $manifest.outputs.regFile
-    if ($regRel) {
-        $regFull = Join-Path $PackagePath $regRel
-        if (Test-Path -LiteralPath $regFull) {
-            $regResult = Import-OfflineReg -FilePath $regFull -PassThru
-            $blockedSections += $regResult.BlockedSections
-            $hasReg = $true
-        } else {
-            Write-Log -LogLevel WARN -Message "DeltaPack [$fullName]: outputs.regFile ('$regRel') no encontrado en el paquete."
-        }
-    }
-
-    # --- PASO 5 (deployment.order): Validar Actions afterRegistry ---
-    if ($actionsRel) {
-        $actionsFull = Join-Path $PackagePath $actionsRel
-        if (Test-Path -LiteralPath $actionsFull) {
-            Invoke-DeltaPackActions -ActionsPath $actionsFull -Phase 'afterRegistry'
-        }
-    }
-
-    $msg = "DeltaPack '$fullName': "
-    $msg += if ($hasWim) { "[WIM] " } else { "[WIM omitido] " }
-    if ($hasActions)   { $msg += "[Actions] " }
-    if ($hasDeletions) { $msg += "[Eliminaciones] " }
-    if ($hasReg)       { $msg += "[Registro] " }
-    return (New-AIOAddonResult -Message $msg.Trim() -BlockedSections $blockedSections -PassThru:$PassThru)
+    $applied = @(
+        if ($outputs.wimFile) { 'WIM' }
+        if ($outputs.actionsFile) { 'Acciones' }
+        if ($outputs.deletionsFile) { "Eliminaciones: $($entries.Count)" }
+        if ($outputs.regFile) { 'Registro' }
+    ) -join ', '
+    return (New-AIOAddonResult -Message "DeltaPack '$fullName' [$applied]" -BlockedSections $blockedSections -PassThru:$PassThru)
 }
 
 # --- INTERFAZ GRÁFICA DEL GESTOR DE ADDONS ---

@@ -131,6 +131,17 @@ function Save-Changes {
         }
 
         # =========================================================
+        try {
+            $destParent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($DEST_WIM_PATH))
+            $parentIdentity = Get-AIOFileIdentity $destParent
+            $mountIdentity = Get-AIOFileIdentity $Script:MOUNT_DIR
+            $sourceIdentity = Get-AIOFileIdentity $Script:WIM_FILE_PATH
+            $previous = Get-AIOOutputSnapshot $DEST_WIM_PATH
+            if ((Test-AIOPathWithin $parentIdentity.Path $mountIdentity.Path) -or ($previous -and $previous.Id -eq $sourceIdentity.Id)) {
+                throw 'La copia debe guardarse fuera del montaje y en un archivo distinto del WIM de origen.'
+            }
+        } catch { Write-Warning $_.Exception.Message; Pause; return }
+
         #  Auto-Detección de Edición y Petición de Metadatos
         #  (Reutiliza la edicion efectiva del Dashboard y la descripcion
         #  del catalogo central, sin depender de haber abierto otro menu).
@@ -197,23 +208,28 @@ function Save-Changes {
         Write-Host "    > Por favor espera. DISM esta preparando la compresion maxima (puede tardar unos minutos en iniciar)..." -ForegroundColor Gray
         Write-Log -LogLevel ACTION -Message "SaveManager: Ejecutando DISM /Capture-Image desde la carpeta de montaje hacia '$DEST_WIM_PATH' (Nombre: $IMAGE_NAME)."
         
-        # Evaluacion dinamica: Si el WIM original tiene "PE" o "Setup" en el nombre/descripcion, 
-        # o si estamos seguros de que es un boot.wim, activamos el flag bootable.
-        $bootableFlag = ""
-        if ($IMAGE_NAME -match "(?i)PE|Recovery|Recuperacion|Setup|Boot") {
-            $bootableFlag = "/Bootable"
-        }
-
-        dism /Capture-Image /ImageFile:"$DEST_WIM_PATH" /CaptureDir:"$Script:MOUNT_DIR" /Name:"$IMAGE_NAME" /Description:"$IMAGE_DESC" /Compress:max /CheckIntegrity /ScratchDir:"$Script:Scratch_DIR" $bootableFlag
-
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "[OK] Copia guardada exitosamente en:" -ForegroundColor Green
-            Write-Host "     $DEST_WIM_PATH" -ForegroundColor Cyan
-            Write-Host "`nNOTA: La imagen original sigue montada. Debes desmontarla (sin guardar) al salir." -ForegroundColor Gray
-            Write-Log -LogLevel INFO -Message "SaveManager: Operacion NewWim completada exitosamente. Imagen original continua montada."
-        } else {
-            Write-Host "[ERROR] Fallo al capturar la nueva imagen (Codigo: $LASTEXITCODE)."
-            Write-Log -LogLevel ERROR -Message "SaveManager: Fallo en DISM Capture-Image (NewWim). Codigo LASTEXITCODE: $LASTEXITCODE"
+        $pending = Join-Path $destParent ('.captura-' + [Guid]::NewGuid().ToString('N') + '.wim')
+        try {
+            $source = Get-AIOWimContainerInfo -Path $Script:WIM_FILE_PATH
+            $bootable = ($source.BootIndex -gt 0 -and $source.BootIndex -eq $Script:MOUNTED_INDEX)
+            $arguments = @('/Capture-Image', "/ImageFile:$pending", "/CaptureDir:$Script:MOUNT_DIR", "/Name:$IMAGE_NAME",
+                "/Description:$IMAGE_DESC", '/Compress:max', '/CheckIntegrity', "/ScratchDir:$Script:Scratch_DIR")
+            if ($bootable) { $arguments += '/Bootable' }
+            $result = Invoke-AIOConsoleSystemTool -Tool dism.exe -Arguments $arguments
+            if ($result.ExitCode -ne 0) { throw "DISM no completo la captura (codigo $($result.ExitCode))." }
+            $indexes = @(Get-WindowsImage -ImagePath $pending -ErrorAction Stop)
+            $outputInfo = Get-AIOWimContainerInfo -Path $pending
+            if ($indexes.Count -ne 1 -or $indexes[0].ImageIndex -ne 1 -or $indexes[0].ImageName -cne $IMAGE_NAME -or
+                $outputInfo.BootIndex -ne [int]$bootable) { throw 'No se pudo verificar el indice de la copia capturada.' }
+            if ((Get-AIOFileIdentity $destParent).Id -ne $parentIdentity.Id) { throw 'Cambio el directorio de destino.' }
+            Publish-AIOVerifiedFile $pending $DEST_WIM_PATH $previous
+            Write-Host "[OK] Copia verificada y guardada en $DEST_WIM_PATH" -ForegroundColor Green
+            Write-Log -LogLevel INFO -Message "SaveManager: Nueva copia verificada en '$DEST_WIM_PATH'."
+        } catch {
+            Write-Warning $_.Exception.Message
+            Write-Log -LogLevel ERROR -Message "SaveManager: $($_.Exception.Message)"
+        } finally {
+            if ([IO.File]::Exists($pending)) { Remove-Item -LiteralPath $pending -Force -ErrorAction Continue }
         }
         Pause
         return 

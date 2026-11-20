@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.14
+    1.5.15
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.14"
+$script:Version = "1.5.15"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1073,9 +1073,9 @@ function Mount-Save-Menu {
         Write-Host "   [1] Montar Imagen"
         Write-Host "       (Carga un .wim o .vhd/vhdx en $Script:MOUNT_DIR)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Recargar Imagen (Descartar Cambios)"
-        Write-Host "       (Desmonta y vuelve a montar. util para revertir)" -ForegroundColor Gray
-        Write-Host ""
+        if ($Script:IMAGE_MOUNTED -eq 1) {
+            Write-Host "   [2] Recargar WIM (descartar cambios del montaje)"
+        }
         if ($Script:IMAGE_MOUNTED -gt 0) {
             Write-Host " [ GUARDADO ]" -ForegroundColor Yellow
             Write-Host "   [3] Guardar cambios en el Indice actual ($($Script:MOUNTED_INDEX))"
@@ -1121,8 +1121,7 @@ function Mount-Save-Menu {
             }
             "2" {
                 Write-Log -LogLevel INFO -Message "MenuMountSave: Accediendo a 'Reload-Image' (Forzar recarga del estado de la imagen montada)."
-                Reload-Image
-                if ($Script:IMAGE_MOUNTED -gt 0) {
+                if (Reload-Image) {
                     Write-Log -LogLevel INFO -Message "MenuMountSave: Recarga exitosa detectada. Redirigiendo directamente al Main-Menu."
                     return
                 }
@@ -1911,9 +1910,11 @@ function Invoke-AIOComponentStoreAnalysis {
         if ($exitCode -notin @(0, 3010)) { throw "DISM /AnalyzeComponentStore termino con codigo $exitCode." }
 
         # Un resultado ausente, ambiguo o no reconocido nunca equivale a "No".
-        $recommendations = [regex]::Matches(($lines -join "`n"), '(?im)^[ \t]*Component Store Cleanup Recommended[ \t]*:[ \t]*(Yes|No)[ \t]*\r?$')
-        if ($recommendations.Count -ne 1) { throw 'No se pudo interpretar una recomendacion unica de limpieza (Yes/No).' }
-        $cleanupRecommended = $recommendations[0].Groups[1].Value
+        $recommendations = [regex]::Matches(($lines -join "`n"), '(?im)^[ \t]*Component Store Cleanup Recommended\b([^\r\n]*)')
+        if ($recommendations.Count -ne 1 -or $recommendations[0].Groups[1].Value -notmatch '^[ \t]*:[ \t]*(Yes|No)[ \t]*$') {
+            throw 'No se pudo interpretar una recomendacion unica de limpieza (Yes/No).'
+        }
+        $cleanupRecommended = $Matches[1]
     } catch {
         $runError = $_.Exception.Message
     } finally {
@@ -3861,43 +3862,61 @@ function Check-And-Repair-Mounts {
 
     # Un montaje de otra herramienta no representa el estado de MOUNT_DIR.
     if ($null -eq $current) { return }
-    if ($current.Status -eq 'OK') { return }
-    if ($current.Status -notin @('Needs Remount', 'Invalid')) {
+    $updated = $current
+    if ($current.Status -eq 'OK') {
+        if ($Script:IMAGE_MOUNTED -eq 1) { return }
+    } elseif ($current.Status -in @('Needs Remount', 'Invalid')) {
+        $msgResult = [System.Windows.Forms.MessageBox]::Show(
+            "DISM informa '$($current.Status)' en '$Script:MOUNT_DIR'.`n`n[Si] = Reconectar esta sesion para recuperar sus cambios (Remount-Image).`n[No] = Limpiar recursos corruptos no recuperables del equipo (Cleanup-Mountpoints). DISM conserva montajes validos y recuperables.`n[Cancelar] = Dejar el estado actual.",
+            'Recuperacion de Imagen', 'YesNoCancel', 'Warning'
+        )
+        if ($msgResult -eq 'No') {
+            Repair-InvalidMounts
+            return
+        }
+        if ($msgResult -ne 'Yes') { return }
+
+        Write-Host '>>> INTENTANDO RECUPERAR SESION (Remount-Image)...' -ForegroundColor Yellow
+        Write-Log -LogLevel ACTION -Message "MountRepair: Iniciando Remount-Image de '$($current.ImageFile)', indice $($current.ImageIndex), en '$Script:MOUNT_DIR'."
+        try {
+            $remountResult = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -WaitForToolOnly -Arguments @('/Remount-Image',"/MountDir:$Script:MOUNT_DIR",'/English')
+            $remountCode = $remountResult.ExitCode
+            Write-Log -LogLevel INFO -Message "MountRepair: Remount-Image termino con codigo $remountCode."
+        } catch {
+            Write-Warning "No se pudo ejecutar la recuperacion de la sesion: $($_.Exception.Message)"
+            Write-Log -LogLevel ERROR -Message "MountRepair: Error ejecutando Remount-Image: $($_.Exception.Message)"
+            return
+        }
+        if ($remountCode -ne 0) {
+            Write-Warning "No se pudo recuperar la sesion (codigo $remountCode). Los cambios no se han descartado."
+            Write-Log -LogLevel ERROR -Message "MountRepair: Remount-Image fallo en '$Script:MOUNT_DIR': $remountCode"
+            return
+        }
+        Write-Host "DISM termino. Verificando el montaje en $Script:MOUNT_DIR..." -ForegroundColor Cyan
+        Write-Log -LogLevel INFO -Message "MountRepair: Consultando Get-MountedImageInfo despues del remonte."
+        try {
+            $updated = Get-AIOMountForPath -Mounts @(Get-AIOMountedImages) -Path $Script:MOUNT_DIR
+            Write-Log -LogLevel INFO -Message "MountRepair: Inventario recibido. Estado='$($updated.Status)'."
+        } catch {
+            Write-Warning $_.Exception.Message
+            Write-Log -LogLevel WARN -Message "MountRepair: Fallo al volver a consultar el inventario: $($_.Exception.Message)"
+            return
+        }
+    } else {
         Write-Warning "Estado de montaje no reconocido en '$Script:MOUNT_DIR': $($current.Status)"
         return
     }
-
-    $msgResult = [System.Windows.Forms.MessageBox]::Show(
-        "DISM informa '$($current.Status)' en '$Script:MOUNT_DIR'.`n`n[Si] = Reconectar esta sesion para recuperar sus cambios (Remount-Image).`n[No] = Limpiar recursos corruptos no recuperables del equipo (Cleanup-Mountpoints). DISM conserva montajes validos y recuperables.`n[Cancelar] = Dejar el estado actual.",
-        'Recuperacion de Imagen', 'YesNoCancel', 'Warning'
-    )
-    if ($msgResult -eq 'No') {
-        Repair-InvalidMounts
-        return
-    }
-    if ($msgResult -ne 'Yes') { return }
-
-    Write-Host '>>> INTENTANDO RECUPERAR SESION (Remount-Image)...' -ForegroundColor Yellow
     try {
-        $remountResult = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments @('/Remount-Image',"/MountDir:$Script:MOUNT_DIR",'/English')
-        $remountCode = $remountResult.ExitCode
-    } catch {
-        Write-Warning "No se pudo ejecutar la recuperacion de la sesion: $($_.Exception.Message)"
-        Write-Log -LogLevel ERROR -Message "MountRepair: Error ejecutando Remount-Image: $($_.Exception.Message)"
-        return
-    }
-    if ($remountCode -ne 0) {
-        Write-Warning "No se pudo recuperar la sesion (codigo $remountCode). Los cambios no se han descartado."
-        Write-Log -LogLevel ERROR -Message "MountRepair: Remount-Image fallo en '$Script:MOUNT_DIR': $remountCode"
-        return
-    }
-    try {
-        $updated = Get-AIOMountForPath -Mounts @(Get-AIOMountedImages) -Path $Script:MOUNT_DIR
         if ($null -eq $updated -or $updated.Status -ne 'OK' -or -not (Test-Path -LiteralPath $updated.MountDir -PathType Container)) {
             throw 'DISM finalizo, pero el punto solicitado todavia no figura como OK y accesible.'
         }
         if ($updated.ReadWrite -ne 'Yes' -or [string]::IsNullOrWhiteSpace($updated.ImageFile) -or $updated.ImageIndex -lt 1) {
             throw 'La sesion no se puede usar para edicion: es de solo lectura o sus metadatos estan incompletos.'
+        }
+        if (($current.ImageIndex -gt 0 -and $current.ImageIndex -ne $updated.ImageIndex) -or
+            ($current.ImageFile -and (ConvertTo-AIOMountPath $current.ImageFile) -ne (ConvertTo-AIOMountPath $updated.ImageFile)) -or
+            (Test-AIOHostWinREProtectedMount -Path $Script:MOUNT_DIR -Mount $updated)) {
+            throw 'La imagen o el indice del montaje cambio o esta protegido.'
         }
         $Script:IMAGE_MOUNTED = 1
         $Script:WIM_FILE_PATH = $updated.ImageFile
@@ -4143,7 +4162,8 @@ function Show-Mount-Warning {
 function Invoke-AIOConsoleSystemTool {
     param(
         [Parameter(Mandatory=$true)][ValidateSet('dism.exe','reagentc.exe')][string]$Tool,
-        [Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][string[]]$Arguments
+        [Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][string[]]$Arguments,
+        [switch]$WaitForToolOnly
     )
     if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw 'No se conoce SystemRoot del anfitrion.' }
     $systemFolder = 'System32'
@@ -4160,7 +4180,22 @@ function Invoke-AIOConsoleSystemTool {
     try {
         # El hijo hereda la consola incluso si el caller captura este resultado.
         # No redirigir stdout/stderr: DISM conserva su progreso en la misma linea.
-        $process = Start-Process -FilePath $exe -ArgumentList $commandLine -NoNewWindow -Wait -PassThru -ErrorAction Stop
+        if ($WaitForToolOnly) {
+            # Remount puede terminar mientras un proceso auxiliar sigue vivo. Conservar
+            # el handle del proceso que iniciamos y leer su propio codigo de salida.
+            $start = New-Object System.Diagnostics.ProcessStartInfo
+            $start.FileName = $exe
+            $start.Arguments = $commandLine
+            $start.UseShellExecute = $false
+            $process = [Diagnostics.Process]::Start($start)
+            if ($null -eq $process) { throw "No se pudo iniciar $Tool." }
+            Write-Log -LogLevel INFO -Message "MountRepair: $Tool iniciado, PID=$($process.Id)."
+            while (-not $process.WaitForExit(30000)) {
+                Write-Host "Esperando a $Tool (PID $($process.Id))..." -ForegroundColor DarkGray
+            }
+        } else {
+            $process = Start-Process -FilePath $exe -ArgumentList $commandLine -NoNewWindow -Wait -PassThru -ErrorAction Stop
+        }
         if ($null -eq $process -or $null -eq $process.ExitCode) { throw "No se obtuvo el codigo de salida de $Tool." }
         [pscustomobject]@{ ExitCode = [int]$process.ExitCode }
     } finally {
@@ -4552,54 +4587,9 @@ try {
     Write-Log -LogLevel WARN -Message "Error verificando DISM: $($_.Exception.Message)"
 }
 
-# --- PASO 2: DETECCION VHD/VHDX (Powershell Storage) ---
-# Solo buscamos VHD si no encontramos un WIM montado (Prioridad WIM)
+# Recuperar solo una sesion VHD registrada por esta herramienta.
 if ($Script:IMAGE_MOUNTED -eq 0 -and -not $Script:AIOHostWinRECheckFailed) {
-    try {
-        # 1. Obtener discos virtuales
-        # Buscamos discos cuyo BusType sea virtual o el modelo indique que lo es
-        $vDisks = Get-Disk | Where-Object { $_.BusType -eq 'FileBackedVirtual' -or $_.Model -match "Virtual Disk" }
-
-        foreach ($disk in $vDisks) {
-            # 2. Obtener TODAS las particiones con letra de unidad valida
-            # (Quitamos el Select-Object -First 1 para no quedarnos solo con la EFI)
-            $partitions = Get-Partition -DiskNumber $disk.Number -ErrorAction SilentlyContinue | Where-Object { $_.DriveLetter }
-
-            foreach ($part in $partitions) {
-                $rootPath = "$($part.DriveLetter):\"
-
-                # 3. HEURISTICA: Es esta particion específica una instalacion de Windows?
-                if (Test-Path "$rootPath\Windows\System32\config\SYSTEM") {
-
-                    # ENCONTRADO!
-                    $Script:IMAGE_MOUNTED = 2 # Estado 2 = VHD
-                    $Script:MOUNT_DIR = $rootPath
-                    $Script:MOUNTED_INDEX = $part.PartitionNumber
-
-                    # Intentar recuperar la ruta del archivo .vhdx original
-                    try {
-                        if (Get-Command Get-VHD -ErrorAction SilentlyContinue) {
-                            $vhdData = Get-VHD -DiskNumber $disk.Number -ErrorAction Stop
-                            $Script:WIM_FILE_PATH = $vhdData.Path
-                        } else {
-                            $Script:WIM_FILE_PATH = "Disco Virtual (Disk $($disk.Number))" 
-                        }
-                    } catch {
-                        $Script:WIM_FILE_PATH = "Disco Virtual Desconocido"
-                    }
-
-                    Write-Host "VHD Detectado: $Script:WIM_FILE_PATH" -ForegroundColor Yellow
-                    Write-Host "Montado en: $Script:MOUNT_DIR" -ForegroundColor Yellow
-                    Write-Log -LogLevel INFO -Message "VHD Recuperado: $Script:WIM_FILE_PATH en $Script:MOUNT_DIR"
-                    break 
-                }
-            }
-            # Si ya encontramos imagen (IMAGE_MOUNTED=2), rompemos el bucle de discos tambien
-            if ($Script:IMAGE_MOUNTED -eq 2) { break }
-        }
-    } catch {
-        Write-Log -LogLevel WARN -Message "Error verificando VHDs: $($_.Exception.Message)"
-    }
+    Restore-AIOVhdSession
 }
 
 # --- REPORTE FINAL ---

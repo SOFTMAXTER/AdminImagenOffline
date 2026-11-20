@@ -8,7 +8,7 @@
 #
 #  NOTA: Esta funcion NO requiere imagen montada ($Script:IMAGE_MOUNTED).
 #  Opera directamente sobre imagenes WIM/ESD y conjuntos SWM y discos del
-#  sistema host. Es autocontenida salvo por Write-Log.
+#  sistema host. Reutiliza las comprobaciones de identidad y publicacion de Modulo-Montaje.
 #
 #  NO modificar las firmas de funcion; el nucleo las invoca por nombre.
 #
@@ -109,6 +109,86 @@ function Get-AIODeploySwmSet {
     [pscustomobject]@{
         First = $first.FullName; Pattern = (Join-Path $first.DirectoryName ($first.BaseName + '*.swm'))
         Info = $info; Files = @(1..([int]$info.TotalParts) | ForEach-Object { $parts[$_] })
+    }
+}
+
+function Get-AIOSelectedExternalDisk {
+    param($Selected)
+    if (-not $Selected.UniqueId) { throw 'Disco sin identificador estable.' }
+    $matchesById = @(Get-Disk -UniqueId $Selected.UniqueId -ErrorAction Stop)
+    $hostPart = Get-Partition -DriveLetter $env:SystemDrive[0] -ErrorAction Stop
+    if ($null -eq $hostPart.DiskNumber -or $matchesById.Count -ne 1) { throw 'El disco seleccionado ya no se identifica de forma unica.' }
+    $disk = $matchesById[0]
+    if ($disk.Number -ne $Selected.Number -or $disk.UniqueId -ne $Selected.UniqueId -or
+        $disk.Size -ne $Selected.Size -or $disk.BusType -ne $Selected.BusType -or
+        $disk.IsBoot -ne $false -or $disk.IsSystem -ne $false -or $disk.IsOffline -ne $false -or
+        $disk.Number -eq $hostPart.DiskNumber -or $disk.BusType -notin @('USB','SD','1394')) {
+        throw 'Cambio el disco seleccionado o su estado de proteccion. Actualiza la lista.'
+    }
+    return $disk
+}
+
+function Assert-AIODeployFileOutsideDisk {
+    param([string]$File,$Target,[hashtable]$Seen)
+    $identity = Get-AIOFileIdentity $File
+    if ($Seen[$identity.Path] -eq 'Verified') { return }
+    if ($Seen[$identity.Path] -eq 'Checking') { throw 'Dependencia circular de almacenamiento.' }
+    $Seen[$identity.Path] = 'Checking'
+    if ($identity.Path -notmatch '^(\\\\\?\\Volume\{[0-9a-f-]+\}\\)') {
+        throw "No se puede determinar el disco que aloja '$File'. Copia la fuente a otro volumen local identificable."
+    }
+    $volume = @(Get-Volume -Path $Matches[1] -ErrorAction Stop)
+    if ($volume.Count -ne 1) { throw "Volumen de origen ambiguo: $File" }
+    if ($volume[0].DriveType -eq 'CD-ROM') {
+        $image = @(Get-DiskImage -Volume $volume[0] -ErrorAction Stop)
+        if ($image.Count -ne 1 -or -not $image[0].ImagePath) { throw "No se pudo identificar el soporte de $File." }
+        Assert-AIODeployFileOutsideDisk $image[0].ImagePath $Target $Seen
+        $Seen[$identity.Path] = 'Verified'
+        return
+    }
+    $parts = @(Get-Partition -Volume $volume[0] -ErrorAction Stop)
+    if ($parts.Count -ne 1) { throw "No se puede asociar la fuente a una sola particion: $File" }
+    $disk = Get-Disk -Number $parts[0].DiskNumber -ErrorAction Stop
+    if ($disk.Number -eq $Target.Number -or $disk.UniqueId -eq $Target.UniqueId) {
+        throw "La fuente '$File' reside en el disco que se va a borrar."
+    }
+    if ($disk.BusType -eq 'File Backed Virtual' -or $disk.BusType -eq 'FileBackedVirtual') {
+        $vhd = Get-VHD -DiskNumber $disk.Number -ErrorAction Stop
+        if (-not $vhd.Path) { throw "Contenedor del disco virtual de origen no identificado." }
+        $parents = @{}
+        while ($vhd) {
+            if (-not $vhd.Path -or $parents.ContainsKey($vhd.Path)) { throw 'Cadena VHD de origen invalida.' }
+            $parents[$vhd.Path] = $true
+            Assert-AIODeployFileOutsideDisk $vhd.Path $Target $Seen
+            if (-not $vhd.ParentPath) { break }
+            $vhd = Get-VHD -Path $vhd.ParentPath -ErrorAction Stop
+        }
+    } elseif ($disk.BusType -notin @('ATA','SATA','NVMe','USB','SD','1394','SCSI','SAS','MMC','iSCSI','ATAPI','Fibre Channel')) {
+        throw "No se pudo verificar el almacenamiento subyacente de '$File' ($($disk.BusType))."
+    }
+    $Seen[$identity.Path] = 'Verified'
+}
+
+function Assert-AIODeployPartitionLetter {
+    param([string]$Letter,[string]$DiskId,[int]$PartitionNumber)
+    $partition = Get-Partition -DriveLetter $Letter[0] -ErrorAction Stop
+    $disk = Get-Disk -Number $partition.DiskNumber -ErrorAction Stop
+    if (-not $DiskId -or $disk.UniqueId -ne $DiskId -or $partition.PartitionNumber -ne $PartitionNumber -or
+        $disk.IsBoot -ne $false -or $disk.IsSystem -ne $false) { throw "Ha cambiado el volumen de destino $Letter." }
+}
+
+function Assert-AIODeploySource {
+    param([string]$Path,[int]$Index,$Target)
+    $image = Get-WindowsImage -ImagePath $Path -Index $Index -ErrorAction Stop
+    if ($image.ImageIndex -ne $Index) { throw 'El indice seleccionado ya no esta disponible.' }
+    $files = @($Path)
+    if ([IO.Path]::GetExtension($Path) -ieq '.swm') {
+        $set = Get-AIODeploySwmSet -FirstPart $Path
+        $files = @($set.Files | ForEach-Object { $_.FullName })
+    }
+    if ($Target) {
+        $seen = @{}
+        foreach ($file in $files) { Assert-AIODeployFileOutsideDisk $file $Target $seen }
     }
 }
 
@@ -630,6 +710,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     # Poblar lista de discos fisicos seguros (excluye sistema y boot)
     $PopulateDisks = {
         $cmbDisks.Items.Clear()
+        $cmbDisks.Tag = @{}
         $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
         try {
             $sysDriveLetter = (Get-Item $env:SystemRoot).Root.Name.Replace("\", "")
@@ -652,7 +733,9 @@ public sealed class AIODeployNativeReader : IDisposable {
 
             foreach ($d in $safeDisks) {
                 $sizeGB = [math]::Round($d.Size / 1GB, 2)
-                $cmbDisks.Items.Add("Disco $($d.Number) - $($d.FriendlyName) ($sizeGB GB) [$($d.BusType)]")
+                if (-not $d.UniqueId) { continue }
+                $row = $cmbDisks.Items.Add("Disco $($d.Number) - $($d.FriendlyName) ($sizeGB GB) [$($d.BusType)]")
+                $cmbDisks.Tag[$row] = $d
             }
         } catch {
             Write-Log -LogLevel ERROR -Message "Error enumerando discos fisicos: $_"
@@ -805,6 +888,7 @@ public sealed class AIODeployNativeReader : IDisposable {
         $sizeMsrMB  = [int]$numMsrSize.Value
         $sizeRecMB  = [int]$numRecSize.Value
 
+        $targetId = $null
         $diskNum             = $null
         $driveLetterSystem   = $null
         $driveLetterBoot     = $null
@@ -815,38 +899,31 @@ public sealed class AIODeployNativeReader : IDisposable {
                 [System.Windows.Forms.MessageBox]::Show("Ruta VHDX vacia.", "Error", 'OK', 'Error')
                 return
             }
-            if (Test-Path $vhdPath) {
-                if ([System.Windows.Forms.MessageBox]::Show(
-                        "El VHD existe. Se borrara todo su contenido.`nContinuar?",
-                        "Confirmar", 'YesNo', 'Warning') -eq 'No') { return }
-                try {
-                    Remove-Item $vhdPath -Force -ErrorAction Stop
-                } catch {
-                    [System.Windows.Forms.MessageBox]::Show(
-                        "No se pudo borrar el archivo. Esta en uso?", "Error", 'OK', 'Error')
-                    return
+            try {
+                $finalVhd = [IO.Path]::GetFullPath($vhdPath)
+                $extension = [IO.Path]::GetExtension($finalVhd)
+                if ($extension -notin @('.vhd','.vhdx')) { throw 'El destino debe tener extension .vhd o .vhdx.' }
+                $previousVhd = Get-AIOOutputSnapshot $finalVhd
+                if ($previousVhd) {
+                    if ([System.Windows.Forms.MessageBox]::Show("Reemplazar el VHD existente despues de verificar la nueva copia?`n$finalVhd",
+                        'Confirmar reemplazo','YesNo','Warning') -ne 'Yes') { return }
                 }
-            }
+                $vhdStagingPath = Join-Path ([IO.Path]::GetDirectoryName($finalVhd)) ('.despliegue-' + [Guid]::NewGuid().ToString('N'))
+            } catch { [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message,'Destino VHD'); return }
         } else {
-            if ($cmbDisks.Items.Count -eq 0 -or $cmbDisks.Text -match "No se detectaron") {
-                [System.Windows.Forms.MessageBox]::Show(
-                    "Seleccione un disco fisico valido.", "Error", 'OK', 'Error')
-                return
-            }
-            if ($cmbDisks.Text -match "^Disco (\d+)") {
-                $diskNum = [int]$Matches[1]
-            } else {
-                [System.Windows.Forms.MessageBox]::Show(
-                    "No se pudo determinar el numero de disco de forma segura. Seleccione un disco valido.",
-                    "Error Critico", 'OK', 'Error')
-                return
-            }
-            $msg = "¡ADVERTENCIA EXTREMA!`n`nEl Disco Fisico $diskNum sera FORMATEADO Y BORRADO COMPLETAMENTE.`nTodos los datos y particiones actuales se perderan de forma irreversible.`n`n¿Esta ABSOLUTAMENTE SEGURO de continuar?"
-            if ([System.Windows.Forms.MessageBox]::Show($msg, "Destruccion de Datos", 'YesNo', 'Warning') -eq 'No') { return }
+            try {
+                $selectedDisk = $cmbDisks.Tag[$cmbDisks.SelectedIndex]
+                $disk = Get-AIOSelectedExternalDisk $selectedDisk
+                Assert-AIODeploySource $wimPath $idx $disk
+            } catch { [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message,'Destino de despliegue'); return }
+            $diskNum = $disk.Number
+            $msg = "Borrar todas las particiones del disco $diskNum, $($disk.FriendlyName), $([Math]::Round($disk.Size / 1GB,1)) GB, ID $($disk.UniqueId)?"
+            if ([System.Windows.Forms.MessageBox]::Show($msg,'Destruccion de datos','YesNo','Warning') -ne 'Yes') { return }
         }
 
         $deployState.CancelRequested = $false
         $vhdCreationStarted   = $false
+        $ownedVhdStage = $null
         $script:isDeploying   = $true
         $btnDeploy.Enabled    = $false
         $btnCancel.Text       = 'CANCELAR'
@@ -885,6 +962,9 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $form.Refresh()
 
                 $totalSize = [long]$numSize.Value * 1GB
+                Assert-AIODeploySource $wimPath $idx $null
+                $ownedVhdStage = (New-Item -Path $vhdStagingPath -ItemType Directory -ErrorAction Stop).FullName
+                $vhdPath = Join-Path $ownedVhdStage ([IO.Path]::GetFileName($finalVhd))
                 $vhdCreationStarted = $true
                 if ($chkDynamic.Checked) {
                     New-VHD -Path $vhdPath -SizeBytes $totalSize -Dynamic -ErrorAction Stop | Out-Null
@@ -904,7 +984,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                     Start-Sleep -Milliseconds 500
                     & $CheckDeployCancellation
                     $vhdInfo = Get-VHD -Path $vhdPath -ErrorAction SilentlyContinue
-                    if ($vhdInfo -and $vhdInfo.DiskNumber -ge 0) {
+                    if ($vhdInfo.Attached -and $null -ne $vhdInfo.DiskNumber -and $vhdInfo.DiskNumber -ge 0) {
                         $diskNum = $vhdInfo.DiskNumber
                     }
                     $retryCount++
@@ -913,19 +993,16 @@ public sealed class AIODeployNativeReader : IDisposable {
                 if ($null -eq $diskNum -or $diskNum -lt 0) {
                     throw "Timeout: El VDS tardó demasiado en exponer el número de disco del VHD. Abortando para evitar daños en el host."
                 }
+                $targetDisk = Get-AIOVerifiedVhdDisk $vhdPath
             } else {
-                $lblStatus.Text = "Forzando desmontaje y limpiando disco fisico $diskNum..."
-                $form.Refresh()
-                
-                # Desconexión forzada para soltar el bloqueo de Windows Explorer o Antivirus
-                Set-Disk -Number $diskNum -IsOffline $true -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 1
-                Set-Disk -Number $diskNum -IsOffline $false -ErrorAction SilentlyContinue
-                & $CheckDeployCancellation
-                
-                # Limpieza con atributo RemoveOEM para destruir particiones protegidas antiguas
-                Clear-Disk -Number $diskNum -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop
+                Assert-AIODeploySource $wimPath $idx $selectedDisk
+                $targetDisk = Get-AIOSelectedExternalDisk $selectedDisk
+                if ($targetDisk.PartitionStyle -ne 'RAW') {
+                    Clear-Disk -InputObject $targetDisk -RemoveData -RemoveOEM -Confirm:$false -ErrorAction Stop
+                }
             }
+            $diskNum = $targetDisk.Number
+            $targetId = $targetDisk.UniqueId
 
             & $CompleteDeployStage -Stage 1
 
@@ -933,12 +1010,14 @@ public sealed class AIODeployNativeReader : IDisposable {
             $lblStatus.Text = "Inicializando disco y preparando particiones..."
             $form.Refresh()
             $partStyle = if ($isGPT) { "GPT" } else { "MBR" }
-            Initialize-Disk -Number $diskNum -PartitionStyle $partStyle -ErrorAction Stop
+            Initialize-Disk -UniqueId $targetId -PartitionStyle $partStyle -ErrorAction Stop
             & $CheckDeployCancellation
 
             # Prevencion de anomalias: Purga proactiva de particiones automaticas 
             # (Ej. particion MSR fantasma de 16MB inyectada por el motor de Initialize-Disk en GPT)
-            Get-Partition -DiskNumber $diskNum | Remove-Partition -Confirm:$false -ErrorAction SilentlyContinue
+            Get-Disk -UniqueId $targetId -ErrorAction Stop |
+                Get-Partition -ErrorAction SilentlyContinue |
+                Remove-Partition -Confirm:$false -ErrorAction SilentlyContinue
             & $CheckDeployCancellation
 
             Write-Log -LogLevel INFO -Message "DEPLOY: Formateando y asignando particiones en Disco $diskNum con esquema $partStyle..."
@@ -948,7 +1027,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $form.Refresh()
 
                 # 1. EFI (Arranque del Sistema)
-                $pEFI = New-Partition -DiskNumber $diskNum -Size ($sizeBootMB * 1MB) `
+                $pEFI = New-Partition -DiskId $targetId -Size ($sizeBootMB * 1MB) `
                     -GptType "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}" -ErrorAction Stop
                 Format-Volume -Partition $pEFI -FileSystem FAT32 -Confirm:$false | Out-Null
                 & $CheckDeployCancellation
@@ -960,20 +1039,20 @@ public sealed class AIODeployNativeReader : IDisposable {
 
                 # 2. MSR (Microsoft Reserved)
                 if ($sizeMsrMB -gt 0) {
-                    New-Partition -DiskNumber $diskNum -Size ($sizeMsrMB * 1MB) `
+                    New-Partition -DiskId $targetId -Size ($sizeMsrMB * 1MB) `
                         -GptType "{e3c9e316-0b5c-4db8-817d-f92df00215ae}" -ErrorAction Stop | Out-Null
                     & $CheckDeployCancellation
                 }
 
                 # 3. Windows (Volumen principal del SO)
-                $diskObj   = Get-Disk -Number $diskNum
+                $diskObj   = Get-Disk -UniqueId $targetId -ErrorAction Stop
                 $freeSpace = $diskObj.LargestFreeExtent
 
                 if ($sizeRecMB -gt 0) {
                     $winSize = $freeSpace - ($sizeRecMB * 1MB) - 10MB
-                    $pWin = New-Partition -DiskNumber $diskNum -Size $winSize -ErrorAction Stop
+                    $pWin = New-Partition -DiskId $targetId -Size $winSize -ErrorAction Stop
                 } else {
-                    $pWin = New-Partition -DiskNumber $diskNum -UseMaximumSize -ErrorAction Stop
+                    $pWin = New-Partition -DiskId $targetId -UseMaximumSize -ErrorAction Stop
                 }
                 Format-Volume -Partition $pWin -FileSystem NTFS -Confirm:$false | Out-Null
                 & $CheckDeployCancellation
@@ -985,7 +1064,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
                 # 4. Recovery (Entorno de Recuperacion)
                 if ($sizeRecMB -gt 0) {
-                    $pRec = New-Partition -DiskNumber $diskNum -UseMaximumSize `
+                    $pRec = New-Partition -DiskId $targetId -UseMaximumSize `
                         -GptType "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}" -ErrorAction Stop
                     Format-Volume -Partition $pRec -FileSystem NTFS -Confirm:$false | Out-Null
                     & $CheckDeployCancellation
@@ -1000,7 +1079,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $form.Refresh()
 
                 # 1. System Reserved (Arranque Activo)
-                $pBoot = New-Partition -DiskNumber $diskNum -Size ($sizeBootMB * 1MB) -IsActive -ErrorAction Stop
+                $pBoot = New-Partition -DiskId $targetId -Size ($sizeBootMB * 1MB) -IsActive -ErrorAction Stop
                 Format-Volume -Partition $pBoot -FileSystem NTFS -Confirm:$false | Out-Null
                 & $CheckDeployCancellation
                 $freeLetBoot      = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
@@ -1010,14 +1089,14 @@ public sealed class AIODeployNativeReader : IDisposable {
                 & $CheckDeployCancellation
 
                 # 2. Windows (Volumen principal del SO)
-                $diskObj   = Get-Disk -Number $diskNum
+                $diskObj   = Get-Disk -UniqueId $targetId -ErrorAction Stop
                 $freeSpace = $diskObj.LargestFreeExtent
 
                 if ($sizeRecMB -gt 0) {
                     $winSize = $freeSpace - ($sizeRecMB * 1MB) - 10MB
-                    $pWin = New-Partition -DiskNumber $diskNum -Size $winSize -ErrorAction Stop
+                    $pWin = New-Partition -DiskId $targetId -Size $winSize -ErrorAction Stop
                 } else {
-                    $pWin = New-Partition -DiskNumber $diskNum -UseMaximumSize -ErrorAction Stop
+                    $pWin = New-Partition -DiskId $targetId -UseMaximumSize -ErrorAction Stop
                 }
                 Format-Volume -Partition $pWin -FileSystem NTFS -Confirm:$false | Out-Null
                 & $CheckDeployCancellation
@@ -1029,7 +1108,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
                 # 3. Recovery (Proteccion Legacy Oculta)
                 if ($sizeRecMB -gt 0) {
-                    $pRec = New-Partition -DiskNumber $diskNum -UseMaximumSize -MbrType 0x27 -ErrorAction Stop
+                    $pRec = New-Partition -DiskId $targetId -UseMaximumSize -MbrType 0x27 -ErrorAction Stop
                     Format-Volume -Partition $pRec -FileSystem NTFS -Confirm:$false | Out-Null
                     & $CheckDeployCancellation
                     $freeLetRec       = Get-UnusedDriveLetter -AlreadyReserved $reservedLetters
@@ -1049,6 +1128,7 @@ public sealed class AIODeployNativeReader : IDisposable {
             $form.Refresh()
 
             Write-Log -LogLevel ACTION -Message "DEPLOY: Ejecutando DISM nativo hacia $driveLetterSystem\. Compact OS solicitado: $useCompactOS."
+            Assert-AIODeployPartitionLetter $driveLetterSystem $targetId $pWin.PartitionNumber
             $dismArgs = "/English /Apply-Image /ImageFile:`"$wimPath`" /Index:$idx /ApplyDir:$driveLetterSystem\"
             if ($swmPattern) {
                 $dismArgs += " /SWMFile:`"$swmPattern`" /CheckIntegrity /Verify"
@@ -1091,6 +1171,9 @@ public sealed class AIODeployNativeReader : IDisposable {
             $fw       = if ($isGPT) { "UEFI" } else { "BIOS" }
             Write-Log -LogLevel ACTION -Message "DEPLOY: Escribiendo BCD ($fw)..."
 
+            $bootNumber = if ($isGPT) { $pEFI.PartitionNumber } else { $pBoot.PartitionNumber }
+            Assert-AIODeployPartitionLetter $driveLetterSystem $targetId $pWin.PartitionNumber
+            Assert-AIODeployPartitionLetter $driveLetterBoot $targetId $bootNumber
             $bcdExitCode = Invoke-AIODeployNativeProcess -FileName "bcdboot.exe" `
                 -Arguments "$driveLetterSystem\Windows /s $driveLetterBoot /f $fw"
             if ($bcdExitCode -ne 0) {
@@ -1102,43 +1185,52 @@ public sealed class AIODeployNativeReader : IDisposable {
             if ($sizeRecMB -gt 0 -and $driveLetterRecovery) {
                 $lblStatus.Text = "Protegiendo particion WinRE..."
                 $form.Refresh()
-                
-                # Aplicar Atributos GPT requeridos por Microsoft si estamos en UEFI
-                if ($isGPT) {
-                    Write-Log -LogLevel INFO -Message "DEPLOY: Inyectando atributos GPT protectivos a la particion Recovery."
-                    try {
-                        # Corrección: Especificar el Namespace de Storage y filtrar en origen
-                        $cimNamespace = "Root\Microsoft\Windows\Storage"
-                        $cimPart = Get-CimInstance -Namespace $cimNamespace -ClassName MSFT_Partition -Filter "DriveLetter = '$($freeLetRec[0])'"
-                        
-                        if ($cimPart) {
-                            $cimPart | Set-CimInstance -Property @{ 
-                                GptType = "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}"; 
-                                IsHidden = $true; 
-                                NoDefaultDriveLetter = $true 
-                            } -ErrorAction SilentlyContinue
-                        }
-                    } catch { 
-                        Write-Log -LogLevel WARN -Message "DEPLOY: No se pudieron establecer los atributos CIM de la particion Recovery. Error: $($_.Exception.Message)" 
-                    }
-                }
 
                 Remove-PartitionAccessPath -InputObject $pRec -AccessPath $driveLetterRecovery -ErrorAction SilentlyContinue
                 $driveLetterRecovery = $null
+
+                # Aplicar atributos GPT oficiales de Microsoft (0x8000000000000001 = Required + NoDefaultDriveLetter).
+                # Set-Partition solo admite -IsHidden/-NoDefaultDriveLetter en particiones Basic Data, no en Recovery.
+                if ($isGPT) {
+                    Write-Log -LogLevel INFO -Message "DEPLOY: Inyectando atributos GPT protectivos (0x8000000000000001) a la particion Recovery."
+                    $dpScript = $null
+                    try {
+                        $verifiedDisk = Get-Disk -UniqueId $targetId -ErrorAction Stop
+                        $recPart = $verifiedDisk | Get-Partition -ErrorAction Stop |
+                            Where-Object { $_.PartitionNumber -eq $pRec.PartitionNumber } |
+                            Select-Object -First 1
+                        if ($recPart) {
+                            $dpScript = Join-Path ([IO.Path]::GetTempPath()) ("aio_rec_gpt_" + [Guid]::NewGuid().ToString('N') + ".txt")
+                            $dpContent = @(
+                                "select disk $($verifiedDisk.Number)",
+                                "select partition $($recPart.PartitionNumber)",
+                                "gpt attributes=0x8000000000000001",
+                                "exit"
+                            ) -join "`r`n"
+                            [IO.File]::WriteAllText($dpScript, $dpContent, [Text.Encoding]::ASCII)
+                            $dpExit = Invoke-AIODeployNativeProcess -FileName "diskpart.exe" -Arguments "/s `"$dpScript`""
+                            if ($dpExit -ne 0) { throw "diskpart devolvio codigo $dpExit." }
+                        } else {
+                            Write-Log -LogLevel WARN -Message "DEPLOY: No se encontro la particion Recovery (numero $($pRec.PartitionNumber)) para aplicar atributos GPT."
+                        }
+                    } catch {
+                        Write-Log -LogLevel WARN -Message "DEPLOY: No se pudieron establecer los atributos GPT de la particion Recovery. Error: $($_.Exception.Message)"
+                    } finally {
+                        if ($dpScript -and (Test-Path -LiteralPath $dpScript)) {
+                            Remove-Item -LiteralPath $dpScript -Force -ErrorAction SilentlyContinue
+                        }
+                    }
+                }
             }
 
             & $CheckDeployCancellation
             $lblStatus.Text = "Ocultando particiones de arranque..."
             $form.Refresh()
-            
+
+            # En GPT, el propio tipo EFI ({c12a7328-...}) ya impide la asignacion automatica de letra
+            # y no admite Set-Partition -IsHidden/-NoDefaultDriveLetter; basta con retirar la letra temporal.
             $bootPart = Get-Partition -DriveLetter $freeLetBoot[0] -ErrorAction SilentlyContinue
-            if ($bootPart) {
-                if ($isGPT) {
-                    try { 
-                        # bootPart ya es un objeto CIM, pero aseguramos la escritura silenciosa
-                        $bootPart | Set-CimInstance -Property @{ IsHidden = $true; NoDefaultDriveLetter = $true } -ErrorAction SilentlyContinue 
-                    } catch {}
-                }
+            if ($bootPart -and $bootPart.DiskNumber -eq $diskNum -and $bootPart.PartitionNumber -eq $bootNumber) {
                 Remove-PartitionAccessPath -InputObject $bootPart -AccessPath $driveLetterBoot -ErrorAction SilentlyContinue
                 $driveLetterBoot = $null
             }
@@ -1150,6 +1242,10 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $lblStatus.Text = "Desmontando disco virtual..."
                 $form.Refresh()
                 Dismount-VHD -Path $vhdPath -ErrorAction Stop
+                if (-not (Test-VHD -Path $vhdPath -ErrorAction Stop)) { throw 'El nuevo disco virtual no supero la verificacion.' }
+                & $CheckDeployCancellation
+                Publish-AIOVerifiedFile $vhdPath $finalVhd $previousVhd
+                $vhdCreationStarted = $false
                 & $CompleteDeployStage -Stage 6
             }
 
@@ -1192,10 +1288,8 @@ public sealed class AIODeployNativeReader : IDisposable {
                 try {
                     if ($letter -and (Test-Path "$letter\")) {
                         $part = Get-Partition -DriveLetter $letter[0] -ErrorAction Stop
-                        if ($part -and $part.DiskNumber -eq $diskNum) {
-                            Remove-PartitionAccessPath `
-                                -DiskNumber $diskNum `
-                                -PartitionNumber $part.PartitionNumber `
+                        if ($part -and $targetId -and (Get-Disk -Number $part.DiskNumber -ErrorAction Stop).UniqueId -eq $targetId) {
+                            Remove-PartitionAccessPath -InputObject $part `
                                 -AccessPath $letter `
                                 -ErrorAction Stop
                         }
@@ -1239,6 +1333,10 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $resultMessage, $resultTitle, 'OK', $resultIcon)
 
         } finally {
+            if ($ownedVhdStage) {
+                try { [IO.Directory]::Delete($ownedVhdStage, $false) }
+                catch { Write-Warning "Archivos de recuperacion o temporales conservados en $ownedVhdStage." }
+            }
             & $StopDeployTime
             $script:isDeploying = $false
             $btnCancel.Enabled = $false

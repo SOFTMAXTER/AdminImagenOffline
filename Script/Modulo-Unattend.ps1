@@ -409,7 +409,7 @@ function Show-Unattend-GUI {
     # PESTANA 2: IMPORTAR
     # ==================================================================
     $tabImport           = New-Object System.Windows.Forms.TabPage
-    $tabImport.Text      = " Importar Externo "
+    $tabImport.Text      = " Importar Ext. (WIOS)"
     $tabImport.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
     $tabControl.TabPages.Add($tabImport)
 
@@ -447,6 +447,15 @@ function Show-Unattend-GUI {
     $lnkWeb.AutoSize  = $true
     $lnkWeb.LinkColor = [System.Drawing.Color]::Yellow
     $grpImport.Controls.Add($lnkWeb)
+
+    $btnWiOS           = New-Object System.Windows.Forms.Button
+    $btnWiOS.Text      = "Abrir generador (WiOS)"
+    $btnWiOS.Location  = "395, 108"
+    $btnWiOS.Size      = "260, 32"
+    $btnWiOS.BackColor = [System.Drawing.Color]::SteelBlue
+    $btnWiOS.ForeColor = [System.Drawing.Color]::White
+    $btnWiOS.FlatStyle = "Flat"
+    $grpImport.Controls.Add($btnWiOS)
 
     $lblValid           = New-Object System.Windows.Forms.Label
     $lblValid.Text      = "Estado: Esperando archivo..."
@@ -799,6 +808,19 @@ $wpeSetupBlock
     # ==================================================================
     $lnkWeb.Add_Click({
         Start-Process "https://schneegans.de/windows/unattend-generator/"
+    })
+
+    $wiosGeneratorPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Tools\WiOS-Autounattend-Generator.html'
+    $btnWiOS.Add_Click({
+        try {
+            if (-not (Test-Path -LiteralPath $wiosGeneratorPath -PathType Leaf)) {
+                throw "No se encontró el generador en '$wiosGeneratorPath'."
+            }
+            Start-Process -FilePath $wiosGeneratorPath -ErrorAction Stop
+        } catch {
+            Write-Log -LogLevel WARN -Message "Unattend-GUI: No se pudo abrir WiOS. $($_.Exception.Message)"
+            [void][System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Abrir generador WiOS', 'OK', 'Warning')
+        }
     })
 
     $btnBrowse.Add_Click({

@@ -306,6 +306,127 @@ function Repair-InvalidMounts {
 }
 
 
+# Identidad del archivo abierto y ruta efectiva. Dos letras o un enlace pueden nombrar el mismo objeto.
+function Get-AIOFileIdentity {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not ('AIOFileIdentityV1' -as [type])) {
+        Add-Type -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+public sealed class AIOFileIdentityV1 {
+    public string Path, Id;
+    [StructLayout(LayoutKind.Sequential)]
+    struct FileInfo {
+        public uint Attributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME Created, Accessed, Written;
+        public uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
+    }
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern uint GetFinalPathNameByHandle(SafeFileHandle handle, StringBuilder buffer, uint capacity, uint flags);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInfo info);
+    public static AIOFileIdentityV1 Read(string path) {
+        using (var handle=CreateFile(path,0,7,IntPtr.Zero,3,0x02000000,IntPtr.Zero)) {
+            if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            var buf=new StringBuilder(32768);
+            uint n=GetFinalPathNameByHandle(handle,buf,(uint)buf.Capacity,1);
+            if (n==0) n=GetFinalPathNameByHandle(handle,buf,(uint)buf.Capacity,0);
+            FileInfo info;
+            if (n==0 || n>=buf.Capacity || !GetFileInformationByHandle(handle,out info))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            return new AIOFileIdentityV1 {Path=buf.ToString(),Id=String.Format("{0:X8}:{1:X8}{2:X8}",info.Volume,info.IndexHigh,info.IndexLow)};
+        }
+    }
+}
+'@
+    }
+    [AIOFileIdentityV1]::Read([IO.Path]::GetFullPath($Path))
+}
+
+function Test-AIOPathWithin {
+    param([string]$Path,[string]$Root)
+    $separator = [IO.Path]::DirectorySeparatorChar
+    $base = $Root.TrimEnd($separator)
+    return ($Path.TrimEnd($separator) -ieq $base -or $Path.StartsWith($base + $separator,[StringComparison]::OrdinalIgnoreCase))
+}
+
+function Get-AIOOutputSnapshot {
+    param([string]$Destination)
+    if (Test-Path -LiteralPath $Destination -ErrorAction Stop) {
+        $item = Get-Item -LiteralPath $Destination -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "El destino debe ser un archivo ordinario: $Destination"
+        }
+        return [pscustomobject]@{Id=(Get-AIOFileIdentity $Destination).Id; Size=$item.Length; Written=$item.LastWriteTimeUtc.Ticks}
+    }
+}
+
+function Publish-AIOVerifiedFile {
+    param([string]$Pending,[string]$Destination,$Previous)
+    if ($null -eq $Previous) {
+        [IO.File]::Move($Pending,$Destination)
+        return
+    }
+    $current = Get-AIOOutputSnapshot $Destination
+    if (-not $current -or $current.Id -ne $Previous.Id -or $current.Size -ne $Previous.Size -or $current.Written -ne $Previous.Written) {
+        throw "El destino ha cambiado desde la confirmacion: $Destination"
+    }
+    # Todos los archivos estan en el mismo volumen. Conservar el respaldo hasta completar Replace.
+    $backup = "$Pending.anterior"
+    [IO.File]::Replace($Pending,$Destination,$backup)
+    try { Remove-Item -LiteralPath $backup -Force -ErrorAction Stop }
+    catch { Write-Warning "Copia anterior conservada en $backup" }
+}
+
+function Get-AIOVerifiedVhdDisk {
+    param([string]$Path)
+    $vhd = Get-VHD -Path $Path -ErrorAction Stop
+    if (-not $vhd.Attached -or $null -eq $vhd.DiskNumber -or [int]$vhd.DiskNumber -lt 0) { throw 'El archivo VHD no esta adjunto a un disco identificable.' }
+    $disk = Get-Disk -Number $vhd.DiskNumber -ErrorAction Stop
+    $backing = Get-VHD -DiskNumber $disk.Number -ErrorAction Stop
+    $hostPartition = Get-Partition -DriveLetter $env:SystemDrive[0] -ErrorAction Stop
+    if ($null -eq $hostPartition.DiskNumber -or $disk.IsBoot -ne $false -or $disk.IsSystem -ne $false -or $disk.Number -eq $hostPartition.DiskNumber -or
+        -not $disk.UniqueId -or (Get-AIOFileIdentity $backing.Path).Id -ne (Get-AIOFileIdentity $Path).Id) {
+        throw 'No se puede asociar el VHD a un disco offline distinto del Windows activo.'
+    }
+    return $disk
+}
+
+function Get-AIOVerifiedVhdPartition {
+    param($Disk,[int]$Number)
+    $part = Get-Partition -DiskNumber $Disk.Number -PartitionNumber $Number -ErrorAction Stop
+    if (-not $part.DriveLetter -or $part.IsBoot -or $part.IsSystem) { throw 'Particion sin letra o protegida.' }
+    $byLetter = Get-Partition -DriveLetter $part.DriveLetter -ErrorAction Stop
+    if ($byLetter.DiskNumber -ne $Disk.Number -or $byLetter.PartitionNumber -ne $Number -or "$($part.DriveLetter):" -ieq $env:SystemDrive) {
+        throw 'La letra ya no corresponde a la particion seleccionada.'
+    }
+    return $part
+}
+
+function Restore-AIOVhdSession {
+    $record = Join-Path (Split-Path -Parent $script:configFile) 'vhd-session.json'
+    if (-not (Test-Path -LiteralPath $record -PathType Leaf)) { return }
+    try {
+        $saved = Get-Content -LiteralPath $record -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $disk = Get-AIOVerifiedVhdDisk $saved.Path
+        $part = Get-AIOVerifiedVhdPartition $disk $saved.Partition
+        if ($saved.FileId -ne (Get-AIOFileIdentity $saved.Path).Id -or $saved.DiskId -ne $disk.UniqueId -or
+            [string]$saved.Offset -ne [string]$part.Offset -or $saved.VolumeId -ne (Get-AIOFileIdentity "$($part.DriveLetter):\").Id) {
+            throw 'La identidad guardada no coincide.'
+        }
+        $Script:WIM_FILE_PATH = $saved.Path
+        $Script:MOUNTED_INDEX = $part.PartitionNumber
+        $Script:MOUNT_DIR = "$($part.DriveLetter):\"
+        $Script:IMAGE_MOUNTED = 2
+        Write-Log -LogLevel INFO -Message "Sesion VHD verificada: $($saved.Path) en $Script:MOUNT_DIR."
+    } catch { Write-Warning "Sesion VHD sin recuperar: $($_.Exception.Message)" }
+}
+
 function Select-WindowsMediaSource {
 	param(
         [string]$ExtractDir = ""
@@ -349,82 +470,219 @@ function Select-WindowsMediaSource {
             }
         }
 
-        # --- 2. AVISO Y LIMPIEZA DE CONTENIDO PREVIO ---
-        if (Test-Path $ExtractDir) {
+    Expand-AIOSelectedIso -IsoPath $IsoPath -ExtractDir $ExtractDir -ProgramDir $parentDir
+}
 
-        # Verificamos si realmente hay archivos adentro (para no asustar si la carpeta está vacía)
-        $existingFiles = Get-ChildItem -Path $ExtractDir -Force
-        
-        if ($existingFiles.Count -gt 0) {
-            $warnMsg = "Se ha detectado contenido previo en la carpeta de extraccion:`n$ExtractDir`n`nPara evitar que los archivos se mezclen y corrompan la imagen, se ELIMINARA todo el contenido actual de esa carpeta antes de extraer la nueva ISO.`n`nEstas de acuerdo en vaciar la carpeta y continuar?"
-            
-            $dialogRes = [System.Windows.Forms.MessageBox]::Show($warnMsg, "Advertencia de Limpieza", 'YesNo', 'Warning')
-            
-            if ($dialogRes -ne 'Yes') {
-                Write-Log -LogLevel INFO -Message "SourceSelector: Operacion cancelada por el usuario para no borrar el directorio previo."
-                Write-Warning "Extracción cancelada para proteger los archivos existentes."
-                return $null
-            }
-            
-            Write-Host "  >> Vaciando directorio de extraccion anterior..." -ForegroundColor DarkGray
-            Write-Log -LogLevel ACTION -Message "SourceSelector: Eliminando contenido previo en $ExtractDir."
-            # Borramos el contenido, no la carpeta principal
-            Remove-Item "$ExtractDir\*" -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    } else {
-        # Si no existe, la creamos
-        New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
-    }
-    
-    # --- 3. MONTAJE Y EXTRACCION ---
+function Expand-AIOSelectedIso {
+    param([string]$IsoPath,[string]$ExtractDir,[string]$ProgramDir)
+    $mountedHere = $false
+    $progState = @{ Active = $false; LastWidth = 0; LastDrawMs = -500L }
     try {
-        Write-Host "  >> Montando imagen de disco..." -ForegroundColor Gray
-        $mountResult = Mount-DiskImage -ImagePath $IsoPath -PassThru -StorageType ISO
-        
+        $base = [IO.Path]::GetFullPath($ExtractDir)
+        if (-not (Test-Path -LiteralPath $base)) {
+            $null = New-Item -Path $base -ItemType Directory -ErrorAction Stop
+        }
+        $baseId = Get-AIOFileIdentity $base
+        $toolId = Get-AIOFileIdentity $ProgramDir
+        $isoId = Get-AIOFileIdentity $IsoPath
+        $rootId = Get-AIOFileIdentity ([IO.Path]::GetPathRoot($base))
+        if ($baseId.Id -eq $rootId.Id -or (Test-AIOPathWithin $toolId.Path $baseId.Path) -or (Test-AIOPathWithin $isoId.Path $baseId.Path)) {
+            throw 'Elige una carpeta de extraccion distinta de la raiz y separada del programa y de la ISO.'
+        }
+        $mountResult = Get-DiskImage -ImagePath $IsoPath -ErrorAction Stop
+        if (-not $mountResult.Attached) {
+            $mountResult = Mount-DiskImage -ImagePath $IsoPath -PassThru -StorageType ISO -ErrorAction Stop
+            $mountedHere = $true
+        }
+        $isoBase = ([IO.Path]::GetFileNameWithoutExtension($IsoPath) -replace '[^A-Za-z0-9._-]', '_').Trim(' ._-')
+        if ([string]::IsNullOrWhiteSpace($isoBase) -or $isoBase -match '^(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$') {
+            $isoBase = 'ISO'
+        }
+        if ($isoBase.Length -gt 20) { $isoBase = $isoBase.Substring(0, 20).TrimEnd(' ._-') }
+        $folderStem = "{0}_{1}" -f $isoBase, (Get-Date -Format 'yyMMdd_HHmm')
+        $ExtractDir = Join-Path $base $folderStem
+        $suffix = 2
+        while (Test-Path -LiteralPath $ExtractDir) {
+            $ExtractDir = Join-Path $base ("{0}_{1}" -f $folderStem, $suffix)
+            $suffix++
+        }
+        $null = New-Item -Path $ExtractDir -ItemType Directory -ErrorAction Stop
         # Pausa tactica de veterano
-        Start-Sleep -Seconds 2 
-        
-        $vol = $mountResult | Get-Volume
-        
-        if (-not $vol) { throw "No se pudo obtener la letra de la unidad montada." }
-        
-        $driveRoot = "$($vol.DriveLetter):\" 
-        
-        Write-Host "  >> Copiando archivos (esto puede tardar varios minutos)..." -ForegroundColor Cyan
-        Write-Log -LogLevel ACTION -Message "SourceSelector: Copiando contenido de $driveRoot a $ExtractDir via Robocopy."
-        
-        $argsRobo = @($driveRoot, $ExtractDir, "/E", "/NFL", "/NDL", "/NJH", "/NJS")
-        $proc = Start-Process "robocopy.exe" -ArgumentList $argsRobo -Wait -PassThru -NoNewWindow
-        
-        if ($proc.ExitCode -ge 8) {
-            Write-Log -LogLevel WARN -Message "SourceSelector: Robocopy fallo con exit code $($proc.ExitCode). Usando Copy-Item."
-            Write-Warning "Robocopy reporto errores. Intentando metodo alternativo (Copy-Item)..."
-            Copy-Item -Path "$driveRoot*" -Destination $ExtractDir -Recurse -Force
-        }
-        
-        Write-Log -LogLevel INFO -Message "SourceSelector: Desmontando ISO."
-        Dismount-DiskImage -ImagePath $IsoPath | Out-Null
-        $SelectedPath = $ExtractDir
-        
-    } catch {
-        Write-Log -LogLevel ERROR -Message "SourceSelector: Fallo al procesar la ISO - $($_.Exception.Message)"
-        [System.Windows.Forms.MessageBox]::Show("Error critico al procesar la ISO:`n$($_.Exception.Message)", "Error ISO", 'OK', 'Error')
-        
-        try { Dismount-DiskImage -ImagePath $IsoPath -ErrorAction SilentlyContinue | Out-Null } catch {}
-        return $null
-    }
+        Start-Sleep -Seconds 2
 
-    # --- 4. PERMISOS ---
-    Write-Host "  >> Normalizando atributos de archivos (Quitando Solo Lectura)..." -ForegroundColor Yellow
-    Write-Log -LogLevel ACTION -Message "SourceSelector: Eliminando atributos IsReadOnly en $SelectedPath"
-    
-    try {
-        Get-ChildItem -Path $SelectedPath -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
-            if ($_.IsReadOnly) { $_.IsReadOnly = $false }
+        $vol = $mountResult | Get-Volume -ErrorAction Stop
+        if (@($vol).Count -ne 1 -or -not $vol.DriveLetter) { throw "No se pudo obtener la letra de la unidad montada." }
+
+        $driveRoot = "$($vol.DriveLetter):\"
+
+        # Inventario rapido previo para calcular porcentaje real por bytes (incluye install.wim/esd).
+        $totalFiles = 0
+        $totalBytes = 0L
+        try {
+            Get-ChildItem -LiteralPath $driveRoot -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                $totalFiles++
+                $totalBytes += $_.Length
+            }
+        } catch {}
+
+        Write-Host ""
+        Write-Host "  >> Copiando archivos de la ISO ($totalFiles archivos, $([Math]::Round($totalBytes / 1GB, 2)) GB)..." -ForegroundColor Cyan
+        Write-Log -LogLevel ACTION -Message "SourceSelector: Copiando contenido de $driveRoot a $ExtractDir via Robocopy (/A-:R /R:2 /W:2). Total=$totalFiles archivos, $totalBytes bytes."
+
+        $barWidth = 24
+        $swCopy = [Diagnostics.Stopwatch]::StartNew()
+        $renderProgress = {
+            param([long]$BytesDone, [int]$FilesDone, [string]$CurrentFile, [switch]$Force)
+            if (-not $Force -and ($swCopy.ElapsedMilliseconds - $progState.LastDrawMs) -lt 120) { return }
+            $progState.LastDrawMs = $swCopy.ElapsedMilliseconds
+
+            $pct = if ($totalBytes -gt 0) {
+                [Math]::Min(100.0, [Math]::Max(0.0, ($BytesDone * 100.0) / $totalBytes))
+            } elseif ($totalFiles -gt 0) {
+                [Math]::Min(100.0, [Math]::Max(0.0, ($FilesDone * 100.0) / $totalFiles))
+            } else { 0.0 }
+
+            $filled = [int][Math]::Floor(($pct / 100.0) * $barWidth)
+            if ($filled -gt $barWidth) { $filled = $barWidth }
+            $barStr = ('#' * $filled) + ('-' * ($barWidth - $filled))
+            $doneGB  = [Math]::Round($BytesDone / 1GB, 2)
+            $totalGB = [Math]::Round($totalBytes / 1GB, 2)
+            $elapsed = $swCopy.Elapsed.ToString('mm\:ss')
+            $filesPart = if ($totalFiles -gt 0) { "$FilesDone/$totalFiles" } else { "$FilesDone" }
+            $sizePart  = if ($totalBytes -gt 0) { ("{0:N2}/{1:N2} GB" -f $doneGB, $totalGB) } else { ("{0:N2} GB" -f $doneGB) }
+            $fileSuffix = if ($CurrentFile) { " | $CurrentFile" } else { '' }
+            $line = ("  [{0}] {1,5:N1}% | {2} | {3} arch. | {4}{5}" -f $barStr, $pct, $sizePart, $filesPart, $elapsed, $fileSuffix)
+
+            $availableWidth = 79
+            try {
+                $cw = $Host.UI.RawUI.WindowSize.Width
+                if ($cw -gt 1) { $availableWidth = $cw - 1 }
+            } catch {}
+            if ($line.Length -gt $availableWidth) {
+                $line = if ($availableWidth -gt 3) { $line.Substring(0, $availableWidth - 3) + '...' } else { $line.Substring(0, $availableWidth) }
+            }
+            $padWidth = [Math]::Min($availableWidth, [Math]::Max($progState.LastWidth, $line.Length))
+            Write-Host ("`r" + $line.PadRight($padWidth)) -NoNewline
+            $progState.LastWidth = $padWidth
+            $progState.Active = $true
         }
-        Write-Host "  [OK] Atributos normalizados." -ForegroundColor Green
+
+        $completedBytes = 0L
+        $currentFileSize = 0L
+        $currentFileName = ''
+        $currentFileAccounted = $true
+        $copiedFiles = 0
+
+        if (-not ('AIOMountProcReaderV1' -as [type])) {
+            Add-Type -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+public sealed class AIOMountProcReaderV1 : IDisposable {
+    private readonly Process process;
+    public readonly ConcurrentQueue<string> Lines = new ConcurrentQueue<string>();
+    public AIOMountProcReaderV1(string fileName, string arguments) {
+        process = new Process();
+        process.StartInfo = new ProcessStartInfo {
+            FileName = fileName, Arguments = arguments,
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        process.OutputDataReceived += (s, e) => { if (e.Data != null) Lines.Enqueue(e.Data); };
+        process.ErrorDataReceived  += (s, e) => { if (e.Data != null) Lines.Enqueue(e.Data); };
+    }
+    public void Start() {
+        if (!process.Start()) throw new InvalidOperationException("No se pudo iniciar robocopy.exe.");
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+    }
+    public bool WaitForExit(int ms) { return process.WaitForExit(ms); }
+    public void WaitForExit() { process.WaitForExit(); }
+    public int ExitCode { get { return process.ExitCode; } }
+    public void Dispose() { process.Dispose(); }
+}
+'@
+        }
+
+        # /A-:R retira Solo Lectura al vuelo; /R:2 /W:2 evita reintentos infinitos;
+        # lector asincrono para actualizar el reloj cada ~250 ms aunque Windows vacie cache.
+        $liveBytes = 0L
+        $dstQuoted = '"' + $ExtractDir.TrimEnd('\') + '"'
+        $roboArgLine = "$driveRoot $dstQuoted /E /XJ /A-:R /R:2 /W:2 /BYTES /NC /NDL /NJH /NJS"
+        $roboExit = $null
+        $reader = New-Object AIOMountProcReaderV1('robocopy.exe', $roboArgLine)
+        try {
+            $reader.Start()
+            $drainQueue = {
+                $rawLine = $null
+                while ($reader.Lines.TryDequeue([ref]$rawLine)) {
+                    foreach ($seg in ($rawLine -split "`r`n|`r|`n")) {
+                        if ([string]::IsNullOrWhiteSpace($seg)) { continue }
+                        if ($seg -match '^\s*(\d+(?:[.,]\d+)?)%\s*$') {
+                            $filePct = 0.0
+                            $pctText = $Matches[1].Replace(',', '.')
+                            if ([double]::TryParse($pctText, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$filePct)) {
+                                if ($filePct -ge 100.0 -and -not $currentFileAccounted) {
+                                    $completedBytes += $currentFileSize
+                                    $liveBytes = $completedBytes
+                                    $currentFileAccounted = $true
+                                } elseif (-not $currentFileAccounted) {
+                                    $liveBytes = $completedBytes + [long][Math]::Floor($currentFileSize * ($filePct / 100.0))
+                                }
+                            }
+                        } elseif ($seg -match '^\s*(\d+)\s+(.+)$') {
+                            if (-not $currentFileAccounted) {
+                                $completedBytes += $currentFileSize
+                                $currentFileAccounted = $true
+                            }
+                            $fileSize = 0L
+                            [void][long]::TryParse($Matches[1], [ref]$fileSize)
+                            $copiedFiles++
+                            $currentFileSize = $fileSize
+                            $currentFileName = [IO.Path]::GetFileName($Matches[2].Trim())
+                            $currentFileAccounted = $false
+                            $liveBytes = $completedBytes
+                        }
+                    }
+                }
+            }
+
+            while (-not $reader.WaitForExit(250)) {
+                . $drainQueue
+                & $renderProgress -BytesDone $liveBytes -FilesDone $copiedFiles -CurrentFile $currentFileName
+            }
+            $reader.WaitForExit()
+            . $drainQueue
+            $roboExit = $reader.ExitCode
+        } finally {
+            $reader.Dispose()
+        }
+        if (-not $currentFileAccounted) {
+            $completedBytes += $currentFileSize
+            $currentFileAccounted = $true
+        }
+        $swCopy.Stop()
+        if ($roboExit -in (0..7)) {
+            $finalBytes = if ($totalBytes -gt 0) { $totalBytes } else { $completedBytes }
+            $finalFiles = if ($totalFiles -gt 0) { $totalFiles } else { $copiedFiles }
+            & $renderProgress -BytesDone $finalBytes -FilesDone $finalFiles -CurrentFile 'Completado' -Force
+        }
+        if ($progState.Active) { Write-Host ''; $progState.Active = $false }
+        if ($null -eq $roboExit -or $roboExit -notin (0..7)) {
+            throw "Error al copiar la ISO (Robocopy $roboExit). Carpeta parcial: $ExtractDir"
+        }
+        $SelectedPath = $ExtractDir
+        Write-Host ("  [OK] ISO extraida ({0} archivos, {1:N2} GB en {2}). Atributos de solo lectura retirados." -f $copiedFiles, ($completedBytes / 1GB), $swCopy.Elapsed.ToString('mm\:ss')) -ForegroundColor Green
+        Write-Log -LogLevel INFO -Message "SourceSelector: Extraccion completada. Archivos=$copiedFiles, Bytes=$completedBytes, Tiempo=$($swCopy.Elapsed.ToString('mm\:ss')), Destino='$ExtractDir'."
+
     } catch {
-        Write-Log -LogLevel WARN -Message "SourceSelector: Advertencia menor al cambiar atributos - $($_.Exception.Message)"
+        if ($progState.Active) { Write-Host ''; $progState.Active = $false }
+        Write-Log -LogLevel ERROR -Message "SourceSelector: Fallo al procesar la ISO - $($_.Exception.Message)"
+        Write-Warning "No se pudo extraer la ISO: $($_.Exception.Message)"
+
+        return $null
+    } finally {
+        if ($mountedHere) { Dismount-DiskImage -ImagePath $IsoPath -ErrorAction Continue | Out-Null }
     }
 
     return $SelectedPath
@@ -530,10 +788,15 @@ function Mount-Image {
             $Script:WIM_FILE_PATH = $null; return
         }
 
+        $attachedHere = $false
         try {
             Write-Host "[+] Montando VHD..." -ForegroundColor Yellow
             Write-Log -LogLevel ACTION -Message "MountManager: Ejecutando Mount-VHD para adjuntar el disco virtual."
-            $vhdInfo = Mount-VHD -Path $Script:WIM_FILE_PATH -PassThru -ErrorAction Stop
+            $vhdInfo = Get-VHD -Path $Script:WIM_FILE_PATH -ErrorAction Stop
+            if (-not $vhdInfo.Attached) {
+                Mount-VHD -Path $Script:WIM_FILE_PATH -ErrorAction Stop
+                $attachedHere = $true
+            }
             
             # --- CORRECCIÓN: Pausa táctica (Respiración del bus virtual) ---
             Write-Log -LogLevel INFO -Message "MountManager: Esperando 2 segundos para inicializacion logica del disco..."
@@ -541,46 +804,49 @@ function Mount-Image {
 
             # 1. Escaneo Inteligente de Particiones
             Write-Log -LogLevel INFO -Message "MountManager: Escaneando tabla de particiones del disco virtual montado."
-            $targetPart = $null
-            $partitions = Get-Partition -DiskNumber $vhdInfo.Number | Where-Object { $_.Size -gt 1GB } # Filtramos EFI/MSR
+            $disk = Get-AIOVerifiedVhdDisk $Script:WIM_FILE_PATH
+            $windowsParts = @()
+            $partitions = Get-Partition -DiskNumber $disk.Number -ErrorAction Stop | Where-Object { $_.Size -gt 1GB } # Filtramos EFI/MSR
 
             foreach ($part in $partitions) {
                 # Auto-Asignar letra si falta
                 if (-not $part.DriveLetter) {
                     $freeLet = Get-UnusedDriveLetter
                     Write-Log -LogLevel INFO -Message "MountManager: Asignando letra temporal [$freeLet] a particion sin montar."
-                    Set-Partition -InputObject $part -NewDriveLetter $freeLet -ErrorAction SilentlyContinue
-                    $part.DriveLetter = $freeLet # Actualizamos objeto en memoria
-                    
+                    Set-Partition -InputObject $part -NewDriveLetter $freeLet -ErrorAction Stop
+
                     # --- CORRECCIÓN: Active Polling (Max 5 segundos) ---
                     $timeout = 50
                     while (-not (Test-Path -LiteralPath "$($freeLet):\") -and $timeout -gt 0) {
                         Start-Sleep -Milliseconds 100
                         $timeout--
                     }
+                    $part = Get-AIOVerifiedVhdPartition $disk $part.PartitionNumber
                 }
                 
                 # Verificar si es Windows
                 if (Test-Path "$($part.DriveLetter):\Windows\System32\config\SYSTEM") {
-                    $targetPart = $part
+                    $windowsParts += $part
                     Write-Log -LogLevel INFO -Message "MountManager: Instalacion de Windows detectada automaticamente en particion [$($part.DriveLetter):]."
-                    break 
                 }
             }
 
             # 2. Seleccion (Automatica o Manual)
-            if ($targetPart) {
+            if ($windowsParts.Count -eq 1) {
+                $targetPart = $windowsParts[0]
                 Write-Host "[AUTO] Windows detectado en particion $($targetPart.DriveLetter):" -ForegroundColor Green
                 $selectedPart = $targetPart
             } else {
                 # Fallback: Menu manual si no detectamos Windows
-                Write-Log -LogLevel WARN -Message "MountManager: No se detecto instalacion de Windows. Lanzando seleccion manual de particion."
-                Write-Warning "No se detecto una instalacion de Windows obvia."
+                Write-Log -LogLevel INFO -Message "MountManager: Seleccion manual. Instalaciones Windows detectadas: $($windowsParts.Count)."
+                Write-Host "Instalaciones Windows detectadas: $($windowsParts.Count)."
                 Write-Host "Seleccione la particion manualmente:" -ForegroundColor Cyan
                 
                 $menuItems = @{}
                 $i = 1
-                $allParts = Get-Partition -DiskNumber $vhdInfo.Number | Where-Object { $_.DriveLetter }
+                $allParts = if ($windowsParts.Count) { $windowsParts } else {
+                    Get-Partition -DiskNumber $disk.Number -ErrorAction Stop | Where-Object { $_.DriveLetter }
+                }
                 
                 foreach ($p in $allParts) {
                     $gb = [math]::Round($p.Size / 1GB, 2)
@@ -590,8 +856,9 @@ function Mount-Image {
                 }
                 
                 $choice = Read-Host "Numero de particion"
-                if ($menuItems[$choice]) { 
-                    $selectedPart = $menuItems[$choice] 
+                $number = 0
+                if ([int]::TryParse($choice, [ref]$number) -and $menuItems.ContainsKey($number)) { 
+                    $selectedPart = $menuItems[$number] 
                     Write-Log -LogLevel INFO -Message "MountManager: El usuario selecciono manualmente la particion [$($selectedPart.DriveLetter):]."
                 } else { 
                     throw "Seleccion invalida." 
@@ -599,7 +866,25 @@ function Mount-Image {
             }
 
             # 3. Configurar Entorno Global
+            $disk = Get-AIOVerifiedVhdDisk $Script:WIM_FILE_PATH
+            $confirmed = Get-AIOVerifiedVhdPartition $disk $selectedPart.PartitionNumber
+            if ($confirmed.DiskNumber -ne $selectedPart.DiskNumber -or $confirmed.Offset -ne $selectedPart.Offset) {
+                throw 'La particion ha cambiado desde la seleccion.'
+            }
+            $selectedPart = $confirmed
             $driveLetter = "$($selectedPart.DriveLetter):\"
+            $record = Join-Path (Split-Path -Parent $script:configFile) 'vhd-session.json'
+            $entry = @{Path=$Script:WIM_FILE_PATH; FileId=(Get-AIOFileIdentity $Script:WIM_FILE_PATH).Id
+                DiskId=$disk.UniqueId; Partition=$selectedPart.PartitionNumber; Offset=[string]$selectedPart.Offset
+                VolumeId=(Get-AIOFileIdentity $driveLetter).Id}
+            $oldRecord = Get-AIOOutputSnapshot $record
+            $pendingRecord = "$record.$([Guid]::NewGuid().ToString('N')).tmp"
+            try {
+                $entry | ConvertTo-Json | Set-Content -LiteralPath $pendingRecord -Encoding UTF8 -ErrorAction Stop
+                Publish-AIOVerifiedFile $pendingRecord $record $oldRecord
+            } finally {
+                if ([IO.File]::Exists($pendingRecord)) { Remove-Item -LiteralPath $pendingRecord -ErrorAction Continue }
+            }
             $Script:MOUNT_DIR = $driveLetter
             $Script:IMAGE_MOUNTED = 2         # Estado 2 = VHD
             $Script:MOUNTED_INDEX = $selectedPart.PartitionNumber
@@ -613,7 +898,7 @@ function Mount-Image {
         } catch {
             Write-Host "Error VHD: $_"
             Write-Log -LogLevel ERROR -Message "MountManager: Fallo critico durante montaje/escaneo VHD: $($_.Exception.Message)"
-            try { Dismount-VHD -Path $Script:WIM_FILE_PATH -ErrorAction SilentlyContinue } catch {}
+            if ($attachedHere) { Dismount-VHD -Path $Script:WIM_FILE_PATH -ErrorAction SilentlyContinue }
             $Script:WIM_FILE_PATH = $null
         }
         Pause; return
@@ -653,6 +938,7 @@ function Mount-Image {
         Pause; return
     }
 
+    Write-Host ""
     Write-Host "[+] Montando (Indice: $INDEX)..." -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "MountManager: Ejecutando DISM /Mount-Wim para adjuntar indice $INDEX en $Script:MOUNT_DIR."
     
@@ -724,6 +1010,7 @@ function Unmount-Image {
             Write-Host "   > Desmontando disco virtual (VHD)..." -ForegroundColor Yellow
             Write-Log -LogLevel ACTION -Message "UnmountManager: Ejecutando Dismount-VHD para el disco virtual en $Script:WIM_FILE_PATH"
             Dismount-VHD -Path $Script:WIM_FILE_PATH -ErrorAction Stop
+            Remove-Item -LiteralPath (Join-Path (Split-Path -Parent $script:configFile) 'vhd-session.json') -ErrorAction SilentlyContinue
             
             if ($Commit) {
                 Write-Host "[OK] VHD Desmontado (Los cambios en VHD se guardan automaticamente en tiempo real)." -ForegroundColor Green
@@ -810,74 +1097,33 @@ function Unmount-Image {
 }
 
 function Reload-Image {
-    param([int]$RetryCount = 0)
-
-    Clear-Host
-    
-    if ($RetryCount -eq 0) {
-        Write-Log -LogLevel ACTION -Message "ImageReloader: Solicitud de recarga de imagen (Reload) iniciada."
-    }
-
-    # Seguridad anti-bucle: Maximo 3 intentos
-    if ($RetryCount -ge 3) {
-        Write-Host "[ERROR FATAL] Se ha intentado recargar la imagen 3 veces sin exito."
-        Write-Host "Es posible que un archivo este bloqueado por un Antivirus o el Explorador."
-        Write-Log -LogLevel ERROR -Message "ImageReloader: Abortado tras 3 intentos fallidos por bloqueos del sistema o antivirus."
+    if ($Script:IMAGE_MOUNTED -ne 1) {
+        Write-Warning 'Recargar y descartar requiere un WIM montado. Los cambios en un VHD son inmediatos.'
         Pause
-        return
+        return $false
     }
-
-    if ($Script:IMAGE_MOUNTED -eq 0) { 
-        Write-Log -LogLevel WARN -Message "ImageReloader: Operacion rechazada. No hay ninguna imagen montada en el sistema."
-        Write-Warning "No hay imagen montada."; Pause; return 
-    }
-    
-    # Asegurar descarga de Hives antes de recargar
-    Write-Log -LogLevel INFO -Message "ImageReloader: [Intento $($RetryCount + 1)] Desmontando colmenas de registro residuales..."
-    Unmount-Hives 
-
-    Write-Host "Intento de recarga: $($RetryCount + 1)" -ForegroundColor DarkGray
-    Write-Host "[+] Desmontando imagen..." -ForegroundColor Yellow
-    Write-Log -LogLevel INFO -Message "ImageReloader: Ejecutando DISM /Unmount-Wim con parametro /Discard..."
-    
-    dism /unmount-wim /mountdir:"$Script:MOUNT_DIR" /discard
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] Error al desmontar. Ejecutando limpieza profunda..."
-        Write-Log -LogLevel ERROR -Message "ImageReloader: Fallo el desmontaje (LASTEXITCODE: $LASTEXITCODE). Ejecutando DISM /Cleanup-Wim..."
-        
-        dism /cleanup-wim
-        
-        # --- Pausa de seguridad ---
-        Write-Host "Esperando 5 segundos para liberar archivos..." -ForegroundColor Cyan
-        Write-Log -LogLevel INFO -Message "ImageReloader: Forzando pausa de 5 segundos para liberar handles de archivos del sistema operativo."
-        Start-Sleep -Seconds 5 
-        
-        # Llamada recursiva con contador incrementado
-        Write-Log -LogLevel WARN -Message "ImageReloader: Iniciando llamada recursiva de recarga..."
-        Reload-Image -RetryCount ($RetryCount + 1) 
-        return
-    }
-
-    # La sesion anterior ya termino, aunque el nuevo montaje use la misma ruta.
-    $Script:AIODashboardCache = $null
-    $Script:ForceMenuRefresh = $false
-
-    Write-Host "[+] Remontando imagen..." -ForegroundColor Yellow
-    Write-Log -LogLevel INFO -Message "ImageReloader: Imagen desmontada. Ejecutando DISM /Mount-Wim para restaurar el estado original."
-    dism /mount-wim /wimfile:"$Script:WIM_FILE_PATH" /index:$Script:MOUNTED_INDEX /mountdir:"$Script:MOUNT_DIR"
-
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[OK] Imagen recargada exitosamente." -ForegroundColor Green
-        Write-Log -LogLevel INFO -Message "ImageReloader: Recarga completada exitosamente. El entorno esta listo para seguir trabajando."
-        $Script:IMAGE_MOUNTED = 1
-		$Script:CachedControlSet = $null
-        $Script:AIODashboardCache = $null
-        $Script:ForceMenuRefresh = $false
-    } else {
-        Write-Host "[ERROR] Error al remontar la imagen."
-        Write-Log -LogLevel ERROR -Message "ImageReloader: Fallo critico al remontar la imagen. El entorno ha quedado desmontado. LASTEXITCODE: $LASTEXITCODE"
+    try {
+        $mounted = Get-AIOMountForPath -Mounts @(Get-AIOMountedImages) -Path $Script:MOUNT_DIR
+        if (-not $mounted -or $mounted.Status -ne 'OK' -or $mounted.ImageIndex -ne $Script:MOUNTED_INDEX -or
+            (Get-AIOFileIdentity $mounted.ImageFile).Id -ne (Get-AIOFileIdentity $Script:WIM_FILE_PATH).Id) {
+            throw 'La sesion registrada en DISM ya no coincide con el WIM seleccionado.'
+        }
+        Unmount-Hives | Out-Host
+        $result = Invoke-AIOConsoleSystemTool -Tool dism.exe -Arguments @('/Unmount-Image',"/MountDir:$Script:MOUNT_DIR",'/Discard')
+        if ($result.ExitCode -ne 0) { throw "Error al desmontar el WIM: $($result.ExitCode)" }
         $Script:IMAGE_MOUNTED = 0
+        $Script:AIODashboardCache = $null
+        $Script:CachedControlSet = $null
+        $Script:ForceMenuRefresh = $false
+        $result = Invoke-AIOConsoleSystemTool -Tool dism.exe -Arguments @('/Mount-Image',"/ImageFile:$Script:WIM_FILE_PATH","/Index:$Script:MOUNTED_INDEX","/MountDir:$Script:MOUNT_DIR")
+        if ($result.ExitCode -ne 0) { throw "Error al volver a montar el WIM: $($result.ExitCode)" }
+        $Script:IMAGE_MOUNTED = 1
+        Write-Host '[OK] WIM recargado.' -ForegroundColor Green
+        return $true
+    } catch {
+        Write-Warning $_.Exception.Message
+        Write-Log -LogLevel ERROR -Message "Recarga WIM: $($_.Exception.Message)"
+        Pause
+        return $false
     }
-    Pause
 }
