@@ -18,7 +18,6 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 * **Despliegue a VHD / Disco Físico con verificaciones de seguridad**: Antes de borrar se revalida el disco externo por su identificador único y su estado de protección, y se comprueba que la imagen de origen (WIM, ESD o SWM, incluidas cadenas de VHD) no resida en el disco que se va a borrar. Las letras de partición destino se verifican (nunca de arranque o sistema), el destino VHD debe terminar en `.vhd` o `.vhdx` y, si ya existe, solo se reemplaza tras confirmar y verificar el nuevo disco virtual con `Test-VHD`.
 * **DeltaPack con verificación estricta**: El paquete debe tener un único manifiesto; las rutas relativas se validan (sin componentes no permitidos ni puntos de reanálisis en el paquete o el montaje), las listas SHA-256 deben estar completas y sin duplicados, las eliminaciones se comprueban contra el plan (tipo y cantidad) y el *Scratch* debe estar fuera de la imagen offline. Un paquete sin contenido aplicable se rechaza.
 * **Editar Índices**: Al exportar o eliminar, el índice indicado debe figurar en el inventario del archivo; un valor inexistente se rechaza antes de ejecutar DISM.
-* **Licencia**: El archivo `LICENSE` pasa de MIT al texto de la GNU GPLv3, coherente con el modelo de doble licencia descrito al final de este documento.
 
 ## Características Principales
 
