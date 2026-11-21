@@ -1,3 +1,11 @@
+1.5.16
+====================================================
+- Interfaz multilenguaje (espanol e ingles): nuevo motor de internacionalizacion (Script\I18n.ps1) y paquetes Lang\es.json y Lang\en.json (1842 textos cada uno) que cubren menus, todos los modulos, dialogos, mensajes, catalogos (descripciones y categorias de ediciones, servicios y ajustes) y el informe de fallos. Al iniciar se detecta el idioma de Windows; si no existe un paquete exacto se usa en cascada (por ejemplo pt-BR, luego pt y por ultimo es) y cualquier texto que falte en una traduccion se muestra en espanol. Las confirmaciones de si/no aceptan S, SI, Y y YES.
+- Selector de idioma: en [C] Configuracion (Rutas e Idioma) se anade [3] Idioma de la Interfaz, con la opcion Automatico (idioma del sistema) y cada paquete disponible en Lang\. La eleccion se guarda en config.json (Language) y se registra en el log.
+- Traducciones propias: basta copiar Lang\en.json con el codigo ISO del idioma (por ejemplo pt.json), editar el bloque _meta y traducir solo los valores, sin tocar las claves ni los marcadores {0}. Aparece automaticamente en el selector. Guia en Lang\README_TRADUCCION.md.
+- Generador WiOS: Tools\WiOS-Autounattend-Generator.html ahora esta disponible en espanol e ingles, con un boton de idioma, preferencia guardada en el navegador y deteccion del idioma del navegador.
+====================================================
+
 1.5.15
 ====================================================
 - Unattend: se incluye Tools\WiOS-Autounattend-Generator.html (WiOS Autounattend Generator 2.0) y un boton Abrir generador (WiOS) en la pestana de importacion externa, que lo abre en el navegador y avisa si el archivo no se encuentra.

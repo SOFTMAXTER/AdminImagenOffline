@@ -1,5 +1,5 @@
 
-# AdminImagenOffline V1.5.15 by SOFTMAXTER
+# AdminImagenOffline V1.5.16 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -9,19 +9,12 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.15 (Changelog)
+## 🆕 Novedades en la Versión 1.5.16 (Changelog)
 
-* **Generador WiOS de Autounattend**: Se incluye `Tools\WiOS-Autounattend-Generator.html` (*WiOS · Autounattend Generator 2.0*) y el módulo Unattend añade el botón **Abrir generador (WiOS)** en la pestaña de importación externa, que lo abre en el navegador y avisa si el archivo no se encuentra.
-* **Guardar como nuevo WIM verificado**: La captura se escribe primero en un archivo temporal `.captura-<GUID>.wim` junto al destino. Antes de publicarla se comprueba que contenga un único índice con el nombre esperado, que el indicador de arranque coincida y que el directorio de destino no haya cambiado; la copia anterior se conserva si existía y el temporal se elimina siempre. `/Bootable` se aplica solo si el índice montado es el índice de arranque del WIM de origen, y se rechaza guardar dentro del montaje o sobre el WIM de origen.
-* **Montaje y recarga más seguros**: *Recargar WIM* solo aparece con un WIM montado y comprueba que la sesión registrada en DISM coincide con el WIM seleccionado antes de desmontar y volver a montar; en un VHD avisa de que los cambios son inmediatos. Al iniciar solo se recupera una sesión VHD registrada por la herramienta y verificada por identidad, y la selección manual de partición se revalida. La recuperación con `Remount-Image` espera al proceso iniciado, informa cada 30 segundos y comprueba que la imagen y el índice no cambiaron ni estén protegidos (WinRE del equipo).
-* **Extracción de ISO reforzada**: La carpeta de extracción debe ser distinta de la raíz, del programa y de la ISO. El contenido se copia con `Robocopy` a una subcarpeta única (`<ISO>_aammdd_hhmm`) con barra de progreso por bytes, se retiran los atributos de solo lectura y, si ocurre un error, se indica la carpeta parcial.
-* **Despliegue a VHD / Disco Físico con verificaciones de seguridad**: Antes de borrar se revalida el disco externo por su identificador único y su estado de protección, y se comprueba que la imagen de origen (WIM, ESD o SWM, incluidas cadenas de VHD) no resida en el disco que se va a borrar. Las letras de partición destino se verifican (nunca de arranque o sistema), el destino VHD debe terminar en `.vhd` o `.vhdx` y, si ya existe, solo se reemplaza tras confirmar y verificar el nuevo disco virtual con `Test-VHD`.
-* **DeltaPack con verificación estricta**: El paquete debe tener un único manifiesto; las rutas relativas se validan (sin componentes no permitidos ni puntos de reanálisis en el paquete o el montaje), las listas SHA-256 deben estar completas y sin duplicados, las eliminaciones se comprueban contra el plan (tipo y cantidad) y el *Scratch* debe estar fuera de la imagen offline. Un paquete sin contenido aplicable se rechaza.
-* **Editar Índices**: Al exportar o eliminar, el índice indicado debe figurar en el inventario del archivo; un valor inexistente se rechaza antes de ejecutar DISM.
-* **Inyector de Appx con comprobación previa de compatibilidad**: Antes de encolar un paquete se detectan los *bundles* incompletos (descarga parcial o sin el payload interno para la arquitectura de la imagen), que se marcan como `BUNDLE INCOMPLETO`, y los que requieren una versión de Windows superior a la de la imagen montada (`TargetDeviceFamily MinVersion`), marcados como `INCOMPATIBLE (OS)`. El motivo aparece como información emergente y en el log. La arquitectura, el build y el nombre del sistema se toman de la caché del Dashboard, con respaldo a la detección local.
-* **OEM Branding con metadatos del Dashboard**: La versión, la edición y el nombre de la imagen se leen de la caché del Dashboard y solo se completan desde el Registro offline lo que falte; el log indica la fuente utilizada.
-* **Montaje sin esperas colgadas**: Los comandos de DISM que se ejecutan en consola esperan únicamente al proceso iniciado, en lugar de a procesos auxiliares como `wimserv.exe`; `Mount-Image` usa esta espera.
-* **Licencia**: El archivo `LICENSE` pasa de MIT al texto de la GNU GPLv3, coherente con el modelo de doble licencia descrito al final de este documento.
+* **Interfaz multilenguaje (español e inglés)**: Nuevo motor de internacionalización (`Script\I18n.ps1`) y paquetes `Lang\es.json` y `Lang\en.json` (1842 textos cada uno) que cubren los menús, todos los módulos, los diálogos, los mensajes, los catálogos (descripciones y categorías de ediciones, servicios y ajustes) y el informe de fallos. Al iniciar se detecta el idioma de Windows; si no existe un paquete exacto se usa en cascada (por ejemplo `pt-BR`, luego `pt` y por último `es`), y cualquier texto que falte en una traducción se muestra en español en lugar de quedar vacío. Las confirmaciones de sí/no aceptan `S`, `SI`, `Y` y `YES`.
+* **Selector de idioma**: En **[C] Configuración (Rutas e Idioma)** se añade **[3] Idioma de la Interfaz**, con la opción *Automático* (idioma del sistema) y cada paquete disponible en `Lang\`. La elección se guarda en `config.json` (`Language`) y se registra en el log.
+* **Traducciones propias**: Para añadir un idioma basta copiar `Lang\en.json` con el código ISO del idioma (por ejemplo `pt.json`), editar el bloque `_meta` y traducir solo los valores, sin tocar las claves ni los marcadores `{0}`. Aparece automáticamente en el selector. La guía está en `Lang\README_TRADUCCION.md`.
+* **Generador WiOS bilingüe**: `Tools\WiOS-Autounattend-Generator.html` ahora está disponible en español e inglés, con un botón de idioma, preferencia guardada en el navegador y detección del idioma del navegador.
 
 ## Características Principales
 
@@ -59,6 +52,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
     TuCarpetaPrincipal/
     │
     ├── AdminImagenOffline.exe    <-- Ejecutable Lanzador Principal
+    ├── Lang/                      <-- Paquetes de idioma (es.json, en.json) y guía de traducción
     ├── Tools/
     │   ├── oscdimg.exe
     │   ├── SetLockScreen.zip
@@ -66,6 +60,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
     │   └── wimlib/                <-- wimlib-imagex.exe (verificación e incorporación de winre.wim, integración de índices y ajuste de CREATIONTIME)
     └── Script/
         ├── AdminImagenOffline.ps1
+        ├── I18n.ps1
         ├── Metadata-Comun.ps1
         ├── Modulo-Actualizaciones.ps1
         ├── Modulo-Addons.ps1
@@ -105,7 +100,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
 
 ## 🚀 Configuración Inicial
 
-Al iniciar el script por primera vez, se te pedirá configurar dos directorios críticos (estas rutas se guardan en `config.json`):
+Al iniciar el script por primera vez, se te pedirá configurar dos directorios críticos (estas rutas se guardan en `config.json`, junto con el idioma de la interfaz, que por defecto se detecta del sistema y puede cambiarse en **[C] Configuración → [3] Idioma de la Interfaz**):
 
 1. **Directorio de Montaje (`MOUNT\_DIR`):** Carpeta vacía (ej. `C:\\TEMP`) donde se desempaquetará la imagen de Windows para su edición.
 2. **Directorio Temporal (`Scratch\_DIR`):** Espacio de trabajo para DISM (ej. `C:\\Scratch`). Se recomienda usar rutas cortas para evitar el límite de 260 caracteres de Windows al extraer paquetes profundos.
