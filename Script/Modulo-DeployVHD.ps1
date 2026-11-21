@@ -341,7 +341,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     # 2. Construccion del formulario
     # ------------------------------------------------------------------
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = "Despliegue WIM/ESD/SWM a VHD/VHDX o Disco Fisico"
+    $form.Text            = Get-AIOString 'deployvhd.form_title'
     $form.Size            = New-Object System.Drawing.Size(720, 680)
     $form.StartPosition   = "CenterScreen"
     $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -351,7 +351,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
     # --- Grupo 1: Imagen de Origen ---
     $grpSource           = New-Object System.Windows.Forms.GroupBox
-    $grpSource.Text      = " 1. Imagen de Origen (WIM / ESD / SWM) "
+    $grpSource.Text      = Get-AIOString 'deployvhd.grp_source'
     $grpSource.Location  = New-Object System.Drawing.Point(20, 15)
     $grpSource.Size      = New-Object System.Drawing.Size(660, 120)
     $grpSource.ForeColor = [System.Drawing.Color]::Cyan
@@ -374,7 +374,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $grpSource.Controls.Add($btnBrowseWim)
 
     $lblIdx           = New-Object System.Windows.Forms.Label
-    $lblIdx.Text      = "Indice:"
+    $lblIdx.Text      = Get-AIOString 'deployvhd.lbl_idx'
     $lblIdx.Location  = "20, 60"
     $lblIdx.AutoSize  = $true
     $lblIdx.ForeColor = [System.Drawing.Color]::Silver
@@ -390,14 +390,14 @@ public sealed class AIODeployNativeReader : IDisposable {
 
     # --- Grupo 2: Tipo de Destino ---
     $grpTargetMode           = New-Object System.Windows.Forms.GroupBox
-    $grpTargetMode.Text      = " 2. Tipo de Destino "
+    $grpTargetMode.Text      = Get-AIOString 'deployvhd.grp_target_mode'
     $grpTargetMode.Location  = "20, 140"
     $grpTargetMode.Size      = "660, 55"
     $grpTargetMode.ForeColor = [System.Drawing.Color]::Yellow
     $form.Controls.Add($grpTargetMode)
 
     $radVhd           = New-Object System.Windows.Forms.RadioButton
-    $radVhd.Text      = "Disco Virtual (VHD / VHDX)"
+    $radVhd.Text      = Get-AIOString 'deployvhd.rad_vhd'
     $radVhd.Location  = "20, 22"
     $radVhd.AutoSize  = $true
     $radVhd.Checked   = $true
@@ -405,7 +405,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $grpTargetMode.Controls.Add($radVhd)
 
     $radPhysical           = New-Object System.Windows.Forms.RadioButton
-    $radPhysical.Text      = "Disco Fisico (USB / Pendrive / HDD Externo)"
+    $radPhysical.Text      = Get-AIOString 'deployvhd.rad_physical'
     $radPhysical.Location  = "250, 22"
     $radPhysical.AutoSize  = $true
     $radPhysical.ForeColor = [System.Drawing.Color]::White
@@ -413,7 +413,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
     # --- Grupo 3: Configuracion de Disco y Particiones ---
     $grpDest           = New-Object System.Windows.Forms.GroupBox
-    $grpDest.Text      = " 3. Configuracion de Disco y Particiones "
+    $grpDest.Text      = Get-AIOString 'deployvhd.grp_dest'
     $grpDest.Location  = "20, 205"
     $grpDest.Size      = "660, 220"
     $grpDest.ForeColor = [System.Drawing.Color]::Orange
@@ -421,7 +421,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
     # Controles VHD
     $lblVhdPath           = New-Object System.Windows.Forms.Label
-    $lblVhdPath.Text      = "Ruta VHDX:"
+    $lblVhdPath.Text      = Get-AIOString 'deployvhd.lbl_vhd_path'
     $lblVhdPath.Location  = "20, 25"
     $lblVhdPath.AutoSize  = $true
     $lblVhdPath.ForeColor = [System.Drawing.Color]::Silver
@@ -436,7 +436,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $grpDest.Controls.Add($txtVhd)
 
     $btnBrowseVhd           = New-Object System.Windows.Forms.Button
-    $btnBrowseVhd.Text      = "Guardar"
+    $btnBrowseVhd.Text      = Get-AIOString 'deployvhd.btn_save'
     $btnBrowseVhd.Location  = "570, 44"
     $btnBrowseVhd.Size      = "70, 25"
     $btnBrowseVhd.BackColor = [System.Drawing.Color]::Silver
@@ -444,7 +444,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $grpDest.Controls.Add($btnBrowseVhd)
 
     $lblSize          = New-Object System.Windows.Forms.Label
-    $lblSize.Text     = "Size Total (GB):"
+    $lblSize.Text     = Get-AIOString 'deployvhd.lbl_size'
     $lblSize.Location = "20, 85"
     $lblSize.AutoSize = $true
     $grpDest.Controls.Add($lblSize)
@@ -458,7 +458,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $grpDest.Controls.Add($numSize)
 
     $chkDynamic          = New-Object System.Windows.Forms.CheckBox
-    $chkDynamic.Text     = "Expansion Dinamica"
+    $chkDynamic.Text     = Get-AIOString 'deployvhd.chk_dynamic'
     $chkDynamic.Location = "250, 85"
     $chkDynamic.AutoSize = $true
     $chkDynamic.Checked  = $true
@@ -466,7 +466,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
     # Controles Disco Fisico (ocultos por defecto)
     $lblPhysicalDisk           = New-Object System.Windows.Forms.Label
-    $lblPhysicalDisk.Text      = "Seleccione el Disco Fisico Destino:"
+    $lblPhysicalDisk.Text      = Get-AIOString 'deployvhd.lbl_physical_disk'
     $lblPhysicalDisk.Location  = "20, 25"
     $lblPhysicalDisk.AutoSize  = $true
     $lblPhysicalDisk.ForeColor = [System.Drawing.Color]::Silver
@@ -483,7 +483,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $grpDest.Controls.Add($cmbDisks)
 
     $btnRefreshDisks           = New-Object System.Windows.Forms.Button
-    $btnRefreshDisks.Text      = "Actualizar Lista"
+    $btnRefreshDisks.Text      = Get-AIOString 'deployvhd.btn_refresh_disks'
     $btnRefreshDisks.Location  = "480, 44"
     $btnRefreshDisks.Size      = "160, 25"
     $btnRefreshDisks.BackColor = [System.Drawing.Color]::DodgerBlue
@@ -493,7 +493,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
     # Controles comunes — tamaños de particiones
     $chkUEFI           = New-Object System.Windows.Forms.CheckBox
-    $chkUEFI.Text      = "Esquema GPT (UEFI)"
+    $chkUEFI.Text      = Get-AIOString 'deployvhd.chk_uefi'
     $chkUEFI.Location  = "420, 85"
     $chkUEFI.AutoSize  = $true
     $chkUEFI.Checked   = $true
@@ -501,14 +501,14 @@ public sealed class AIODeployNativeReader : IDisposable {
     $grpDest.Controls.Add($chkUEFI)
 
     $lblPartInfo           = New-Object System.Windows.Forms.Label
-    $lblPartInfo.Text      = "--- Size de Particiones de Sistema ---"
+    $lblPartInfo.Text      = Get-AIOString 'deployvhd.lbl_part_info'
     $lblPartInfo.Location  = "20, 125"
     $lblPartInfo.AutoSize  = $true
     $lblPartInfo.ForeColor = [System.Drawing.Color]::Silver
     $grpDest.Controls.Add($lblPartInfo)
 
     $lblEfiSize          = New-Object System.Windows.Forms.Label
-    $lblEfiSize.Text     = "EFI (MB):"
+    $lblEfiSize.Text     = Get-AIOString 'deployvhd.lbl_efi_size'
     $lblEfiSize.Location = "20, 155"
     $lblEfiSize.AutoSize = $true
     $grpDest.Controls.Add($lblEfiSize)
@@ -522,7 +522,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $grpDest.Controls.Add($numEfiSize)
 
     $lblMsrSize          = New-Object System.Windows.Forms.Label
-    $lblMsrSize.Text     = "MSR (MB):"
+    $lblMsrSize.Text     = Get-AIOString 'deployvhd.lbl_msr_size'
     $lblMsrSize.Location = "250, 155"
     $lblMsrSize.AutoSize = $true
     $grpDest.Controls.Add($lblMsrSize)
@@ -536,7 +536,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $grpDest.Controls.Add($numMsrSize)
 
     $lblRecSize           = New-Object System.Windows.Forms.Label
-    $lblRecSize.Text      = "Recovery (MB):"
+    $lblRecSize.Text     = Get-AIOString 'deployvhd.lbl_rec_size'
     $lblRecSize.Location  = "430, 155"
     $lblRecSize.AutoSize  = $true
     $lblRecSize.ForeColor = [System.Drawing.Color]::White
@@ -552,7 +552,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
     # Compact OS se aplica a Windows dentro del destino (VHD o disco fisico).
     $chkCompactOS           = New-Object System.Windows.Forms.CheckBox
-    $chkCompactOS.Text      = "Compact OS (reducir espacio ocupado por Windows)"
+    $chkCompactOS.Text      = Get-AIOString 'deployvhd.chk_compact_os'
     $chkCompactOS.Location  = "20, 187"
     $chkCompactOS.AutoSize  = $true
     $chkCompactOS.Checked   = $false
@@ -561,7 +561,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
     # Etiqueta de estado y boton principal
     $lblStatus           = New-Object System.Windows.Forms.Label
-    $lblStatus.Text      = "Esperando configuracion..."
+    $lblStatus.Text      = Get-AIOString 'deployvhd.status_waiting'
     $lblStatus.Location  = "20, 438"
     $lblStatus.Size      = "660, 36"
     $lblStatus.AutoSize  = $false
@@ -569,7 +569,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $form.Controls.Add($lblStatus)
 
     $btnDeploy           = New-Object System.Windows.Forms.Button
-    $btnDeploy.Text      = "EJECUTAR DESPLIEGUE"
+    $btnDeploy.Text      = Get-AIOString 'deployvhd.btn_deploy'
     $btnDeploy.Location  = "20, 586"
     $btnDeploy.Size      = "300, 40"
     $btnDeploy.BackColor = [System.Drawing.Color]::SeaGreen
@@ -579,7 +579,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $form.Controls.Add($btnDeploy)
 
     $btnCancel           = New-Object System.Windows.Forms.Button
-    $btnCancel.Text      = "CANCELAR"
+    $btnCancel.Text      = Get-AIOString 'deployvhd.btn_cancel'
     $btnCancel.Location  = "500, 586"
     $btnCancel.Size      = "180, 40"
     $btnCancel.BackColor = [System.Drawing.Color]::Firebrick
@@ -590,7 +590,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $form.Controls.Add($btnCancel)
 
     $lblDeployProgress           = New-Object System.Windows.Forms.Label
-    $lblDeployProgress.Text      = "Progreso general: 0% | Tiempo: 00:00:00"
+    $lblDeployProgress.Text      = Get-AIOString 'deployvhd.progress_initial'
     $lblDeployProgress.Location  = "20, 478"
     $lblDeployProgress.Size      = "660, 20"
     $lblDeployProgress.ForeColor = [System.Drawing.Color]::Silver
@@ -612,7 +612,7 @@ public sealed class AIODeployNativeReader : IDisposable {
     $progressDeploy.Controls.Add($progressDeployFill)
 
     $lblImageProgress           = New-Object System.Windows.Forms.Label
-    $lblImageProgress.Text      = "Aplicacion de imagen: en espera."
+    $lblImageProgress.Text      = Get-AIOString 'deployvhd.img_progress_idle'
     $lblImageProgress.Location  = "20, 530"
     $lblImageProgress.Size      = "660, 20"
     $lblImageProgress.ForeColor = [System.Drawing.Color]::Silver
@@ -636,7 +636,7 @@ public sealed class AIODeployNativeReader : IDisposable {
         $progressDeployFill.Width = [int][math]::Floor(
             $progressDeploy.ClientSize.Width * $deployProgress.Completed / $deployProgress.Total)
         $elapsedText = Format-AIODeployElapsedTime $deployWatch.Elapsed
-        $lblDeployProgress.Text = "$($deployProgress.Caption): $($deployProgress.Completed) de $($deployProgress.Total) etapas ($percent%) | Tiempo: $elapsedText"
+        $lblDeployProgress.Text = Get-AIOString 'deployvhd.progress_fmt' $deployProgress.Caption $deployProgress.Completed $deployProgress.Total $percent $elapsedText
         $progressDeploy.Refresh()
         $lblDeployProgress.Refresh()
     }
@@ -667,9 +667,9 @@ public sealed class AIODeployNativeReader : IDisposable {
         # exitosa permite completar esta barra y contabilizar la etapa de imagen.
         $progressImage.Value = [int][math]::Floor([math]::Min(99.9, $Percent) * 10)
         if ($Percent -ge 100) {
-            $lblImageProgress.Text = "Aplicacion de imagen: finalizando y comprobando resultado..."
+            $lblImageProgress.Text = Get-AIOString 'deployvhd.img_progress_finishing'
         } else {
-            $lblImageProgress.Text = "Aplicacion de imagen: $($Percent.ToString('0.#'))%."
+            $lblImageProgress.Text = Get-AIOString 'deployvhd.img_progress_pct' ($Percent.ToString('0.#'))
         }
         $form.Refresh()
     }
@@ -698,12 +698,12 @@ public sealed class AIODeployNativeReader : IDisposable {
             $numEfiSize.Value      = 260
             $lblMsrSize.Visible    = $true
             $numMsrSize.Visible    = $true
-            $lblEfiSize.Text       = "EFI (MB):"
+            $lblEfiSize.Text       = Get-AIOString 'deployvhd.lbl_efi_size'
         } else {
             $numEfiSize.Value      = 500
             $lblMsrSize.Visible    = $false
             $numMsrSize.Visible    = $false
-            $lblEfiSize.Text       = "Sys. Rsvd (MB):"
+            $lblEfiSize.Text       = Get-AIOString 'deployvhd.lbl_sys_rsvd'
         }
     })
 
@@ -734,7 +734,7 @@ public sealed class AIODeployNativeReader : IDisposable {
             foreach ($d in $safeDisks) {
                 $sizeGB = [math]::Round($d.Size / 1GB, 2)
                 if (-not $d.UniqueId) { continue }
-                $row = $cmbDisks.Items.Add("Disco $($d.Number) - $($d.FriendlyName) ($sizeGB GB) [$($d.BusType)]")
+                $row = $cmbDisks.Items.Add((Get-AIOString 'deployvhd.disk_item' $d.Number $d.FriendlyName $sizeGB $d.BusType))
                 $cmbDisks.Tag[$row] = $d
             }
         } catch {
@@ -744,7 +744,7 @@ public sealed class AIODeployNativeReader : IDisposable {
         }
 
         if ($cmbDisks.Items.Count -eq 0) {
-            $cmbDisks.Items.Add("No se detectaron discos externos (USB).")
+            $cmbDisks.Items.Add((Get-AIOString 'deployvhd.no_usb_disks'))
         }
         $cmbDisks.SelectedIndex = 0
     }
@@ -757,13 +757,13 @@ public sealed class AIODeployNativeReader : IDisposable {
     # SWM: seleccionar la primera parte y mantener el conjunto en una sola carpeta.
     $btnBrowseWim.Add_Click({
         $ofd        = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "Imagenes WIM/ESD/SWM|*.wim;*.esd;*.swm|WIM (*.wim)|*.wim|ESD (*.esd)|*.esd|SWM (primera parte)|*.swm"
-        $ofd.Title  = "Selecciona WIM, ESD o la primera parte SWM (ej. install.swm)"
+        $ofd.Filter = Get-AIOString 'deployvhd.filter_wim_esd_swm'
+        $ofd.Title  = Get-AIOString 'deployvhd.ofd_title'
         try {
             if ($ofd.ShowDialog() -ne 'OK') { return }
             $txtWim.Text = ''
             $cmbIndex.Items.Clear()
-            $lblStatus.Text = "Leyendo imagen..."
+            $lblStatus.Text = Get-AIOString 'deployvhd.status_reading_img'
             $form.Refresh()
             try {
                 $swmSet = $null
@@ -777,11 +777,11 @@ public sealed class AIODeployNativeReader : IDisposable {
                 }
                 $cmbIndex.SelectedIndex = 0
                 $txtWim.Text = $ofd.FileName
-                $lblStatus.Text = if ($swmSet) { "SWM cargado ($($swmSet.Files.Count) partes)." } else { "Imagen cargada." }
+                $lblStatus.Text = if ($swmSet) { Get-AIOString 'deployvhd.status_swm_loaded' $swmSet.Files.Count } else { Get-AIOString 'deployvhd.status_img_loaded' }
             } catch {
                 $txtWim.Text = ''
                 $cmbIndex.Items.Clear()
-                $lblStatus.Text = "Error leyendo imagen."
+                $lblStatus.Text = Get-AIOString 'deployvhd.status_img_read_err'
                 Write-Log -LogLevel ERROR -Message "DEPLOY: Origen no valido: $($_.Exception.Message)"
                 [void][System.Windows.Forms.MessageBox]::Show(
                     "No se pudo cargar la imagen:`n`n$($_.Exception.Message)", "Imagen de origen", 'OK', 'Error')
@@ -802,10 +802,10 @@ public sealed class AIODeployNativeReader : IDisposable {
     $btnCancel.Add_Click({
         if (-not $script:isDeploying -or $deployState.CancelRequested) { return }
         $deployState.CancelRequested = $true
-        $btnCancel.Text = 'CANCELANDO...'
+        $btnCancel.Text = Get-AIOString 'deployvhd.btn_cancelling'
         $btnCancel.Enabled = $false
         $deployProgress.Caption = 'Cancelando'
-        $lblStatus.Text = 'Cancelacion solicitada. Esperando a que termine la operacion activa para limpiar el destino...'
+        $lblStatus.Text = Get-AIOString 'deployvhd.status_cancel_req'
         $lblStatus.ForeColor = [System.Drawing.Color]::Gold
         & $RefreshDeployProgress
         $form.Refresh()
@@ -816,7 +816,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
         # Validaciones previas
         if (-not $txtWim.Text) {
-            [System.Windows.Forms.MessageBox]::Show("Falta la imagen origen.", "Error", 'OK', 'Error')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'deployvhd.err_missing_src'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
             return
         }
 
@@ -896,7 +896,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
         if ($isVhdMode) {
             if (-not $vhdPath) {
-                [System.Windows.Forms.MessageBox]::Show("Ruta VHDX vacia.", "Error", 'OK', 'Error')
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'deployvhd.err_empty_vhd'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
                 return
             }
             try {
@@ -905,20 +905,20 @@ public sealed class AIODeployNativeReader : IDisposable {
                 if ($extension -notin @('.vhd','.vhdx')) { throw 'El destino debe tener extension .vhd o .vhdx.' }
                 $previousVhd = Get-AIOOutputSnapshot $finalVhd
                 if ($previousVhd) {
-                    if ([System.Windows.Forms.MessageBox]::Show("Reemplazar el VHD existente despues de verificar la nueva copia?`n$finalVhd",
+                    if ([System.Windows.Forms.MessageBox]::Show((Get-AIOString 'deployvhd.confirm_replace_vhd' $finalVhd),
                         'Confirmar reemplazo','YesNo','Warning') -ne 'Yes') { return }
                 }
                 $vhdStagingPath = Join-Path ([IO.Path]::GetDirectoryName($finalVhd)) ('.despliegue-' + [Guid]::NewGuid().ToString('N'))
-            } catch { [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message,'Destino VHD'); return }
+            } catch { [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message,(Get-AIOString 'deployvhd.title_vhd_dest')); return }
         } else {
             try {
                 $selectedDisk = $cmbDisks.Tag[$cmbDisks.SelectedIndex]
                 $disk = Get-AIOSelectedExternalDisk $selectedDisk
                 Assert-AIODeploySource $wimPath $idx $disk
-            } catch { [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message,'Destino de despliegue'); return }
+            } catch { [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message,(Get-AIOString 'deployvhd.title_deploy_dest')); return }
             $diskNum = $disk.Number
-            $msg = "Borrar todas las particiones del disco $diskNum, $($disk.FriendlyName), $([Math]::Round($disk.Size / 1GB,1)) GB, ID $($disk.UniqueId)?"
-            if ([System.Windows.Forms.MessageBox]::Show($msg,'Destruccion de datos','YesNo','Warning') -ne 'Yes') { return }
+            $msg = Get-AIOString 'deployvhd.confirm_wipe_disk' $diskNum $disk.FriendlyName ([Math]::Round($disk.Size / 1GB, 1)) $disk.UniqueId
+            if ([System.Windows.Forms.MessageBox]::Show($msg,(Get-AIOString 'deployvhd.title_data_loss'),'YesNo','Warning') -ne 'Yes') { return }
         }
 
         $deployState.CancelRequested = $false
@@ -926,7 +926,7 @@ public sealed class AIODeployNativeReader : IDisposable {
         $ownedVhdStage = $null
         $script:isDeploying   = $true
         $btnDeploy.Enabled    = $false
-        $btnCancel.Text       = 'CANCELAR'
+        $btnCancel.Text       = Get-AIOString 'deployvhd.btn_cancel'
         $btnCancel.Enabled    = $true
         $grpSource.Enabled    = $false
         $grpTargetMode.Enabled = $false
@@ -940,7 +940,7 @@ public sealed class AIODeployNativeReader : IDisposable {
         $lblDeployProgress.ForeColor = [System.Drawing.Color]::Silver
         & $RefreshDeployProgress
         $progressImage.Value = 0
-        $lblImageProgress.Text = "Aplicacion de imagen: en espera."
+        $lblImageProgress.Text = Get-AIOString 'deployvhd.img_progress_idle'
         $lblImageProgress.ForeColor = [System.Drawing.Color]::Silver
         $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
         $form.Refresh()
@@ -958,7 +958,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
             # ── Fase 1: Preparacion del disco ─────────────────────────
             if ($isVhdMode) {
-                $lblStatus.Text = "Creando disco virtual..."
+                $lblStatus.Text = Get-AIOString 'deployvhd.status_creating_vhd'
                 $form.Refresh()
 
                 $totalSize = [long]$numSize.Value * 1GB
@@ -1007,7 +1007,7 @@ public sealed class AIODeployNativeReader : IDisposable {
             & $CompleteDeployStage -Stage 1
 
             # ── Fase 2: Inicializacion y particionado ─────────────────
-            $lblStatus.Text = "Inicializando disco y preparando particiones..."
+            $lblStatus.Text = Get-AIOString 'deployvhd.status_init_disk'
             $form.Refresh()
             $partStyle = if ($isGPT) { "GPT" } else { "MBR" }
             Initialize-Disk -UniqueId $targetId -PartitionStyle $partStyle -ErrorAction Stop
@@ -1023,7 +1023,7 @@ public sealed class AIODeployNativeReader : IDisposable {
             Write-Log -LogLevel INFO -Message "DEPLOY: Formateando y asignando particiones en Disco $diskNum con esquema $partStyle..."
 
             if ($isGPT) {
-                $lblStatus.Text = "Particionando GPT (UEFI)..."
+                $lblStatus.Text = Get-AIOString 'deployvhd.status_part_gpt'
                 $form.Refresh()
 
                 # 1. EFI (Arranque del Sistema)
@@ -1075,7 +1075,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 }
 
             } else {
-                $lblStatus.Text = "Particionando MBR (Legacy)..."
+                $lblStatus.Text = Get-AIOString 'deployvhd.status_part_mbr'
                 $form.Refresh()
 
                 # 1. System Reserved (Arranque Activo)
@@ -1124,7 +1124,7 @@ public sealed class AIODeployNativeReader : IDisposable {
             $lblStatus.Text = if ($useCompactOS) {
                 "Desplegando Windows con Compact OS (Esto puede tardar mas)..."
             } else { "Desplegando imagen (Esto tardara varios minutos)..." }
-            $lblImageProgress.Text = "Aplicacion de imagen: 0%."
+            $lblImageProgress.Text = Get-AIOString 'deployvhd.img_progress_0'
             $form.Refresh()
 
             Write-Log -LogLevel ACTION -Message "DEPLOY: Ejecutando DISM nativo hacia $driveLetterSystem\. Compact OS solicitado: $useCompactOS."
@@ -1155,17 +1155,17 @@ public sealed class AIODeployNativeReader : IDisposable {
             }
 
             if ($dismExitCode -ne 0) {
-                $lblImageProgress.Text = "Aplicacion de imagen: error (codigo $dismExitCode)."
+                $lblImageProgress.Text = Get-AIOString 'deployvhd.img_progress_err' $dismExitCode
                 $lblImageProgress.ForeColor = [System.Drawing.Color]::Red
                 throw "Fallo DISM al aplicar la imagen. Codigo: $dismExitCode"
             }
             $progressImage.Value = $progressImage.Maximum
-            $lblImageProgress.Text = "Aplicacion de imagen: 100%, completada."
+            $lblImageProgress.Text = Get-AIOString 'deployvhd.img_progress_100'
             $lblImageProgress.ForeColor = [System.Drawing.Color]::LightGreen
             & $CompleteDeployStage -Stage 3
 
             # ── Fase 4: Escritura del sector de arranque ───────────────
-            $lblStatus.Text = "Escribiendo sectores de arranque..."
+            $lblStatus.Text = Get-AIOString 'deployvhd.status_boot_sectors'
             $form.Refresh()
 
             $fw       = if ($isGPT) { "UEFI" } else { "BIOS" }
@@ -1183,7 +1183,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
             # ── Fase 5: Ocultar y proteger particiones de sistema ─────────
             if ($sizeRecMB -gt 0 -and $driveLetterRecovery) {
-                $lblStatus.Text = "Protegiendo particion WinRE..."
+                $lblStatus.Text = Get-AIOString 'deployvhd.status_protect_winre'
                 $form.Refresh()
 
                 Remove-PartitionAccessPath -InputObject $pRec -AccessPath $driveLetterRecovery -ErrorAction SilentlyContinue
@@ -1224,7 +1224,7 @@ public sealed class AIODeployNativeReader : IDisposable {
             }
 
             & $CheckDeployCancellation
-            $lblStatus.Text = "Ocultando particiones de arranque..."
+            $lblStatus.Text = Get-AIOString 'deployvhd.status_hide_boot'
             $form.Refresh()
 
             # En GPT, el propio tipo EFI ({c12a7328-...}) ya impide la asignacion automatica de letra
@@ -1239,7 +1239,7 @@ public sealed class AIODeployNativeReader : IDisposable {
 
             # ── Fase 6: Desmontar VHD si aplica ───────────────────────
             if ($isVhdMode) {
-                $lblStatus.Text = "Desmontando disco virtual..."
+                $lblStatus.Text = Get-AIOString 'deployvhd.status_dismount_vhd'
                 $form.Refresh()
                 Dismount-VHD -Path $vhdPath -ErrorAction Stop
                 if (-not (Test-VHD -Path $vhdPath -ErrorAction Stop)) { throw 'El nuevo disco virtual no supero la verificacion.' }
@@ -1249,7 +1249,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 & $CompleteDeployStage -Stage 6
             }
 
-            $lblStatus.Text      = if ($useCompactOS) { "Completado con Compact OS." } else { "Completado." }
+            $lblStatus.Text      = if ($useCompactOS) { Get-AIOString 'deployvhd.status_done_compact' } else { Get-AIOString 'deployvhd.status_done' }
             $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
             $btnCancel.Enabled = $false
             # Detener antes del dialogo: leer el resultado no suma tiempo de trabajo.
@@ -1268,13 +1268,13 @@ public sealed class AIODeployNativeReader : IDisposable {
             $failureMessage = $_.Exception.Message
             $cancelled = $_.Exception -is [OperationCanceledException]
             $btnCancel.Enabled = $false
-            $deployProgress.Caption = if ($cancelled) { 'Cancelando' } else { 'Detenido' }
+            $deployProgress.Caption = if ($cancelled) { Get-AIOString 'deployvhd.cap_cancelling' } else { Get-AIOString 'deployvhd.cap_stopped' }
             $resultColor = if ($cancelled) { [System.Drawing.Color]::Gold } else { [System.Drawing.Color]::Red }
-            $lblStatus.Text = if ($cancelled) { 'Cancelando: limpiando el destino...' } else { 'Error en el despliegue. Limpiando el destino...' }
+            $lblStatus.Text = if ($cancelled) { Get-AIOString 'deployvhd.status_cancelling_cleanup' } else { Get-AIOString 'deployvhd.status_err_cleanup' }
             $lblStatus.ForeColor = $resultColor
             $lblDeployProgress.ForeColor = $resultColor
             if ($deployProgress.Completed -eq 2 -and $progressImage.Value -lt $progressImage.Maximum) {
-                $lblImageProgress.Text = if ($cancelled) { 'Aplicacion de imagen: detenida por cancelacion.' } else { 'Aplicacion de imagen: no completada.' }
+                $lblImageProgress.Text = if ($cancelled) { Get-AIOString 'deployvhd.img_progress_cancelled' } else { Get-AIOString 'deployvhd.img_progress_incomplete' }
                 $lblImageProgress.ForeColor = $resultColor
             }
             & $RefreshDeployProgress
@@ -1309,8 +1309,8 @@ public sealed class AIODeployNativeReader : IDisposable {
                 }
             }
 
-            $deployProgress.Caption = if ($cancelled) { 'Cancelado' } else { 'Detenido' }
-            $lblStatus.Text = if ($cancelled) { 'Despliegue cancelado.' } else { 'Error en el despliegue.' }
+            $deployProgress.Caption = if ($cancelled) { Get-AIOString 'deployvhd.cap_cancelled' } else { Get-AIOString 'deployvhd.cap_stopped' }
+            $lblStatus.Text = if ($cancelled) { Get-AIOString 'deployvhd.status_cancelled' } else { Get-AIOString 'deployvhd.status_failed' }
             if ($cleanupWarnings.Count) { $lblStatus.Text += ' Hay tareas de limpieza pendientes.' }
             & $StopDeployTime
             $elapsedText = Format-AIODeployElapsedTime $deployWatch.Elapsed
@@ -1335,12 +1335,12 @@ public sealed class AIODeployNativeReader : IDisposable {
         } finally {
             if ($ownedVhdStage) {
                 try { [IO.Directory]::Delete($ownedVhdStage, $false) }
-                catch { Write-Warning "Archivos de recuperacion o temporales conservados en $ownedVhdStage." }
+                catch { Write-Warning (Get-AIOString 'deployvhd.temp_kept_warn' $ownedVhdStage) }
             }
             & $StopDeployTime
             $script:isDeploying = $false
             $btnCancel.Enabled = $false
-            $btnCancel.Text = 'CANCELAR'
+            $btnCancel.Text = Get-AIOString 'deployvhd.btn_cancel'
             $btnDeploy.Enabled  = $true
             $grpSource.Enabled = $true
             $grpTargetMode.Enabled = $true

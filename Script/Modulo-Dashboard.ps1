@@ -445,7 +445,7 @@ function ConvertTo-AIODashboardMetadata {
         $nameSource = 'Familia Server offline + edicion efectiva'
     }
     if ($family) {
-        $label = if ($edition) { Get-AIODashboardEditionLabel -Edition $edition -Server:$isServer } else { '(edicion no disponible)' }
+        $label = if ($edition) { Get-AIODashboardEditionLabel -Edition $edition -Server:$isServer } else { Get-AIOString 'dashboard.edition_unavailable' }
         $name = "$family $label"
     }
     $nameAdjusted = $name -cne $rawProductName
@@ -713,7 +713,7 @@ function Get-AIOCachedDashboardMetadata {
     # Los datos parciales tambien se conservan hasta un cambio de imagen o una
     # operacion que solicite refresco; volver al menu no dispara reintentos.
     if ($ForceRefresh -or $null -eq $cache -or $cache.Key -cne $key) {
-        Write-Host 'Leyendo metadatos del sistema operativo...' -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'dashboard.reading_metadata') -ForegroundColor DarkGray
         $data = Read-AIODashboardMetadata -MountPath $MountPath -ImagePath $ImagePath -Index $Index
         $script:AIODashboardCache = [pscustomobject]@{ Key = $key; Data = $data; ReadUtc = [DateTime]::UtcNow }
     }
@@ -724,15 +724,15 @@ function Write-AIODashboardMetadata {
     param($Metadata, [string]$MountPath, [int]$Width = 80)
     if ($null -eq $Metadata) { return }
     $rows = @(
-        @('Detalles SO', $Metadata.Name), @('Edicion', $Metadata.Edition), @('Version', $Metadata.DisplayVersion),
-        @('Build', $Metadata.Version), @('Arquitectura', $Metadata.Architecture), @('Tipo', $Metadata.InstallationType)
+        @((Get-AIOString 'dashboard.row_os_details'), $Metadata.Name), @((Get-AIOString 'dashboard.row_edition'), $Metadata.Edition), @((Get-AIOString 'dashboard.row_version'), $Metadata.DisplayVersion),
+        @((Get-AIOString 'dashboard.row_build'), $Metadata.Version), @((Get-AIOString 'dashboard.row_arch'), $Metadata.Architecture), @((Get-AIOString 'dashboard.row_type'), $Metadata.InstallationType)
     )
     if ($Metadata.IsWinPE) {
-        $rows += ,@('Rol', $Metadata.EnvironmentRole)
-        $rows += ,@('Deteccion', $Metadata.EnvironmentConfidence)
+        $rows += ,@((Get-AIOString 'dashboard.row_role'), $Metadata.EnvironmentRole)
+        $rows += ,@((Get-AIOString 'dashboard.row_detection'), $Metadata.EnvironmentConfidence)
     }
-    if ($null -ne $Metadata.ImageIndex) { $rows += ,@('Indice WIM', "[$($Metadata.ImageIndex)] $($Metadata.ImageName)") }
-    $rows += ,@('Directorio', $MountPath)
+    if ($null -ne $Metadata.ImageIndex) { $rows += ,@((Get-AIOString 'dashboard.row_wim_index'), "[$($Metadata.ImageIndex)] $($Metadata.ImageName)") }
+    $rows += ,@((Get-AIOString 'dashboard.row_directory'), $MountPath)
     foreach ($item in $rows) {
         $prefix = '  + {0,-12}: ' -f $item[0]
         $value = ([string]$item[1] -replace '[\x00-\x1F\x7F]', ' ').Trim()
@@ -741,6 +741,6 @@ function Write-AIODashboardMetadata {
         Write-Host ($prefix + $value) -ForegroundColor Cyan
     }
     if (@($Metadata.Issues).Count -gt 0) {
-        Write-Host '  Lectura parcial. Se mantiene hasta el proximo montaje/cambio de edicion.' -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'dashboard.partial_read_warn') -ForegroundColor Yellow
     }
 }

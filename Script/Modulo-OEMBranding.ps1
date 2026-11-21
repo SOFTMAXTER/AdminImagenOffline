@@ -48,7 +48,7 @@ function Show-OEMBranding-GUI {
     # ------------------------------------------------------------------
     if ($Script:IMAGE_MOUNTED -eq 0) {
         [System.Windows.Forms.MessageBox]::Show(
-            "Primero debes montar una imagen.", "Error", 'OK', 'Error')
+            (Get-AIOString 'drivers.mount_first'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         return
     }
 
@@ -186,7 +186,7 @@ function Show-OEMBranding-GUI {
     # 2. Construccion del formulario
     # ------------------------------------------------------------------
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = "OEM Branding - Arquitectura Zero-GPO y Active Setup"
+    $form.Text            = Get-AIOString 'oem.form_title'
     $form.Size            = New-Object System.Drawing.Size(980, 560)
     $form.StartPosition   = "CenterScreen"
     $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -195,14 +195,14 @@ function Show-OEMBranding-GUI {
     $form.MaximizeBox     = $false
 
     $lblTitle          = New-Object System.Windows.Forms.Label
-    $lblTitle.Text     = "Inyeccion NATIVA de Branding y Propiedades del Sistema"
+    $lblTitle.Text     = Get-AIOString 'oem.title'
     $lblTitle.Font     = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
     $lblTitle.Location = "20, 15"
     $lblTitle.AutoSize = $true
     $form.Controls.Add($lblTitle)
 
     $lblOsInfo           = New-Object System.Windows.Forms.Label
-    $lblOsInfo.Text      = "Analizando imagen..."
+    $lblOsInfo.Text      = Get-AIOString 'appx.analyzing_img'
     $lblOsInfo.Font      = New-Object System.Drawing.Font("Segoe UI", 8)
     $lblOsInfo.ForeColor = [System.Drawing.Color]::LightGreen
     $lblOsInfo.Location  = "20, 42"
@@ -213,7 +213,7 @@ function Show-OEMBranding-GUI {
     # COLUMNA IZQUIERDA: Grupo 1 - Imagenes y Tema
     # ==================================================================
     $grpImages           = New-Object System.Windows.Forms.GroupBox
-    $grpImages.Text      = " Politicas de Imagen y Tema "
+    $grpImages.Text      = Get-AIOString 'oem.grp_images'
     $grpImages.Location  = "20, 70"
     $grpImages.Size      = "520, 380"
     $grpImages.ForeColor = [System.Drawing.Color]::Cyan
@@ -221,14 +221,14 @@ function Show-OEMBranding-GUI {
 
     # --- FONDO DE ESCRITORIO ---
     $lblWall           = New-Object System.Windows.Forms.Label
-    $lblWall.Text      = "Fondo de Escritorio:"
+    $lblWall.Text      = Get-AIOString 'oem.lbl_wall'
     $lblWall.Location  = "15, 30"
     $lblWall.AutoSize  = $true
     $lblWall.ForeColor = [System.Drawing.Color]::White
     $grpImages.Controls.Add($lblWall)
 
     $lblWallHint           = New-Object System.Windows.Forms.Label
-    $lblWallHint.Text      = "[ Recom: 1920x1080 o 4K (16:9) ]"
+    $lblWallHint.Text      = Get-AIOString 'oem.lbl_wall_hint'
     $lblWallHint.Location  = "165, 30"
     $lblWallHint.AutoSize  = $true
     $lblWallHint.ForeColor = [System.Drawing.Color]::Silver
@@ -243,7 +243,7 @@ function Show-OEMBranding-GUI {
     $grpImages.Controls.Add($txtWall)
 
     $btnWall           = New-Object System.Windows.Forms.Button
-    $btnWall.Text      = "Examinar..."
+    $btnWall.Text      = Get-AIOString 'oem.btn_browse'
     $btnWall.Location  = "260, 48"
     $btnWall.Size      = "80, 26"
     $btnWall.BackColor = [System.Drawing.Color]::Gray
@@ -260,14 +260,14 @@ function Show-OEMBranding-GUI {
 
     # --- PANTALLA DE BLOQUEO ---
     $lblLock           = New-Object System.Windows.Forms.Label
-    $lblLock.Text      = "Pantalla de Bloqueo:"
+    $lblLock.Text      = Get-AIOString 'oem.lbl_lock'
     $lblLock.Location  = "15, 120"
     $lblLock.AutoSize  = $true
     $lblLock.ForeColor = [System.Drawing.Color]::White
     $grpImages.Controls.Add($lblLock)
 
     $lblLockHint           = New-Object System.Windows.Forms.Label
-    $lblLockHint.Text      = "[ Recom: 1920x1080 o 4K (16:9) ]"
+    $lblLockHint.Text      = Get-AIOString 'oem.lbl_wall_hint'
     $lblLockHint.Location  = "165, 120"
     $lblLockHint.AutoSize  = $true
     $lblLockHint.ForeColor = [System.Drawing.Color]::Silver
@@ -282,7 +282,7 @@ function Show-OEMBranding-GUI {
     $grpImages.Controls.Add($txtLock)
 
     $btnLock           = New-Object System.Windows.Forms.Button
-    $btnLock.Text      = "Examinar..."
+    $btnLock.Text      = Get-AIOString 'oem.btn_browse'
     $btnLock.Location  = "260, 138"
     $btnLock.Size      = "80, 26"
     $btnLock.BackColor = [System.Drawing.Color]::Gray
@@ -299,14 +299,14 @@ function Show-OEMBranding-GUI {
 
     # --- FOTO DE PERFIL ---
     $lblAvatar           = New-Object System.Windows.Forms.Label
-    $lblAvatar.Text      = "Foto de Perfil:"
+    $lblAvatar.Text      = Get-AIOString 'oem.lbl_avatar'
     $lblAvatar.Location  = "15, 210"
     $lblAvatar.AutoSize  = $true
     $lblAvatar.ForeColor = [System.Drawing.Color]::White
     $grpImages.Controls.Add($lblAvatar)
 
     $lblAvatarHint           = New-Object System.Windows.Forms.Label
-    $lblAvatarHint.Text      = "[ Recom: Cuadrado 448x448 px ]"
+    $lblAvatarHint.Text      = Get-AIOString 'oem.lbl_avatar_hint'
     $lblAvatarHint.Location  = "165, 210"
     $lblAvatarHint.AutoSize  = $true
     $lblAvatarHint.ForeColor = [System.Drawing.Color]::Silver
@@ -321,7 +321,7 @@ function Show-OEMBranding-GUI {
     $grpImages.Controls.Add($txtAvatar)
 
     $btnAvatar           = New-Object System.Windows.Forms.Button
-    $btnAvatar.Text      = "Examinar..."
+    $btnAvatar.Text      = Get-AIOString 'oem.btn_browse'
     $btnAvatar.Location  = "260, 228"
     $btnAvatar.Size      = "80, 26"
     $btnAvatar.BackColor = [System.Drawing.Color]::Gray
@@ -338,34 +338,34 @@ function Show-OEMBranding-GUI {
 
     # --- TEMA ---
     $lblTheme          = New-Object System.Windows.Forms.Label
-    $lblTheme.Text     = "Tema Principal:"
+    $lblTheme.Text     = Get-AIOString 'oem.lbl_theme'
     $lblTheme.Location = "15, 310"
     $lblTheme.AutoSize = $true
     $lblTheme.ForeColor = [System.Drawing.Color]::White
     $grpImages.Controls.Add($lblTheme)
 
     $radThemeNone          = New-Object System.Windows.Forms.RadioButton
-    $radThemeNone.Text     = "No alterar"
+    $radThemeNone.Text     = Get-AIOString 'oem.rad_theme_none'
     $radThemeNone.Location = "120, 308"
     $radThemeNone.AutoSize = $true
     $radThemeNone.Checked  = $true
     $grpImages.Controls.Add($radThemeNone)
 
     $radThemeDark          = New-Object System.Windows.Forms.RadioButton
-    $radThemeDark.Text     = "Oscuro"
+    $radThemeDark.Text     = Get-AIOString 'oem.rad_theme_dark'
     $radThemeDark.Location = "220, 308"
     $radThemeDark.AutoSize = $true
     $grpImages.Controls.Add($radThemeDark)
 
     $radThemeLight          = New-Object System.Windows.Forms.RadioButton
-    $radThemeLight.Text     = "Claro"
+    $radThemeLight.Text     = Get-AIOString 'oem.rad_theme_light'
     $radThemeLight.Location = "310, 308"
     $radThemeLight.AutoSize = $true
     $grpImages.Controls.Add($radThemeLight)
 	
 	# --- CHECKBOX DE BLOQUEO PERMANENTE CORPORATIVO ---
     $chkForcePolicy          = New-Object System.Windows.Forms.CheckBox
-    $chkForcePolicy.Text     = "Bloquear permanentemente (Modo Corporativo / GPO)"
+    $chkForcePolicy.Text     = Get-AIOString 'oem.chk_force_policy'
     $chkForcePolicy.Location = "15, 345"
     $chkForcePolicy.Size     = "450, 23"
     $chkForcePolicy.Font     = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
@@ -377,14 +377,14 @@ function Show-OEMBranding-GUI {
     # COLUMNA DERECHA: Grupo 2 - Informacion OEM
     # ==================================================================
     $grpOem           = New-Object System.Windows.Forms.GroupBox
-    $grpOem.Text      = " Informacion del Ensamblador (OEM) "
+    $grpOem.Text      = Get-AIOString 'oem.grp_oem'
     $grpOem.Location  = "560, 70"
     $grpOem.Size      = "380, 380"
     $grpOem.ForeColor = [System.Drawing.Color]::Orange
     $form.Controls.Add($grpOem)
 
     $lblFab           = New-Object System.Windows.Forms.Label
-    $lblFab.Text      = "Fabricante:"
+    $lblFab.Text      = Get-AIOString 'oem.lbl_fab'
     $lblFab.Location  = "20, 35"
     $lblFab.AutoSize  = $true
     $lblFab.ForeColor = [System.Drawing.Color]::White
@@ -398,7 +398,7 @@ function Show-OEMBranding-GUI {
     $grpOem.Controls.Add($txtFab)
 
     $lblMod           = New-Object System.Windows.Forms.Label
-    $lblMod.Text      = "Modelo del Equipo:"
+    $lblMod.Text      = Get-AIOString 'oem.lbl_model'
     $lblMod.Location  = "20, 100"
     $lblMod.AutoSize  = $true
     $lblMod.ForeColor = [System.Drawing.Color]::White
@@ -412,7 +412,7 @@ function Show-OEMBranding-GUI {
     $grpOem.Controls.Add($txtMod)
 
     $lblUrl           = New-Object System.Windows.Forms.Label
-    $lblUrl.Text      = "Sitio Web de Soporte (URL):"
+    $lblUrl.Text      = Get-AIOString 'oem.lbl_url'
     $lblUrl.Location  = "20, 165"
     $lblUrl.AutoSize  = $true
     $lblUrl.ForeColor = [System.Drawing.Color]::White
@@ -426,7 +426,7 @@ function Show-OEMBranding-GUI {
     $grpOem.Controls.Add($txtUrl)
 
     $lblPhone           = New-Object System.Windows.Forms.Label
-    $lblPhone.Text      = "Telefono de Soporte:"
+    $lblPhone.Text      = Get-AIOString 'oem.lbl_phone'
     $lblPhone.Location  = "20, 230"
     $lblPhone.AutoSize  = $true
     $lblPhone.ForeColor = [System.Drawing.Color]::White
@@ -440,7 +440,7 @@ function Show-OEMBranding-GUI {
     $grpOem.Controls.Add($txtPhone)
 
     $lblHours           = New-Object System.Windows.Forms.Label
-    $lblHours.Text      = "Horario de Atencion:"
+    $lblHours.Text      = Get-AIOString 'oem.lbl_hours'
     $lblHours.Location  = "20, 295"
     $lblHours.AutoSize  = $true
     $lblHours.ForeColor = [System.Drawing.Color]::White
@@ -457,14 +457,14 @@ function Show-OEMBranding-GUI {
     # BARRA DE ESTADO Y BOTON APLICAR
     # ==================================================================
     $lblStatus           = New-Object System.Windows.Forms.Label
-    $lblStatus.Text      = "Listo."
+    $lblStatus.Text      = Get-AIOString 'drivers.status_ready'
     $lblStatus.Location  = "20, 480"
     $lblStatus.Size      = "450, 18"
     $lblStatus.ForeColor = [System.Drawing.Color]::Silver
     $form.Controls.Add($lblStatus)
 
     $btnApply           = New-Object System.Windows.Forms.Button
-    $btnApply.Text      = "APLICAR BRANDING A LA IMAGEN"
+    $btnApply.Text      = Get-AIOString 'oem.btn_apply'
     $btnApply.Location  = "560, 465"
     $btnApply.Size      = "380, 40"
     $btnApply.BackColor = [System.Drawing.Color]::SeaGreen
@@ -484,7 +484,7 @@ function Show-OEMBranding-GUI {
         $imgMeta = Get-OemImageMetadata
         if ($imgMeta.Build -gt 0 -or $imgMeta.Edition -ne "Desconocida") {
             $editionCategory = Get-EditionCategory -EditionId $imgMeta.Edition
-            $lblOsInfo.Text  = "Detectado: $($imgMeta.OsName) | Edicion: $($imgMeta.Edition) ($editionCategory) | Build: $($imgMeta.Build)"
+            $lblOsInfo.Text  = Get-AIOString 'oem.os_detected' $imgMeta.OsName $imgMeta.Edition $editionCategory $imgMeta.Build
             Write-Log -LogLevel INFO -Message "OEM_Branding: Metadatos de imagen obtenidos desde $($imgMeta.Source) ($($imgMeta.OsName) | Edicion: $($imgMeta.Edition) | Build: $($imgMeta.Build))."
         }
 
@@ -518,7 +518,7 @@ function Show-OEMBranding-GUI {
 
     $btnWall.Add_Click({
         $ofd = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "Imagenes (*.jpg;*.jpeg;*.png)|*.jpg;*.jpeg;*.png"
+        $ofd.Filter = Get-AIOString 'oem.filter_images'
         if ($ofd.ShowDialog() -eq 'OK') {
             $txtWall.Text = $ofd.FileName
             try {
@@ -538,7 +538,7 @@ function Show-OEMBranding-GUI {
 
     $btnLock.Add_Click({
         $ofd = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "Imagenes (*.jpg;*.jpeg;*.png)|*.jpg;*.jpeg;*.png"
+        $ofd.Filter = Get-AIOString 'oem.filter_images'
         if ($ofd.ShowDialog() -eq 'OK') {
             $txtLock.Text = $ofd.FileName
             try {
@@ -558,7 +558,7 @@ function Show-OEMBranding-GUI {
 
     $btnAvatar.Add_Click({
         $ofd = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "Imagenes (*.jpg;*.jpeg;*.png)|*.jpg;*.jpeg;*.png"
+        $ofd.Filter = Get-AIOString 'oem.filter_images'
         if ($ofd.ShowDialog() -eq 'OK') {
             $txtAvatar.Text = $ofd.FileName
             try {
@@ -584,14 +584,14 @@ function Show-OEMBranding-GUI {
         if (-not $txtWall.Text  -and -not $txtLock.Text  -and $radThemeNone.Checked -and
             -not $txtFab.Text   -and -not $txtMod.Text   -and -not $txtUrl.Text -and
             -not $txtPhone.Text -and -not $txtHours.Text -and -not $txtAvatar.Text) {
-            [System.Windows.Forms.MessageBox]::Show("Selecciona al menos un parametro.", "Aviso", 'OK', 'Warning')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'oem.select_one_param'), (Get-AIOString 'servicios.notice_title'), 'OK', 'Warning')
             return
         }
 
         $script:isOemApplying    = $true
         $form.Cursor             = [System.Windows.Forms.Cursors]::WaitCursor
         $btnApply.Enabled        = $false
-        $lblStatus.Text          = "Analizando imagen e iniciando motor arquitectonico..."
+        $lblStatus.Text          = Get-AIOString 'oem.status_analyzing'
         $lblStatus.ForeColor     = [System.Drawing.Color]::Yellow
         $form.Refresh()
 
@@ -610,7 +610,7 @@ function Show-OEMBranding-GUI {
             $editionCategory = Get-EditionCategory -EditionId $editionId
             $osLabel         = $imgMeta.OsName
 
-            $lblStatus.Text = "Aplicando para $osLabel ($editionId)..."
+            $lblStatus.Text = Get-AIOString 'oem.status_applying_for' $osLabel $editionId
             $form.Refresh()
 
             Enable-Privileges
@@ -631,7 +631,7 @@ function Show-OEMBranding-GUI {
                 Write-Log -LogLevel WARN -Message "OEM_Branding: Wallpaper seleccionado ya no existe en disco ($($txtWall.Text)). Se omite."
             }
             if ($txtWall.Text -and (Test-Path $txtWall.Text)) {
-                $lblStatus.Text = "Configurando perfil predeterminado (oem.theme)..."
+                $lblStatus.Text = Get-AIOString 'oem.status_oem_theme'
                 $form.Refresh()
 
                 $wallExt      = [System.IO.Path]::GetExtension($txtWall.Text)
@@ -773,7 +773,7 @@ SchemeName=@%SystemRoot%\System32\mmres.dll,-800
 
                 # CONDICIÓN AÑADIDA: Saltar el motor Active Setup si se usa Bloqueo Corporativo (CSP/GPO)
                 if ($chkForcePolicy.Checked) {
-                    $lblStatus.Text = "Preparando imagen de bloqueo para inyeccion CSP/GPO..."
+                    $lblStatus.Text = Get-AIOString 'oem.status_lock_csp'
                     $form.Refresh()
                     Write-Log -LogLevel INFO -Message "OEM_Branding: Bloque 2 (Active Setup) saltado por directiva GPO/CSP. Imagen copiada a $lockInternal."
                 } 
@@ -786,7 +786,7 @@ SchemeName=@%SystemRoot%\System32\mmres.dll,-800
                     if (-not (Test-Path $zipSource)) {
                         Write-Log -LogLevel ERROR -Message "OEM_Branding: SetLockScreen.zip no encontrado. Se omite LockScreen."
                     } else {
-                        $lblStatus.Text = "Configurando Lock Screen via binario nativo (Active Setup)..."
+                        $lblStatus.Text = Get-AIOString 'oem.status_lock_active'
                         $form.Refresh()
 
                         $corpITDir = Join-Path $Script:MOUNT_DIR "Program Files\CorporateIT"
@@ -815,7 +815,7 @@ SchemeName=@%SystemRoot%\System32\mmres.dll,-800
             $themeVal   = $null
             $themeLabel = $null
             if (-not $radThemeNone.Checked) {
-                $lblStatus.Text = "Configurando esquema global de color..."
+                $lblStatus.Text = Get-AIOString 'oem.status_color'
                 $form.Refresh()
 
                 $themeVal   = if ($radThemeDark.Checked) { 0 } else { 1 }
@@ -834,7 +834,7 @@ SchemeName=@%SystemRoot%\System32\mmres.dll,-800
             # ── Bloque 4: Metadatos OEM ───────────────────────────────────────────────
             $oemApplied = $false
             if ($txtFab.Text -or $txtMod.Text -or $txtPhone.Text -or $txtHours.Text -or $txtUrl.Text) {
-                $lblStatus.Text = "Escribiendo metadatos OEM..."
+                $lblStatus.Text = Get-AIOString 'oem.status_meta'
                 $form.Refresh()
 
                 $oemValues = @{}
@@ -853,7 +853,7 @@ SchemeName=@%SystemRoot%\System32\mmres.dll,-800
                 Write-Log -LogLevel WARN -Message "OEM_Branding: Foto de perfil seleccionada ya no existe en disco ($($txtAvatar.Text)). Se omite."
             }
             if ($txtAvatar.Text -and (Test-Path $txtAvatar.Text)) {
-                $lblStatus.Text = "Inyectando foto de perfil predeterminada..."
+                $lblStatus.Text = Get-AIOString 'oem.status_avatar'
                 $form.Refresh()
 
                 $avatarDestDir = Join-Path $Script:MOUNT_DIR "ProgramData\Microsoft\User Account Pictures"
@@ -915,7 +915,7 @@ SchemeName=@%SystemRoot%\System32\mmres.dll,-800
 
 			# ── Bloque 6: Politicas de Bloqueo Corporativo (CSP y GPO) ──────────────────────
             if ($chkForcePolicy.Checked) {
-                $lblStatus.Text = "Aplicando politicas de bloqueo corporativo (CSP/GPO)..."
+                $lblStatus.Text = Get-AIOString 'oem.status_policies'
                 $form.Refresh()
 
                 # --- EVALUACIÓN DINÁMICA DE SOPORTE GPO/CSP ---
@@ -1005,17 +1005,17 @@ SchemeName=@%SystemRoot%\System32\mmres.dll,-800
             $msg += "Arquitectura desplegada:`n  - $($methodsUsed -join "`n  - ")"
 
             Write-Log -LogLevel ACTION -Message "OEM_Branding: Proceso Zero-GPO completado. $($methodsUsed -join ' | ')"
-            $lblStatus.Text      = "Completado exitosamente."
+            $lblStatus.Text      = Get-AIOString 'oem.status_done'
             $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
-            [System.Windows.Forms.MessageBox]::Show($msg, "Exito", 'OK', 'Information')
+            [System.Windows.Forms.MessageBox]::Show($msg, (Get-AIOString 'features.success_title'), 'OK', 'Information')
 
         } catch {
             Write-Log -LogLevel ERROR -Message "OEM_Branding: Fallo critico - $($_.Exception.Message)"
-            $lblStatus.Text      = "Error."
+            $lblStatus.Text      = Get-AIOString 'oem.status_err'
             $lblStatus.ForeColor = [System.Drawing.Color]::Salmon
             [System.Windows.Forms.MessageBox]::Show(
-                "Error al aplicar Branding:`n$($_.Exception.Message)",
-                "Error", 'OK', 'Error')
+                (Get-AIOString 'oem.err_applying' $_.Exception.Message),
+                (Get-AIOString 'common.error_title'), 'OK', 'Error')
         } finally {
             $script:isOemApplying = $false
             $form.Cursor          = [System.Windows.Forms.Cursors]::Default
@@ -1026,14 +1026,14 @@ SchemeName=@%SystemRoot%\System32\mmres.dll,-800
     # Cierre seguro (confirmacion + Desmontar Hives de registro)
     $form.Add_FormClosing({
         if ($script:isOemApplying) {
-            [System.Windows.Forms.MessageBox]::Show("Operacion en curso. Espera a que termine.", "Aviso", 'OK', 'Warning')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'oem.busy_warn'), (Get-AIOString 'servicios.notice_title'), 'OK', 'Warning')
             $_.Cancel = $true
             return
         }
 
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Estas seguro de que deseas salir?",
-            "Confirmar Salida",
+            (Get-AIOString 'metadata.confirm_exit_body'),
+            (Get-AIOString 'metadata.confirm_exit_title'),
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question)
 
@@ -1043,7 +1043,7 @@ SchemeName=@%SystemRoot%\System32\mmres.dll,-800
         }
 
         Write-Log -LogLevel INFO -Message "OEM_Branding: Cerrando. Desmontando Hives..."
-        $lblStatus.Text = "Desmontando Hives..."
+        $lblStatus.Text = Get-AIOString 'servicios.status_unloading_hives'
         $form.Refresh()
         try {
             Unmount-Hives

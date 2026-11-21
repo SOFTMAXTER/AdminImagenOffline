@@ -45,7 +45,7 @@ function Show-Unattend-GUI {
     # ------------------------------------------------------------------
     if ($Script:IMAGE_MOUNTED -eq 0) {
         [System.Windows.Forms.MessageBox]::Show(
-            "Primero debes montar una imagen.", "Error Montaje", 'OK', 'Error')
+            (Get-AIOString 'drivers.mount_first'), (Get-AIOString 'unattend.mount_error_title'), 'OK', 'Error')
         return
     }
 
@@ -76,7 +76,7 @@ function Show-Unattend-GUI {
     # 3. Construccion del formulario
     # ------------------------------------------------------------------
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = "Gestor OOBE Inteligente ($detectedArch) - Integrado"
+    $form.Text            = Get-AIOString 'unattend.form_title' $detectedArch
     $form.Size            = New-Object System.Drawing.Size(980, 650)
     $form.StartPosition   = "CenterScreen"
     $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -94,20 +94,20 @@ function Show-Unattend-GUI {
     # PESTANA 1: GENERADOR AVANZADO
     # ==================================================================
     $tabBasic           = New-Object System.Windows.Forms.TabPage
-    $tabBasic.Text      = " Generador Avanzado "
+    $tabBasic.Text      = Get-AIOString 'unattend.tab_basic'
     $tabBasic.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
     $tabControl.TabPages.Add($tabBasic)
 
     # ── Grupo: Usuario Admin Local y Nombre de Equipo ─────────────────
     $grpUser           = New-Object System.Windows.Forms.GroupBox
-    $grpUser.Text      = " Usuario Admin Local y Nombre de Equipo "
+    $grpUser.Text      = Get-AIOString 'unattend.grp_user'
     $grpUser.Location  = "20, 15"
     $grpUser.Size      = "440, 175"
     $grpUser.ForeColor = [System.Drawing.Color]::White
     $tabBasic.Controls.Add($grpUser)
 
     $chkInteractiveUser           = New-Object System.Windows.Forms.CheckBox
-    $chkInteractiveUser.Text      = "Forzar creacion manual de usuario (Mostrar pantalla OOBE)"
+    $chkInteractiveUser.Text      = Get-AIOString 'unattend.chk_interactive_user'
     $chkInteractiveUser.Location  = "20, 25"
     $chkInteractiveUser.AutoSize  = $true
     $chkInteractiveUser.Checked   = $true
@@ -115,7 +115,7 @@ function Show-Unattend-GUI {
     $grpUser.Controls.Add($chkInteractiveUser)
 
     $lblUser          = New-Object System.Windows.Forms.Label
-    $lblUser.Text     = "Usuario:"
+    $lblUser.Text     = Get-AIOString 'unattend.lbl_user'
     $lblUser.Location = "20, 65"
     $lblUser.AutoSize = $true
     $grpUser.Controls.Add($lblUser)
@@ -127,7 +127,7 @@ function Show-Unattend-GUI {
     $grpUser.Controls.Add($txtUser)
 
     $lblPass          = New-Object System.Windows.Forms.Label
-    $lblPass.Text     = "Clave:"
+    $lblPass.Text     = Get-AIOString 'unattend.lbl_pass'
     $lblPass.Location = "220, 65"
     $lblPass.AutoSize = $true
     $grpUser.Controls.Add($lblPass)
@@ -140,7 +140,7 @@ function Show-Unattend-GUI {
     $grpUser.Controls.Add($txtPass)
 
     $lblPCName           = New-Object System.Windows.Forms.Label
-    $lblPCName.Text      = "Nombre PC:"
+    $lblPCName.Text      = Get-AIOString 'unattend.lbl_pcname'
     $lblPCName.Location  = "20, 105"
     $lblPCName.AutoSize  = $true
     $lblPCName.ForeColor = [System.Drawing.Color]::LightGreen
@@ -155,14 +155,14 @@ function Show-Unattend-GUI {
     $grpUser.Controls.Add($txtPCName)
 
     $lblPCNameHint           = New-Object System.Windows.Forms.Label
-    $lblPCNameHint.Text      = "(Vacio = auto)"
+    $lblPCNameHint.Text      = Get-AIOString 'unattend.lbl_pcname_hint'
     $lblPCNameHint.Location  = "265, 105"
     $lblPCNameHint.AutoSize  = $true
     $lblPCNameHint.ForeColor = [System.Drawing.Color]::DarkGray
     $grpUser.Controls.Add($lblPCNameHint)
 
 	$chkPassExpire          = New-Object System.Windows.Forms.CheckBox
-    $chkPassExpire.Text     = "La contraseña del usuario nunca expira"
+    $chkPassExpire.Text     = Get-AIOString 'unattend.chk_pass_expire'
     $chkPassExpire.Location = "20, 135"
     $chkPassExpire.AutoSize = $true
     $chkPassExpire.Checked  = $true
@@ -179,14 +179,14 @@ function Show-Unattend-GUI {
 
     # ── Grupo: Preferencias de idioma y teclado ───────────────────────
     $grpLang           = New-Object System.Windows.Forms.GroupBox
-    $grpLang.Text      = " Preferencias de idioma y teclado "
+    $grpLang.Text      = Get-AIOString 'unattend.grp_lang'
     $grpLang.Location  = "20, 200"
     $grpLang.Size      = "440, 275"
     $grpLang.ForeColor = [System.Drawing.Color]::PaleGoldenrod
     $tabBasic.Controls.Add($grpLang)
 
     $chkInteractiveLang           = New-Object System.Windows.Forms.CheckBox
-    $chkInteractiveLang.Text      = "Seleccionar idioma interactivamente en la instalacion"
+    $chkInteractiveLang.Text      = Get-AIOString 'unattend.chk_interactive_lang'
     $chkInteractiveLang.Location  = "20, 25"
     $chkInteractiveLang.AutoSize  = $true
     $chkInteractiveLang.Checked   = $true
@@ -194,14 +194,14 @@ function Show-Unattend-GUI {
     $grpLang.Controls.Add($chkInteractiveLang)
 
     $lblLangH1          = New-Object System.Windows.Forms.Label
-    $lblLangH1.Text     = "Instale Windows usando este idioma:"
+    $lblLangH1.Text     = Get-AIOString 'unattend.lbl_lang_h1'
     $lblLangH1.Location = "20, 60"
     $lblLangH1.AutoSize = $true
     $lblLangH1.Font     = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
     $grpLang.Controls.Add($lblLangH1)
 
     $lblSetupLang          = New-Object System.Windows.Forms.Label
-    $lblSetupLang.Text     = "Idioma de visualizacion de Windows:"
+    $lblSetupLang.Text     = Get-AIOString 'unattend.lbl_setup_lang'
     $lblSetupLang.Location = "20, 85"
     $lblSetupLang.AutoSize = $true
     $grpLang.Controls.Add($lblSetupLang)
@@ -220,14 +220,14 @@ function Show-Unattend-GUI {
     $grpLang.Controls.Add($cmbSetupLang)
 
     $lblLangH2          = New-Object System.Windows.Forms.Label
-    $lblLangH2.Text     = "Primer idioma y distribucion del teclado:"
+    $lblLangH2.Text     = Get-AIOString 'unattend.lbl_lang_h2'
     $lblLangH2.Location = "20, 140"
     $lblLangH2.AutoSize = $true
     $lblLangH2.Font     = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
     $grpLang.Controls.Add($lblLangH2)
 
     $lblSysLang          = New-Object System.Windows.Forms.Label
-    $lblSysLang.Text     = "Idioma del Sistema:"
+    $lblSysLang.Text     = Get-AIOString 'unattend.lbl_sys_lang'
     $lblSysLang.Location = "20, 165"
     $lblSysLang.AutoSize = $true
     $grpLang.Controls.Add($lblSysLang)
@@ -246,7 +246,7 @@ function Show-Unattend-GUI {
     $grpLang.Controls.Add($cmbSysLang)
 
     $lblKeyboard          = New-Object System.Windows.Forms.Label
-    $lblKeyboard.Text     = "Distribucion del teclado (Entrada):"
+    $lblKeyboard.Text     = Get-AIOString 'unattend.lbl_keyboard'
     $lblKeyboard.Location = "20, 220"
     $lblKeyboard.AutoSize = $true
     $grpLang.Controls.Add($lblKeyboard)
@@ -274,28 +274,28 @@ function Show-Unattend-GUI {
 
     # ── Grupo: Hacks y Bypass ─────────────────────────────────────────
     $grpHacks           = New-Object System.Windows.Forms.GroupBox
-    $grpHacks.Text      = " Hacks y Bypass (Win10/Win11) "
+    $grpHacks.Text      = Get-AIOString 'unattend.grp_hacks'
     $grpHacks.Location  = "480, 15"
     $grpHacks.Size      = "440, 145"
     $grpHacks.ForeColor = [System.Drawing.Color]::Cyan
     $tabBasic.Controls.Add($grpHacks)
 
     $chkBypass          = New-Object System.Windows.Forms.CheckBox
-    $chkBypass.Text     = "Bypass Requisitos (TPM, SecureBoot, RAM) - Solo Win11"
+    $chkBypass.Text     = Get-AIOString 'unattend.chk_bypass'
     $chkBypass.Location = "20, 25"
     $chkBypass.AutoSize = $true
     $chkBypass.Checked  = $false
     $grpHacks.Controls.Add($chkBypass)
 
     $chkNet          = New-Object System.Windows.Forms.CheckBox
-    $chkNet.Text     = "Saltar Cuenta Microsoft (Forzar Local) + Saltar EULA"
+    $chkNet.Text     = Get-AIOString 'unattend.chk_net'
     $chkNet.Location = "20, 55"
     $chkNet.AutoSize = $true
     $chkNet.Checked  = $true
     $grpHacks.Controls.Add($chkNet)
 
     $chkNRO           = New-Object System.Windows.Forms.CheckBox
-    $chkNRO.Text      = "Permitir instalacion sin Internet (BypassNRO)"
+    $chkNRO.Text      = Get-AIOString 'unattend.chk_nro'
     $chkNRO.Location  = "20, 85"
     $chkNRO.AutoSize  = $true
     $chkNRO.Checked   = $true
@@ -303,7 +303,7 @@ function Show-Unattend-GUI {
     $grpHacks.Controls.Add($chkNRO)
 
     $chkHideWifi           = New-Object System.Windows.Forms.CheckBox
-    $chkHideWifi.Text      = "Omitir configuracion de red Wi-Fi"
+    $chkHideWifi.Text      = Get-AIOString 'unattend.chk_hide_wifi'
     $chkHideWifi.Location  = "20, 115"
     $chkHideWifi.AutoSize  = $true
     $chkHideWifi.Checked   = $true
@@ -312,42 +312,42 @@ function Show-Unattend-GUI {
 
     # ── Grupo: Optimizacion, Visual y Privacidad ──────────────────────
     $grpTweaks           = New-Object System.Windows.Forms.GroupBox
-    $grpTweaks.Text      = " Optimizacion, Visual y Privacidad "
+    $grpTweaks.Text      = Get-AIOString 'unattend.grp_tweaks'
     $grpTweaks.Location  = "480, 170"
     $grpTweaks.Size      = "440, 330"
     $grpTweaks.ForeColor = [System.Drawing.Color]::Orange
     $tabBasic.Controls.Add($grpTweaks)
 
     $chkVisuals          = New-Object System.Windows.Forms.CheckBox
-    $chkVisuals.Text     = "Estilo Win10: Barra Izquierda + Menu Clasico"
+    $chkVisuals.Text     = Get-AIOString 'unattend.chk_visuals'
     $chkVisuals.Location = "20, 30"
     $chkVisuals.AutoSize = $true
     $chkVisuals.Checked  = $false
     $grpTweaks.Controls.Add($chkVisuals)
 
     $chkExt          = New-Object System.Windows.Forms.CheckBox
-    $chkExt.Text     = "Explorador: Mostrar Extensiones y Rutas Largas"
+    $chkExt.Text     = Get-AIOString 'unattend.chk_ext'
     $chkExt.Location = "20, 60"
     $chkExt.AutoSize = $true
     $chkExt.Checked  = $true
     $grpTweaks.Controls.Add($chkExt)
 
     $chkBloat          = New-Object System.Windows.Forms.CheckBox
-    $chkBloat.Text     = "Debloat: Desactivar Copilot, y Sugerencias"
+    $chkBloat.Text     = Get-AIOString 'unattend.chk_bloat'
     $chkBloat.Location = "20, 90"
     $chkBloat.AutoSize = $true
     $chkBloat.Checked  = $true
     $grpTweaks.Controls.Add($chkBloat)
 
     $chkHidePS          = New-Object System.Windows.Forms.CheckBox
-    $chkHidePS.Text     = "Ocultar CMD/PowerShell durante la instalacion"
+    $chkHidePS.Text     = Get-AIOString 'unattend.chk_hide_ps'
     $chkHidePS.Location = "20, 120"
     $chkHidePS.AutoSize = $true
     $chkHidePS.Checked  = $true
     $grpTweaks.Controls.Add($chkHidePS)
 
     $chkBitlocker           = New-Object System.Windows.Forms.CheckBox
-    $chkBitlocker.Text      = "Desactivar BitLocker en todas las unidades"
+    $chkBitlocker.Text      = Get-AIOString 'unattend.chk_bitlocker'
     $chkBitlocker.Location  = "20, 150"
     $chkBitlocker.AutoSize  = $true
     $chkBitlocker.Checked   = $true
@@ -355,7 +355,7 @@ function Show-Unattend-GUI {
     $grpTweaks.Controls.Add($chkBitlocker)
 
     $chkTelemetry           = New-Object System.Windows.Forms.CheckBox
-    $chkTelemetry.Text      = "Privacidad: Desactivar Telemetria (DiagTrack)"
+    $chkTelemetry.Text      = Get-AIOString 'unattend.chk_telemetry'
     $chkTelemetry.Location  = "20, 180"
     $chkTelemetry.AutoSize  = $true
     $chkTelemetry.Checked   = $true
@@ -363,7 +363,7 @@ function Show-Unattend-GUI {
     $grpTweaks.Controls.Add($chkTelemetry)
 
     $chkCortana           = New-Object System.Windows.Forms.CheckBox
-    $chkCortana.Text      = "Desactivar Cortana y Personalizacion de Entrada"
+    $chkCortana.Text      = Get-AIOString 'unattend.chk_cortana'
     $chkCortana.Location  = "20, 210"
     $chkCortana.AutoSize  = $true
     $chkCortana.Checked   = $true
@@ -371,7 +371,7 @@ function Show-Unattend-GUI {
     $grpTweaks.Controls.Add($chkCortana)
 
     $chkPowerPlan           = New-Object System.Windows.Forms.CheckBox
-    $chkPowerPlan.Text      = "Plan de Energia: Alto Rendimiento"
+    $chkPowerPlan.Text      = Get-AIOString 'unattend.chk_powerplan'
     $chkPowerPlan.Location  = "20, 240"
     $chkPowerPlan.AutoSize  = $true
     $chkPowerPlan.Checked   = $true
@@ -379,7 +379,7 @@ function Show-Unattend-GUI {
     $grpTweaks.Controls.Add($chkPowerPlan)
 
     $chkFastBoot          = New-Object System.Windows.Forms.CheckBox
-    $chkFastBoot.Text     = "Deshabilitar Inicio Rapido (FastBoot)"
+    $chkFastBoot.Text     = Get-AIOString 'unattend.chk_fastboot'
     $chkFastBoot.Location = "20, 270"
     $chkFastBoot.AutoSize = $true
     $chkFastBoot.Checked  = $true
@@ -387,7 +387,7 @@ function Show-Unattend-GUI {
 
     # NUEVO: Ajustes de la Barra de Tareas
     $chkTaskbar          = New-Object System.Windows.Forms.CheckBox
-    $chkTaskbar.Text     = "Barra de Tareas: Buscar como Icono y Ocultar Noticias"
+    $chkTaskbar.Text      = Get-AIOString 'unattend.chk_taskbar'
     $chkTaskbar.Location = "20, 300"
     $chkTaskbar.AutoSize = $true
     $chkTaskbar.Checked  = $true
@@ -396,7 +396,7 @@ function Show-Unattend-GUI {
 
     # Boton Generar
     $btnGen           = New-Object System.Windows.Forms.Button
-    $btnGen.Text      = "GENERAR E INYECTAR XML"
+    $btnGen.Text      = Get-AIOString 'unattend.btn_generate'
     $btnGen.Location  = "320, 515" 
     $btnGen.Size      = "300, 20"
     $btnGen.BackColor = [System.Drawing.Color]::SeaGreen
@@ -409,19 +409,19 @@ function Show-Unattend-GUI {
     # PESTANA 2: IMPORTAR
     # ==================================================================
     $tabImport           = New-Object System.Windows.Forms.TabPage
-    $tabImport.Text      = " Importar Ext. (WIOS)"
+    $tabImport.Text      = Get-AIOString 'unattend.tab_import'
     $tabImport.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
     $tabControl.TabPages.Add($tabImport)
 
     $grpImport           = New-Object System.Windows.Forms.GroupBox
-    $grpImport.Text      = " Inyeccion Directa de Autounattend.xml "
+    $grpImport.Text      = Get-AIOString 'unattend.grp_import'
     $grpImport.Size      = "700, 300"
     $grpImport.Location  = "115, 80"
     $grpImport.ForeColor = [System.Drawing.Color]::Cyan
     $tabImport.Controls.Add($grpImport)
 
     $lblImp           = New-Object System.Windows.Forms.Label
-    $lblImp.Text      = "Selecciona un archivo XML existente en tu equipo:"
+    $lblImp.Text      = Get-AIOString 'unattend.lbl_imp'
     $lblImp.Location  = "40, 50"
     $lblImp.AutoSize  = $true
     $lblImp.ForeColor = [System.Drawing.Color]::White
@@ -442,14 +442,14 @@ function Show-Unattend-GUI {
     $grpImport.Controls.Add($btnBrowse)
 
     $lnkWeb           = New-Object System.Windows.Forms.LinkLabel
-    $lnkWeb.Text      = "Generador Online Recomendado (schneegans.de)"
+    $lnkWeb.Text      = Get-AIOString 'unattend.lnk_web'
     $lnkWeb.Location  = "40, 115"
     $lnkWeb.AutoSize  = $true
     $lnkWeb.LinkColor = [System.Drawing.Color]::Yellow
     $grpImport.Controls.Add($lnkWeb)
 
     $btnWiOS           = New-Object System.Windows.Forms.Button
-    $btnWiOS.Text      = "Abrir generador (WiOS)"
+    $btnWiOS.Text      = Get-AIOString 'unattend.btn_wios'
     $btnWiOS.Location  = "395, 108"
     $btnWiOS.Size      = "260, 32"
     $btnWiOS.BackColor = [System.Drawing.Color]::SteelBlue
@@ -458,14 +458,14 @@ function Show-Unattend-GUI {
     $grpImport.Controls.Add($btnWiOS)
 
     $lblValid           = New-Object System.Windows.Forms.Label
-    $lblValid.Text      = "Estado: Esperando archivo..."
+    $lblValid.Text      = Get-AIOString 'unattend.lbl_valid_wait'
     $lblValid.Location  = "40, 160"
     $lblValid.AutoSize  = $true
     $lblValid.ForeColor = [System.Drawing.Color]::Silver
     $grpImport.Controls.Add($lblValid)
 
     $btnInjectImp           = New-Object System.Windows.Forms.Button
-    $btnInjectImp.Text      = "VALIDAR E INYECTAR XML"
+    $btnInjectImp.Text      = Get-AIOString 'unattend.btn_inject_imp'
     $btnInjectImp.Location  = "200, 210"
     $btnInjectImp.Size      = "300, 45"
     $btnInjectImp.BackColor = [System.Drawing.Color]::Orange
@@ -491,29 +491,26 @@ function Show-Unattend-GUI {
             $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
             [System.IO.File]::WriteAllText($destFile, $Content, $utf8NoBom)
 
-            $msg  = "El archivo se inyecto en el WIM (Windows\Panther\unattend.xml) para la fase OOBE.`n`n"
-            $msg += "Para que funcionen la Seleccion de Idioma inicial y los Bypasses de TPM, "
-            $msg += "DEBES colocar una copia en la RAIZ de tu USB/ISO con el nombre 'autounattend.xml'.`n`n"
-            $msg += "Deseas guardar una copia en tu PC ahora mismo?"
+            $msg  = Get-AIOString 'unattend.inject_ok_body'
 
-            $res = [System.Windows.Forms.MessageBox]::Show($msg, "Inyeccion Exitosa", 'YesNo', 'Information')
+            $res = [System.Windows.Forms.MessageBox]::Show($msg, (Get-AIOString 'unattend.inject_ok_title'), 'YesNo', 'Information')
 
             if ($res -eq 'Yes') {
                 $sfd          = New-Object System.Windows.Forms.SaveFileDialog
-                $sfd.Filter   = "Archivo Autounattend (*.xml)|*.xml"
+                $sfd.Filter   = Get-AIOString 'unattend.xml_filter'
                 $sfd.FileName = "autounattend.xml"
-                $sfd.Title    = "Guardar copia para la raiz del USB/ISO"
+                $sfd.Title    = Get-AIOString 'unattend.sfd_title'
 
                 if ($sfd.ShowDialog() -eq 'OK') {
                     [System.IO.File]::WriteAllText($sfd.FileName, $Content, $utf8NoBom)
                     [System.Windows.Forms.MessageBox]::Show(
-                        "Copia guardada en:`n$($sfd.FileName)",
-                        "Exito", 'OK', 'Information')
+                        (Get-AIOString 'unattend.copy_saved' $sfd.FileName),
+                        (Get-AIOString 'features.success_title'), 'OK', 'Information')
                 }
             }
             $form.Close()
         } catch {
-            [System.Windows.Forms.MessageBox]::Show("Error: $_", "Error", 'OK', 'Error')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'metadata.msg_error' $_), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         }
     }
 
@@ -819,7 +816,7 @@ $wpeSetupBlock
             Start-Process -FilePath $wiosGeneratorPath -ErrorAction Stop
         } catch {
             Write-Log -LogLevel WARN -Message "Unattend-GUI: No se pudo abrir WiOS. $($_.Exception.Message)"
-            [void][System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, 'Abrir generador WiOS', 'OK', 'Warning')
+            [void][System.Windows.Forms.MessageBox]::Show($form, $_.Exception.Message, (Get-AIOString 'unattend.wios_title'), 'OK', 'Warning')
         }
     })
 
@@ -831,12 +828,12 @@ $wpeSetupBlock
             try {
                 $check = [xml](Get-Content $ofd.FileName)
                 if ($check.unattend) {
-                    $lblValid.Text        = "XML Valido detectado."
+                    $lblValid.Text        = Get-AIOString 'unattend.xml_valid'
                     $lblValid.ForeColor   = [System.Drawing.Color]::LightGreen
                     $btnInjectImp.Enabled = $true
                 } else { throw "Nodo <unattend> no encontrado" }
             } catch {
-                $lblValid.Text        = "Archivo invalido."
+                $lblValid.Text        = Get-AIOString 'unattend.xml_invalid'
                 $lblValid.ForeColor   = [System.Drawing.Color]::Salmon
                 $btnInjectImp.Enabled = $false
             }
@@ -851,8 +848,8 @@ $wpeSetupBlock
 
     $form.Add_FormClosing({ 
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Estas seguro de que deseas salir?", 
-            "Confirmar Salida", 
+            (Get-AIOString 'metadata.confirm_exit_body'),
+            (Get-AIOString 'metadata.confirm_exit_title'), 
             [System.Windows.Forms.MessageBoxButtons]::YesNo, 
             [System.Windows.Forms.MessageBoxIcon]::Question
         )

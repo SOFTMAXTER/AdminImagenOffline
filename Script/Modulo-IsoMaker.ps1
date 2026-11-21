@@ -88,7 +88,7 @@ function Show-IsoMaker-GUI {
             $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
             "[$stamp] [$LogLevel] - $Message" | Out-File -FilePath $script:IsoMaker_fallbackLog -Append -Encoding utf8
         } catch {
-            Write-Warning "ISO_Maker: No se pudo registrar el evento: $Message"
+            Write-Warning (Get-AIOString 'isomaker.warn_log_event' $Message)
         }
     }
 
@@ -224,9 +224,8 @@ function Show-IsoMaker-GUI {
             }
         } else {
             Write-IsoMakerLog -LogLevel ERROR -Message "ISO_Maker: Dependencia faltante. El usuario declino buscar oscdimg.exe. Saliendo."
-            $msg = "Para utilizar el Generador de ISO, es un requisito estricto contar con 'oscdimg.exe'.`n`n" +
-                   "Por favor, descarga e instala el Windows Assessment and Deployment Kit (ADK)."
-            [System.Windows.Forms.MessageBox]::Show($msg, "Requisito Faltante: Windows ADK", 'OK', 'Error')
+            $msg = Get-AIOString 'isomaker.adk_missing_body'
+            [System.Windows.Forms.MessageBox]::Show($msg, (Get-AIOString 'isomaker.adk_missing_title'), 'OK', 'Error')
             return
         }
     }
@@ -351,7 +350,7 @@ namespace IsoMaker
     $uiOrange    = [System.Drawing.Color]::Orange
 
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = "ISO Maker by SOFTMAXTER"
+    $form.Text            = Get-AIOString 'isomaker.form_title'
     $form.ClientSize      = New-Object System.Drawing.Size(930, 650)
     $form.StartPosition   = "CenterScreen"
     $form.BackColor       = $uiBg
@@ -371,7 +370,7 @@ namespace IsoMaker
     $form.Controls.Add($lblHeaderTitle)
 
     $lblHeaderSub           = New-Object System.Windows.Forms.Label
-    $lblHeaderSub.Text      = "• Creación de Medios de Instalación Windows BIOS/UEFI"
+    $lblHeaderSub.Text      = Get-AIOString 'isomaker.header_sub'
     $lblHeaderSub.Font      = New-Object System.Drawing.Font("Segoe UI", 9)
     $lblHeaderSub.ForeColor = $uiSecondary
     $lblHeaderSub.Location  = "105, 18"
@@ -382,7 +381,7 @@ namespace IsoMaker
 
     # --- 1. CONFIGURACION DE IMAGEN ---
     $grpCfg           = New-Object System.Windows.Forms.GroupBox
-    $grpCfg.Text      = " CONFIGURACION DE IMAGEN "
+    $grpCfg.Text      = Get-AIOString 'isomaker.grp_cfg'
     $grpCfg.Location  = "15, 50"
     $grpCfg.Size      = "450, 190"
     $grpCfg.ForeColor = $uiCyan
@@ -390,7 +389,7 @@ namespace IsoMaker
     $form.Controls.Add($grpCfg)
 
     $lblSrc           = New-Object System.Windows.Forms.Label
-    $lblSrc.Text      = "CARPETA ORIGEN (boot, efi, sources...)"
+    $lblSrc.Text      = Get-AIOString 'isomaker.lbl_src'
     $lblSrc.Location  = "15, 25"
     $lblSrc.Size      = "425, 20"
     $lblSrc.AutoSize  = $false
@@ -407,7 +406,7 @@ namespace IsoMaker
     $grpCfg.Controls.Add($txtSrc)
 
     $btnSrc                           = New-Object System.Windows.Forms.Button
-    $btnSrc.Text                      = "Explorar..."
+    $btnSrc.Text                      = Get-AIOString 'isomaker.btn_src'
     $btnSrc.Location                  = "365, 51"
     $btnSrc.Size                      = "75, 25"
     $btnSrc.BackColor                 = [System.Drawing.Color]::Silver
@@ -417,7 +416,7 @@ namespace IsoMaker
     $grpCfg.Controls.Add($btnSrc)
 
     $lblDst           = New-Object System.Windows.Forms.Label
-    $lblDst.Text      = "ARCHIVO ISO DESTINO"
+    $lblDst.Text      = Get-AIOString 'isomaker.lbl_dst'
     $lblDst.Location  = "15, 84"
     $lblDst.Size      = "425, 20"
     $lblDst.AutoSize  = $false
@@ -434,7 +433,7 @@ namespace IsoMaker
     $grpCfg.Controls.Add($txtDst)
 
     $btnDst                           = New-Object System.Windows.Forms.Button
-    $btnDst.Text                      = "Guardar"
+    $btnDst.Text                      = Get-AIOString 'isomaker.btn_dst'
     $btnDst.Location                  = "365, 110"
     $btnDst.Size                      = "75, 25"
     $btnDst.BackColor                 = [System.Drawing.Color]::Silver
@@ -444,7 +443,7 @@ namespace IsoMaker
     $grpCfg.Controls.Add($btnDst)
 
     $lblLabel           = New-Object System.Windows.Forms.Label
-    $lblLabel.Text      = "ETIQUETA DE VOLUMEN:"
+    $lblLabel.Text      = Get-AIOString 'isomaker.lbl_label'
     $lblLabel.Location  = "15, 151"
     $lblLabel.Size      = "145, 22"
     $lblLabel.AutoSize  = $false
@@ -464,7 +463,7 @@ namespace IsoMaker
 
     # --- 2. AUTOMATIZACION OOBE ---
     $grpAuto           = New-Object System.Windows.Forms.GroupBox
-    $grpAuto.Text      = " AUTOMATIZACION OOBE (Opcional) "
+    $grpAuto.Text      = Get-AIOString 'isomaker.grp_auto'
     $grpAuto.Location  = "15, 250"
     $grpAuto.Size      = "450, 112"
     $grpAuto.ForeColor = $uiOrange
@@ -472,7 +471,7 @@ namespace IsoMaker
     $form.Controls.Add($grpAuto)
 
     $lblAutoInfo           = New-Object System.Windows.Forms.Label
-    $lblAutoInfo.Text      = "INYECTAR autounattend.xml EN LA RAIZ DEL MEDIO"
+    $lblAutoInfo.Text      = Get-AIOString 'isomaker.lbl_auto_info'
     $lblAutoInfo.Location  = "15, 25"
     $lblAutoInfo.Size      = "425, 20"
     $lblAutoInfo.AutoSize  = $false
@@ -499,7 +498,7 @@ namespace IsoMaker
     $grpAuto.Controls.Add($btnUnattend)
 
     $lnkWeb                 = New-Object System.Windows.Forms.LinkLabel
-    $lnkWeb.Text            = "Generador online — schneegans.de"
+    $lnkWeb.Text            = Get-AIOString 'isomaker.lnk_web'
     $lnkWeb.Location        = "15, 84"
     $lnkWeb.Size            = "280, 22"
     $lnkWeb.AutoSize        = $false
@@ -511,7 +510,7 @@ namespace IsoMaker
 
     # --- 3. VALIDACION DE ORIGEN ---
     $grpVal           = New-Object System.Windows.Forms.GroupBox
-    $grpVal.Text      = " VALIDACION DE ORIGEN "
+    $grpVal.Text      = Get-AIOString 'isomaker.grp_val'
     $grpVal.Location  = "15, 372"
     $grpVal.Size      = "450, 160"
     $grpVal.ForeColor = [System.Drawing.Color]::Gray
@@ -551,7 +550,7 @@ namespace IsoMaker
     $grpVal.Controls.Add($lblValWim)
 
     $lblValSpace           = New-Object System.Windows.Forms.Label
-    $lblValSpace.Text      = "• Espacio libre en destino: (Esperando...)"
+    $lblValSpace.Text      = Get-AIOString 'isomaker.val_space_wait'
     $lblValSpace.Location  = "10, 90"
     $lblValSpace.Size      = "430, 18"
     $lblValSpace.ForeColor = $uiMuted
@@ -561,7 +560,7 @@ namespace IsoMaker
     $grpVal.Controls.Add($lblValSpace)
 
     $lblValSrcSize           = New-Object System.Windows.Forms.Label
-    $lblValSrcSize.Text      = "• Tamaño carpeta origen: (Esperando...)"
+    $lblValSrcSize.Text      = Get-AIOString 'isomaker.val_src_size_wait'
     $lblValSrcSize.Location  = "10, 112"
     $lblValSrcSize.Size      = "430, 18"
     $lblValSrcSize.ForeColor = $uiMuted
@@ -571,7 +570,7 @@ namespace IsoMaker
     $grpVal.Controls.Add($lblValSrcSize)
 
     $lblValLang           = New-Object System.Windows.Forms.Label
-    $lblValLang.Text      = "• Idioma predeterminado: (Esperando...)"
+    $lblValLang.Text      = Get-AIOString 'isomaker.val_lang_wait'
     $lblValLang.Location  = "10, 134"
     $lblValLang.Size      = "430, 18"
     $lblValLang.ForeColor = $uiMuted
@@ -584,7 +583,7 @@ namespace IsoMaker
 
     # --- 4. PROGRESO DE COMPILACION ---
     $grpProg           = New-Object System.Windows.Forms.GroupBox
-    $grpProg.Text      = " PROGRESO DE COMPILACION "
+    $grpProg.Text      = Get-AIOString 'isomaker.grp_prog'
     $grpProg.Location  = "475, 50"
     $grpProg.Size      = "440, 515"
     $grpProg.ForeColor = [System.Drawing.Color]::LightGreen
@@ -645,7 +644,7 @@ namespace IsoMaker
     })
 
     $lblPhase           = New-Object System.Windows.Forms.Label
-    $lblPhase.Text      = "Esperando configuracion..."
+    $lblPhase.Text      = Get-AIOString 'isomaker.phase_waiting'
     $lblPhase.Location  = "15, 82"
     $lblPhase.Size      = "410, 42"
     $lblPhase.ForeColor = $uiCyan
@@ -664,7 +663,7 @@ namespace IsoMaker
     $grpProg.Controls.Add($pbMain)
 
     $lblPercent           = New-Object System.Windows.Forms.Label
-    $lblPercent.Text      = "0 % completado"
+    $lblPercent.Text      = Get-AIOString 'isomaker.pct_0'
     $lblPercent.Location  = "15, 165"
     $lblPercent.AutoSize  = $true
     $lblPercent.ForeColor = $uiGreen
@@ -696,7 +695,7 @@ namespace IsoMaker
     # ================= FILA INFERIOR DE BOTONES =================
 
     $btnExportLog                            = New-Object System.Windows.Forms.Button
-    $btnExportLog.Text                       = "Exportar Log"
+    $btnExportLog.Text                       = Get-AIOString 'isomaker.btn_export_log'
     $btnExportLog.Location                   = "15, 575"
     $btnExportLog.Size                       = "140, 40"
     $btnExportLog.BackColor                  = [System.Drawing.Color]::FromArgb(45, 45, 48)
@@ -710,7 +709,7 @@ namespace IsoMaker
     # [F1] btnMake ocupa 590 px en reposo.
     # Al iniciar compilacion se reduce a 430 px para que aparezca btnCancel.
     $btnMake                           = New-Object System.Windows.Forms.Button
-    $btnMake.Text                      = "► CREAR ISO BOOTEABLE"
+    $btnMake.Text                      = Get-AIOString 'isomaker.btn_make'
     $btnMake.Location                  = "165, 575"
     $btnMake.Size                      = "590, 40"
     $btnMake.BackColor                 = [System.Drawing.Color]::SeaGreen
@@ -723,7 +722,7 @@ namespace IsoMaker
     # [F1] Boton Cancelar — visible solo durante la compilacion.
     # Se ubica donde estaba la mitad derecha de btnMake (605..755).
     $btnCancel                           = New-Object System.Windows.Forms.Button
-    $btnCancel.Text                      = "✖  Cancelar"
+    $btnCancel.Text                      = Get-AIOString 'isomaker.btn_cancel'
     $btnCancel.Location                  = "605, 575"
     $btnCancel.Size                      = "150, 40"
     $btnCancel.BackColor                 = [System.Drawing.Color]::DarkRed
@@ -735,7 +734,7 @@ namespace IsoMaker
     $form.Controls.Add($btnCancel)
 
     $btnOpenFolder                           = New-Object System.Windows.Forms.Button
-    $btnOpenFolder.Text                      = ">> Abrir carpeta de la imagen generada"
+    $btnOpenFolder.Text                      = Get-AIOString 'isomaker.btn_open_folder'
     $btnOpenFolder.Location                  = "15, 620"
     $btnOpenFolder.Size                      = "880, 25"
     $btnOpenFolder.BackColor                 = [System.Drawing.Color]::FromArgb(0, 80, 0)
@@ -1109,7 +1108,7 @@ $script:IsoMaker_GetSwmSetInfo = {
         Parts        = @()
         MissingParts = @()
         Errors       = @()
-        Summary      = 'No se encontro un conjunto SWM.'
+        Summary      = (Get-AIOString 'isomaker.swm_not_found')
     }
 
     try {
@@ -1187,14 +1186,14 @@ $script:IsoMaker_GetSwmSetInfo = {
         $result.Valid = ($result.Errors.Count -eq 0)
         if ($result.Valid) {
             $imagesText = if ($result.ImageCount -gt 0) { " | $($result.ImageCount) indices" } else { '' }
-            $result.Summary = "Conjunto SWM valido: $($result.PartCount) partes$imagesText"
+            $result.Summary = Get-AIOString 'isomaker.swm_valid_fmt' $result.PartCount $imagesText
         } else {
-            $result.Summary = "Conjunto SWM no valido: $($result.Errors -join ' | ')"
+            $result.Summary = Get-AIOString 'isomaker.swm_invalid_fmt' ($result.Errors -join ' | ')
         }
     } catch {
         $result.Errors += $_.Exception.Message
         $result.Valid = $false
-        $result.Summary = "No se pudo validar SWM: $($_.Exception.Message)"
+        $result.Summary = Get-AIOString 'isomaker.swm_validate_err' $_.Exception.Message
     }
     return [pscustomobject]$result
 }
@@ -1422,12 +1421,12 @@ $script:IsoMaker_TestIsoImage = {
             $lblValBoot.Text = "• boot\etfsboot.com"; $lblValBoot.ForeColor = $grayC
             $lblValEfi.Text  = "• efisys.bin (UEFI)"; $lblValEfi.ForeColor  = $grayC
             $lblValWim.Text  = "• sources\install.*"; $lblValWim.ForeColor  = $grayC
-            $lblValLang.Text = "• Idioma predeterminado: (Esperando...)"; $lblValLang.ForeColor = $grayC
+            $lblValLang.Text = Get-AIOString 'isomaker.val_lang_wait'; $lblValLang.ForeColor = $grayC
             return
         }
         $biosPath = Join-Path $srcPath 'boot\etfsboot.com'
         $hasBoot  = (Test-Path -LiteralPath $biosPath -PathType Leaf) -and ((Get-Item -LiteralPath $biosPath -ErrorAction SilentlyContinue).Length -gt 0)
-        $lblValBoot.Text      = if ($hasBoot) { "• boot\etfsboot.com (BIOS)" } else { "• boot\etfsboot.com (BIOS no disponible)" }
+        $lblValBoot.Text      = if ($hasBoot) { Get-AIOString 'isomaker.val_boot_ok' } else { Get-AIOString 'isomaker.val_boot_no' }
         $lblValBoot.ForeColor = if ($hasBoot) { $okC } else { $warnC }
 
         $efiStandardPath = Join-Path $srcPath 'efi\microsoft\boot\efisys.bin'
@@ -1469,7 +1468,7 @@ $script:IsoMaker_TestIsoImage = {
         param([string]$srcPath, [string]$dstPath)
 
         if ([string]::IsNullOrWhiteSpace($dstPath)) {
-            $lblValSpace.Text      = "• Espacio libre en destino: (Esperando...)"
+            $lblValSpace.Text      = Get-AIOString 'isomaker.val_space_wait'
             $lblValSpace.ForeColor = $uiMuted
             return
         }
@@ -1477,14 +1476,14 @@ $script:IsoMaker_TestIsoImage = {
         try {
             $q = Split-Path -Qualifier $dstPath -ErrorAction SilentlyContinue
             if (-not $q) {
-                $lblValSpace.Text      = "• Espacio libre en destino: No disponible para esta ruta"
+                $lblValSpace.Text      = Get-AIOString 'isomaker.val_space_na_path'
                 $lblValSpace.ForeColor = $uiMuted
                 return
             }
 
             $drive = Get-PSDrive -Name $q.TrimEnd(':') -ErrorAction SilentlyContinue
             if (-not $drive) {
-                $lblValSpace.Text      = "• Espacio libre en destino: No disponible"
+                $lblValSpace.Text      = Get-AIOString 'isomaker.val_space_na'
                 $lblValSpace.ForeColor = $uiMuted
                 return
             }
@@ -1508,10 +1507,10 @@ $script:IsoMaker_TestIsoImage = {
 
             $freeGB     = [math]::Round($drive.Free / 1GB, 1)
             $requiredGB = [math]::Round($requiredBytes / 1GB, 1)
-            $lblValSpace.Text = "• Espacio libre en destino: $freeGB GB | Estimado requerido: $requiredGB GB"
+            $lblValSpace.Text = Get-AIOString 'isomaker.val_space_fmt' $freeGB $requiredGB
             $lblValSpace.ForeColor = if ($drive.Free -ge $requiredBytes) { $uiGreen } else { [System.Drawing.Color]::Orange }
         } catch {
-            $lblValSpace.Text      = "• Espacio libre en destino: No se pudo calcular"
+            $lblValSpace.Text      = Get-AIOString 'isomaker.val_space_err'
             $lblValSpace.ForeColor = [System.Drawing.Color]::Orange
         }
     }
@@ -1578,9 +1577,9 @@ $script:IsoMaker_TestIsoImage = {
         & $script:IsoMaker_UpdateValidation $srcPath
         & $script:IsoMaker_UpdateDiskSpace  $srcPath $txtDst.Text
 
-        $lblValSrcSize.Text      = "• Calculando Tamaño de la carpeta origen..."
+        $lblValSrcSize.Text      = Get-AIOString 'isomaker.val_src_size_calc'
         $lblValSrcSize.ForeColor = $uiMuted
-        $lblValLang.Text         = "• Idioma predeterminado: Detectando..."
+        $lblValLang.Text         = Get-AIOString 'isomaker.val_lang_detecting'
         $lblValLang.ForeColor    = $uiMuted
 
         # --- Calculo de Tamaño de la carpeta (async) ---
@@ -1633,7 +1632,7 @@ $script:IsoMaker_TestIsoImage = {
             $script:IsoMaker_sizeHandle = $null; $script:IsoMaker_sizeQueue = $null
 
             if ($null -ne $res.Error) {
-                $lblValSrcSize.Text      = "• No se pudo calcular el Tamaño de la carpeta origen"
+                $lblValSrcSize.Text      = Get-AIOString 'isomaker.val_src_size_err'
                 $lblValSrcSize.ForeColor = [System.Drawing.Color]::Orange
                 Write-IsoMakerLog -LogLevel WARN -Message "ISO_Maker: No se pudo calcular el Tamaño de la carpeta origen: $($res.Error)"
             } else {
@@ -1645,7 +1644,7 @@ $script:IsoMaker_TestIsoImage = {
                          else   { "$bytes bytes" }
                 $color = if ($bytes -ge 8GB) { [System.Drawing.Color]::Orange }  # > 8 GB: probablemente incluye drivers/updates adicionales fuera de lo habitual
                          else                { $uiGreen }
-                $lblValSrcSize.Text      = "• Tamaño carpeta origen: $strSz ($($res.Count) archivos | $($res.DirCount) directorios)"
+                $lblValSrcSize.Text      = Get-AIOString 'isomaker.val_src_size_fmt' $strSz $res.Count $res.DirCount
                 $lblValSrcSize.ForeColor = $color
                 Write-IsoMakerLog -LogLevel INFO -Message "ISO_Maker: Tamaño carpeta origen: $strSz ($($res.Count) archivos | $($res.DirCount) directorios) | Reparse points: $($res.ReparsePointCount)."
             }
@@ -1860,7 +1859,7 @@ $script:IsoMaker_TestIsoImage = {
                         $txtLabel.Text = "WINDOWS_CUSTOM"
                         $script:IsoMaker_labelUserEdited = $false
                     }
-                    $lblValLang.Text      = "• Idioma predeterminado: No detectado"
+                    $lblValLang.Text      = Get-AIOString 'isomaker.val_lang_not_found'
                     $lblValLang.ForeColor = [System.Drawing.Color]::Orange
                     Write-IsoMakerLog -LogLevel WARN -Message "ISO_Maker: Fallo al extraer metadatos DISM: $($res.Error). Etiqueta por defecto aplicada."
                     & $script:IsoMaker_SetPhase "Error leyendo metadatos. Etiqueta por defecto aplicada." ([System.Drawing.Color]::Orange)
@@ -1871,7 +1870,7 @@ $script:IsoMaker_TestIsoImage = {
                         $res.Label = $res.Label -replace '_UNKFRE_', "_${resolvedArchitecture}FRE_"
                     }
                     $script:IsoMaker_detectedArchitecture = [string]$resolvedArchitecture
-                    $lblValLang.Text = "• Idioma predeterminado: $($res.DefaultLanguage) | Arquitectura: $resolvedArchitecture"
+                    $lblValLang.Text = Get-AIOString 'isomaker.val_lang_fmt' $res.DefaultLanguage $resolvedArchitecture
                     $lblValLang.ForeColor = if ($res.DefaultLanguage -eq 'MULTI') {
                         [System.Drawing.Color]::Orange
                     } else {
@@ -1896,7 +1895,7 @@ $script:IsoMaker_TestIsoImage = {
             $btnMake.Enabled        = $true
             $txtLabel.Text          = "WINDOWS_CUSTOM"
             $script:IsoMaker_labelUserEdited = $false
-            $lblValLang.Text        = "• Idioma predeterminado: No disponible"
+            $lblValLang.Text        = Get-AIOString 'isomaker.val_lang_na'
             $lblValLang.ForeColor   = [System.Drawing.Color]::Orange
             Write-IsoMakerLog -LogLevel WARN -Message "ISO_Maker: No se detecto una imagen de metadatos compatible (install.wim/esd o boot.wim para SWM). Aplicando etiqueta base."
             & $script:IsoMaker_SetPhase "Imagen de metadatos no encontrada. Etiqueta base aplicada." ([System.Drawing.Color]::Orange)
@@ -2080,13 +2079,13 @@ $script:IsoMaker_TestIsoImage = {
 
     $btnSrc.Add_Click({
         $fbd             = New-Object System.Windows.Forms.FolderBrowserDialog
-        $fbd.Description = "Selecciona carpeta raiz de Windows (donde estan setup.exe, boot, efi...)"
+        $fbd.Description = Get-AIOString 'isomaker.fbd_desc'
         if ($fbd.ShowDialog() -eq 'OK') { & $script:IsoMaker_AnalyzeSrc $fbd.SelectedPath }
     })
 
     $btnDst.Add_Click({
         $sfd        = New-Object System.Windows.Forms.SaveFileDialog
-        $sfd.Filter = "Imagen ISO (*.iso)|*.iso"
+        $sfd.Filter = Get-AIOString 'isomaker.iso_filter'
         if ($sfd.ShowDialog() -eq 'OK') {
             $txtDst.Text = $sfd.FileName
             Write-IsoMakerLog -LogLevel INFO -Message "ISO_Maker: Archivo de destino configurado: $($txtDst.Text)"
@@ -2170,7 +2169,7 @@ $script:IsoMaker_TestIsoImage = {
         # Actualizar HUD
         & $script:IsoMaker_SetPhase "Compilacion cancelada por el usuario." ([System.Drawing.Color]::Orange)
         $pbMain.Value         = 0
-        $lblPercent.Text      = "Cancelado"
+        $lblPercent.Text      = Get-AIOString 'isomaker.pct_cancelled'
         $lblPercent.ForeColor = [System.Drawing.Color]::Orange
         $btnExportLog.Enabled = -not [string]::IsNullOrWhiteSpace($script:IsoMaker_lastBuildLog)
 
@@ -2189,13 +2188,13 @@ $script:IsoMaker_TestIsoImage = {
 
         if (-not $src -or -not $iso) {
             Write-IsoMakerLog -LogLevel WARN -Message "ISO_Maker: El usuario intento compilar sin definir rutas de origen o destino."
-            [System.Windows.Forms.MessageBox]::Show("Faltan rutas.", "Error", 'OK', 'Error')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'isomaker.err_missing_paths'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
             return
         }
 
         if (-not (Test-Path -LiteralPath $src -PathType Container)) {
             Write-IsoMakerLog -LogLevel ERROR -Message "ISO_Maker: La carpeta origen no existe: $src"
-            [System.Windows.Forms.MessageBox]::Show("La carpeta origen no existe.", "Error", 'OK', 'Error')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'isomaker.err_src_missing'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
             return
         }
 
@@ -2235,7 +2234,7 @@ $script:IsoMaker_TestIsoImage = {
             }
         } catch {
             Write-IsoMakerLog -LogLevel ERROR -Message "ISO_Maker: Ruta de origen/destino no valida: $($_.Exception.Message)"
-            [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "Ruta no valida", 'OK', 'Error') | Out-Null
+            [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, (Get-AIOString 'isomaker.err_invalid_path_title'), 'OK', 'Error') | Out-Null
             return
         }
 
@@ -2499,13 +2498,13 @@ $script:IsoMaker_TestIsoImage = {
             & $script:IsoMaker_InitializeInjectionState
         } catch {
             Write-IsoMakerLog -LogLevel ERROR -Message "ISO_Maker: No se pudo preparar el respaldo temporal de inyeccion: $($_.Exception.Message)"
-            [System.Windows.Forms.MessageBox]::Show("No se pudo preparar la inyeccion:`n$($_.Exception.Message)", "Error", 'OK', 'Error') | Out-Null
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'isomaker.err_prep_inject' $_.Exception.Message), (Get-AIOString 'common.error_title'), 'OK', 'Error') | Out-Null
             return
         }
 
         if (-not [string]::IsNullOrWhiteSpace($xmlPath)) {
             if (-not (Test-Path -LiteralPath $xmlPath -PathType Leaf)) {
-                [System.Windows.Forms.MessageBox]::Show("El archivo XML seleccionado ya no existe:`n$xmlPath", "Archivo no encontrado", 'OK', 'Error') | Out-Null
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'isomaker.err_xml_missing' $xmlPath), (Get-AIOString 'isomaker.err_file_not_found_title'), 'OK', 'Error') | Out-Null
                 & $script:IsoMaker_CleanupInjectedFiles
                 return
             }
@@ -2541,7 +2540,7 @@ $script:IsoMaker_TestIsoImage = {
                 }
             } catch {
                 Write-IsoMakerLog -LogLevel ERROR -Message "ISO_Maker: Fallo al copiar el archivo XML a la raiz - $($_.Exception.Message)"
-                [System.Windows.Forms.MessageBox]::Show("Error copiando XML: $($_.Exception.Message)", "Error", 'OK', 'Error') | Out-Null
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'isomaker.err_copy_xml' $_.Exception.Message), (Get-AIOString 'common.error_title'), 'OK', 'Error') | Out-Null
                 & $script:IsoMaker_CleanupInjectedFiles
                 return
             }
@@ -2576,7 +2575,7 @@ $script:IsoMaker_TestIsoImage = {
         $grpAuto.Enabled      = $false
         $form.Cursor          = [System.Windows.Forms.Cursors]::WaitCursor
         $pbMain.Value         = 0
-        $lblPercent.Text      = "0 % completado"
+        $lblPercent.Text      = Get-AIOString 'isomaker.pct_0'
         $lblPercent.ForeColor = $uiGreen
         $lblFileInfo.Text     = ""
         $lblSizeInfo.Text     = ""
@@ -2713,7 +2712,7 @@ $script:IsoMaker_TestIsoImage = {
             $script:IsoMaker_attemptIndex = $AttemptIndex
             $script:IsoMaker_lastPct = 0
             $pbMain.Value = 0
-            $lblPercent.Text = "0 % completado"
+            $lblPercent.Text = Get-AIOString 'isomaker.pct_0'
             $lblPercent.Refresh()
 
             $script:IsoMaker_outQueue = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
@@ -2789,7 +2788,7 @@ $script:IsoMaker_TestIsoImage = {
                             $script:IsoMaker_attemptOutLogBuilder.AppendLine($line) | Out-Null
                             if (-not [string]::IsNullOrWhiteSpace($line) -and
                                 $line -match '(\d+) files in (\d+) directories') {
-                                $lblFileInfo.Text = "$($matches[1]) archivos | $($matches[2]) directorios"
+                                $lblFileInfo.Text = Get-AIOString 'isomaker.file_info_fmt' $matches[1] $matches[2]
                                 $lblFileInfo.Refresh()
                             }
                         }
@@ -2810,7 +2809,7 @@ $script:IsoMaker_TestIsoImage = {
                                     }
                                     # [FIX B1] Clampar al maximo para evitar ArgumentOutOfRangeException
                                     $pbMain.Value    = [Math]::Min($pct, $pbMain.Maximum)
-                                    $lblPercent.Text = "$pct % completado"
+                                    $lblPercent.Text = Get-AIOString 'isomaker.pct_fmt' $pct
                                     $lblPercent.Refresh()
                                     if ($pct -eq 100) {
                                         & $script:IsoMaker_SetPhase "Optimizando almacenamiento y finalizando..." ([System.Drawing.Color]::Orange)
@@ -3092,13 +3091,13 @@ if (-not $script:IsoMaker_verificationResult.Valid) {
                             } else {
                                 "$cFiles archivos | $cDirs directorios"
                             }
-                            if ($bAfter -gt 0) { $lblSizeInfo.Text = "Tamaño final: $strAfter ($bAfter bytes)" }
+                            if ($bAfter -gt 0) { $lblSizeInfo.Text = Get-AIOString 'isomaker.size_final_fmt' $strAfter $bAfter }
 
                             if ($script:IsoMaker_lastBuildHash -and $script:IsoMaker_lastBuildHash -notmatch '^ERROR') {
                                 $lblHashInfo.Text      = "SHA-256:`n$script:IsoMaker_lastBuildHash"
                                 $lblHashInfo.ForeColor = $uiGreen
                             } else {
-                                $lblHashInfo.Text      = "SHA-256: Error al calcular"
+                                $lblHashInfo.Text      = Get-AIOString 'isomaker.sha256_err'
                                 $lblHashInfo.ForeColor = [System.Drawing.Color]::Orange
                             }
 
@@ -3106,30 +3105,23 @@ if (-not $script:IsoMaker_verificationResult.Valid) {
 
                             if ($script:IsoMaker_verificationResult.Valid) {
                                 Write-IsoMakerLog -LogLevel ACTION -Message "ISO_Maker: ISO generada y verificada correctamente. Archivos: $cFiles | Tamaño final: $strAfter | Espacio ahorrado: $strSaved | Destino: $script:IsoMaker_iso"
-                                $msgSummary = "La imagen ISO se ha compilado y verificado correctamente.`n`n"
+                                $msgSummary = Get-AIOString 'isomaker.summary_ok_hdr'
                             } else {
                                 Write-IsoMakerLog -LogLevel WARN -Message "ISO_Maker: ISO generada, pero con errores de verificacion. Destino: $script:IsoMaker_iso"
-                                $msgSummary = "La imagen ISO se compilo, pero la validacion posterior encontro errores.`n`n"
+                                $msgSummary = Get-AIOString 'isomaker.summary_err_hdr'
                             }
-                            $msgSummary += "ESTADISTICAS DE COMPILACION:`n"
-                            $msgSummary += "-------------------------------------------------------------`n"
-                            $msgSummary += " Archivos inyectados  : $cFiles (en $cDirs carpetas)`n"
-                            $msgSummary += " Tamaño original      : $strBefore`n"
-                            $msgSummary += " Tamaño optimizado    : $strAfter`n"
-                            $msgSummary += " Espacio ahorrado     : $strSaved`n"
-                            $msgSummary += "-------------------------------------------------------------`n`n"
-                            $msgSummary += "Ruta de la imagen:`n$script:IsoMaker_iso"
-                            $msgSummary += "`n`nValidacion post-build: $(if($script:IsoMaker_verificationResult.Valid){'CORRECTA'}else{'CON ERRORES'})"
+                            $postBuildStatus = if ($script:IsoMaker_verificationResult.Valid) { Get-AIOString 'isomaker.postbuild_ok' } else { Get-AIOString 'isomaker.postbuild_err' }
+                            $msgSummary += Get-AIOString 'isomaker.summary_stats' $cFiles $cDirs $strBefore $strAfter $strSaved $script:IsoMaker_iso $postBuildStatus
                             if (-not $script:IsoMaker_verificationResult.Valid) {
                                 $msgSummary += "`n" + (($script:IsoMaker_verificationResult.Errors | ForEach-Object { " - $_" }) -join "`n")
                             }
                             if ($script:IsoMaker_verificationResult.Warnings.Count -gt 0) {
-                                $msgSummary += "`nAdvertencias:`n" + (($script:IsoMaker_verificationResult.Warnings | ForEach-Object { " - $_" }) -join "`n")
+                                $msgSummary += (Get-AIOString 'isomaker.summary_warnings_hdr') + (($script:IsoMaker_verificationResult.Warnings | ForEach-Object { " - $_" }) -join "`n")
                             }
                             if ($script:IsoMaker_lastBuildHash -and $script:IsoMaker_lastBuildHash -notmatch '^ERROR') {
                                 $msgSummary += "`n`nSHA-256:`n$script:IsoMaker_lastBuildHash"
                             }
-                            $summaryTitle = if ($script:IsoMaker_verificationResult.Valid) { 'ISO Creada con Exito' } else { 'ISO Creada con Advertencias' }
+                            $summaryTitle = if ($script:IsoMaker_verificationResult.Valid) { Get-AIOString 'isomaker.summary_title_ok' } else { Get-AIOString 'isomaker.summary_title_warn' }
                             $summaryIcon  = if ($script:IsoMaker_verificationResult.Valid) { 'Information' } else { 'Warning' }
                             [System.Windows.Forms.MessageBox]::Show($msgSummary, $summaryTitle, 'OK', $summaryIcon)
 
@@ -3174,7 +3166,7 @@ if (-not $script:IsoMaker_verificationResult.Valid) {
                             Write-IsoMakerLog -LogLevel WARN -Message "ISO_Maker: No se pudo guardar automaticamente el log detallado del fallo: $($_.Exception.Message)"
                         }
                         $pbMain.Value    = 0
-                        $lblPercent.Text = "Error (Codigo: $exitCode)"
+                        $lblPercent.Text = Get-AIOString 'isomaker.pct_error' $exitCode
                         $lblPercent.Refresh()
                         & $script:IsoMaker_SetPhase "Fallo la compilacion. Codigo: $exitCode" ([System.Drawing.Color]::Crimson)
                         [System.Windows.Forms.MessageBox]::Show(
@@ -3206,7 +3198,7 @@ if (-not $script:IsoMaker_verificationResult.Valid) {
                     & $script:IsoMaker_DisposeIsoProcess $true
                     & $script:IsoMaker_CleanupInjectedFiles
                     & $script:IsoMaker_FinalizeIsoOutput $false
-                    Write-Warning "pollTimer encontro un error critico: $($_.Exception.Message)`nStack: $($_.Exception.StackTrace)"
+                    Write-Warning (Get-AIOString 'isomaker.warn_poll_timer' $_.Exception.Message $_.Exception.StackTrace)
                     & $script:IsoMaker_RestoreCompileUI
                 }
             }
@@ -3217,7 +3209,7 @@ if (-not $script:IsoMaker_verificationResult.Valid) {
         } catch {
             Write-IsoMakerLog -LogLevel ERROR -Message "ISO_Maker: Excepcion no controlada en el motor de compilacion: $($_.Exception.Message)"
             & $script:IsoMaker_SetPhase "Excepcion: $($_.Exception.Message)" ([System.Drawing.Color]::Crimson)
-            [System.Windows.Forms.MessageBox]::Show("Excepcion: $_", "Crash", 'OK', 'Error')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'isomaker.err_crash' $_), 'Crash', 'OK', 'Error')
 
             # [FIX B2] Liberar timer y buildDone en el catch exterior del btnMake
             if ($null -ne $script:IsoMaker_pollTimer) {
@@ -3240,19 +3232,19 @@ if (-not $script:IsoMaker_verificationResult.Valid) {
     # ------------------------------------------------------------------
     $btnExportLog.Add_Click({
         if (-not $script:IsoMaker_lastBuildLog) {
-            [System.Windows.Forms.MessageBox]::Show("No hay ningun log de compilacion disponible aun.`nRealiza una compilacion primero.", "Sin Log", 'OK', 'Information')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'isomaker.no_log_body'), (Get-AIOString 'isomaker.no_log_title'), 'OK', 'Information')
             return
         }
         $sfd          = New-Object System.Windows.Forms.SaveFileDialog
-        $sfd.Filter   = "Archivo de Log (*.txt)|*.txt|Todos los archivos (*.*)|*.*"
+        $sfd.Filter   = Get-AIOString 'isomaker.filter_log'
         $sfd.FileName = "ISO_Maker_Build_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
         if ($sfd.ShowDialog() -eq 'OK') {
             try {
                 $script:IsoMaker_lastBuildLog | Out-File -FilePath $sfd.FileName -Encoding utf8 -Force
                 Write-IsoMakerLog -LogLevel ACTION -Message "ISO_Maker: Log exportado manualmente a: $($sfd.FileName)"
-                [System.Windows.Forms.MessageBox]::Show("Log exportado correctamente en:`n$($sfd.FileName)", "Log Exportado", 'OK', 'Information')
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'isomaker.log_exported_body' $sfd.FileName), (Get-AIOString 'isomaker.log_exported_title'), 'OK', 'Information')
             } catch {
-                [System.Windows.Forms.MessageBox]::Show("Error al exportar el log:`n$($_.Exception.Message)", "Error", 'OK', 'Error')
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'isomaker.log_export_err' $_.Exception.Message), (Get-AIOString 'common.error_title'), 'OK', 'Error')
             }
         }
     })
@@ -3263,7 +3255,7 @@ if (-not $script:IsoMaker_verificationResult.Valid) {
             Write-IsoMakerLog -LogLevel INFO -Message "ISO_Maker: El usuario abrio la carpeta de destino: $target"
             Invoke-Item -LiteralPath $target
         } else {
-            [System.Windows.Forms.MessageBox]::Show("No se pudo determinar la carpeta de destino.", "Error", 'OK', 'Warning')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'isomaker.dest_folder_err'), (Get-AIOString 'common.error_title'), 'OK', 'Warning')
         }
     })
 
@@ -3376,7 +3368,7 @@ if (-not $script:IsoMaker_verificationResult.Valid) {
                 [System.Windows.Forms.MessageBoxIcon]::Error
             ) | Out-Null
         } catch {
-            Write-Warning "ISO_Maker no pudo continuar: $startupError"
+            Write-Warning (Get-AIOString 'isomaker.warn_startup_err' $startupError)
         }
     } finally {
         Write-IsoMakerLog -LogLevel INFO -Message "ISO_Maker: Control devuelto al menu principal."

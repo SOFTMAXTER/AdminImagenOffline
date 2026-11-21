@@ -694,18 +694,18 @@ function Show-AIOUpdateAdkStatus {
     param([Parameter(Mandatory = $true)] [object]$AdkInfo)
 
     Write-Host ''
-    Write-Host ' Herramientas de mantenimiento:' -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'actualizaciones.tools_header') -ForegroundColor Yellow
     if ($AdkInfo.Detected) {
-        Write-Host ' ADK          : Detectado' -ForegroundColor Green
-        if ($AdkInfo.Root) { Write-Host " Ruta ADK     : $($AdkInfo.Root)" -ForegroundColor White }
+        Write-Host (Get-AIOString 'actualizaciones.adk_detected') -ForegroundColor Green
+        if ($AdkInfo.Root) { Write-Host (Get-AIOString 'actualizaciones.adk_root' $AdkInfo.Root) -ForegroundColor White }
     }
     else {
-        Write-Host ' ADK          : No detectado' -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'actualizaciones.adk_not_detected') -ForegroundColor Yellow
     }
 
     $versionText = if ($AdkInfo.ActiveDismVersion) { [string]$AdkInfo.ActiveDismVersion } else { 'N/D' }
-    Write-Host " DISM activo  : $($AdkInfo.ActiveDismSource) | $versionText" -ForegroundColor White
-    Write-Host " Ruta DISM    : $($AdkInfo.ActiveDismPath)" -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'actualizaciones.dism_active' $AdkInfo.ActiveDismSource $versionText) -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.dism_path' $AdkInfo.ActiveDismPath) -ForegroundColor DarkGray
 }
 
 function Write-AIOUpdateLog {
@@ -729,8 +729,9 @@ function Write-AIOUpdateLog {
 function Wait-AIOUpdateUser {
     [CmdletBinding()]
     param(
-        [string]$Message = 'Presiona ENTER para volver al menu principal'
+        [string]$Message = ''
     )
+    if ([string]::IsNullOrWhiteSpace($Message)) { $Message = Get-AIOString 'actualizaciones.press_enter_main' }
 
     try {
         [void](Read-Host "`n$Message")
@@ -793,30 +794,30 @@ function Show-AIOUpdateTerminalSummary {
     Write-Host "`n=======================================================" -ForegroundColor $color
     Write-Host (" {0}" -f $title) -ForegroundColor $color
     Write-Host '=======================================================' -ForegroundColor $color
-    if ($state.Message) { Write-Host " Mensaje          : $($state.Message)" -ForegroundColor White }
-    if ($state.Phase) { Write-Host " Fase             : $($state.Phase)" -ForegroundColor White }
-    if ($state.MediaRoot) { Write-Host " Medio            : $($state.MediaRoot)" -ForegroundColor White }
-    Write-Host " Cambios iniciados: $([bool]$state.MediaMutationStarted)" -ForegroundColor White
+    if ($state.Message) { Write-Host (Get-AIOString 'actualizaciones.state_msg' $state.Message) -ForegroundColor White }
+    if ($state.Phase) { Write-Host (Get-AIOString 'actualizaciones.state_phase' $state.Phase) -ForegroundColor White }
+    if ($state.MediaRoot) { Write-Host (Get-AIOString 'actualizaciones.state_media' $state.MediaRoot) -ForegroundColor White }
+    Write-Host (Get-AIOString 'actualizaciones.state_mutated' ([bool]$state.MediaMutationStarted)) -ForegroundColor White
     if ($Status -eq 'Failed' -or $state.RestorationStatus -ne 'No requerida') {
         $restoreColor = if ($state.RestorationStatus -like 'Restaurado*') { 'Green' } elseif ($state.RestorationStatus -like 'Fallo*') { 'Red' } else { 'Yellow' }
-        Write-Host " Restauracion     : $($state.RestorationStatus)" -ForegroundColor $restoreColor
+        Write-Host (Get-AIOString 'actualizaciones.state_restore' $state.RestorationStatus) -ForegroundColor $restoreColor
     }
-    if ($state.BackupRoot) { Write-Host " Respaldo         : $($state.BackupRoot)" -ForegroundColor Gray }
-    if ($state.ReportJson) { Write-Host " Reporte JSON     : $($state.ReportJson)" -ForegroundColor Gray }
-    if ($state.ReportHtml) { Write-Host " Reporte HTML     : $($state.ReportHtml)" -ForegroundColor Gray }
-    if ($state.DiagnosticPath) { Write-Host " Diagnostico      : $($state.DiagnosticPath)" -ForegroundColor Yellow }
-    if ($state.LogPath) { Write-Host " Registro DISM    : $($state.LogPath)" -ForegroundColor DarkGray }
-    if ($state.ErrorLine) { Write-Host " Linea            : $($state.ErrorLine)" -ForegroundColor DarkRed }
-    if ($state.ErrorCode) { Write-Host " Codigo           : $($state.ErrorCode)" -ForegroundColor DarkRed }
+    if ($state.BackupRoot) { Write-Host (Get-AIOString 'actualizaciones.state_backup' $state.BackupRoot) -ForegroundColor Gray }
+    if ($state.ReportJson) { Write-Host (Get-AIOString 'actualizaciones.state_json' $state.ReportJson) -ForegroundColor Gray }
+    if ($state.ReportHtml) { Write-Host (Get-AIOString 'actualizaciones.state_html' $state.ReportHtml) -ForegroundColor Gray }
+    if ($state.DiagnosticPath) { Write-Host (Get-AIOString 'actualizaciones.state_diag' $state.DiagnosticPath) -ForegroundColor Yellow }
+    if ($state.LogPath) { Write-Host (Get-AIOString 'actualizaciones.state_dism_log' $state.LogPath) -ForegroundColor DarkGray }
+    if ($state.ErrorLine) { Write-Host (Get-AIOString 'actualizaciones.state_line' $state.ErrorLine) -ForegroundColor DarkRed }
+    if ($state.ErrorCode) { Write-Host (Get-AIOString 'actualizaciones.state_code' $state.ErrorCode) -ForegroundColor DarkRed }
 
     $completed = @($state.CompletedTargets | Where-Object { $null -ne $_ })
     if ($completed.Count -gt 0) {
-        Write-Host "`n Operaciones completadas:" -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'actualizaciones.ops_completed') -ForegroundColor Cyan
         foreach ($item in @($completed | Select-Object -First 10)) {
             Write-Host "   [OK] $item" -ForegroundColor Green
         }
         if ($completed.Count -gt 10) {
-            Write-Host "   ... y $($completed.Count - 10) operacion(es) adicional(es)." -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.ops_more' ($completed.Count - 10)) -ForegroundColor DarkGray
         }
     }
 }
@@ -842,7 +843,7 @@ function Select-AIOUpdateFolder {
         }
     }
     catch {
-        Write-Warning "No se pudo abrir el selector de carpetas: $($_.Exception.Message)"
+        Write-Warning (Get-AIOString 'actualizaciones.folder_dialog_warn' $_.Exception.Message)
     }
 
     return $null
@@ -1256,7 +1257,7 @@ function New-AIOUpdatePreflightBackup {
     $incompletePath = Join-Path $preflightRoot 'BACKUP_INCOMPLETO.txt'
 
     Write-Host "`n=======================================================" -ForegroundColor DarkCyan
-    Write-Host ' RESPALDO PREVIO OBLIGATORIO' -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'actualizaciones.preflight_title') -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor DarkCyan
 
     Initialize-AIOUpdateDirectory -Path $preflightRoot -Empty
@@ -1291,10 +1292,10 @@ function New-AIOUpdatePreflightBackup {
         }
     }
 
-    Write-Host (" Archivos a respaldar : {0}" -f $files.Count) -ForegroundColor White
-    Write-Host (" Tamano aproximado    : {0:N2} GB" -f ($totalBytes / 1GB)) -ForegroundColor White
-    Write-Host " Destino              : $preflightRoot" -ForegroundColor White
-    Write-Host ' Hash                 : SHA-256 para todos los archivos' -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'actualizaciones.preflight_files' $files.Count) -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.preflight_size' ($totalBytes / 1GB)) -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.preflight_dest' $preflightRoot) -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.preflight_hash') -ForegroundColor DarkGray
 
     $records = New-Object System.Collections.Generic.List[object]
     $criticalNames = @('sources\install.wim', 'sources\boot.wim')
@@ -1309,13 +1310,13 @@ function New-AIOUpdatePreflightBackup {
             Initialize-AIOUpdateDirectory -Path (Split-Path -Parent $destination)
 
             if ($relative -in $criticalNames) {
-                Write-Host "   [$position/$($files.Count)] Copiando y verificando $relative..." -ForegroundColor Gray
+                Write-Host (Get-AIOString 'actualizaciones.preflight_copying' $position $files.Count $relative) -ForegroundColor Gray
             }
 
             $copyResult = Copy-AIOUpdateFileVerified -Source $file.FullName -Destination $destination
             $sourceHash = [string]$copyResult.SHA256
             if ($relative -in $criticalNames) {
-                Write-Host '      [VERIFICADO] SHA-256 coincide.' -ForegroundColor DarkGray
+                Write-Host (Get-AIOString 'actualizaciones.preflight_sha_ok') -ForegroundColor DarkGray
             }
 
             $percent = if ($files.Count -gt 0) { [math]::Min(100, [math]::Floor(($position * 100.0) / $files.Count)) } else { 100 }
@@ -1369,7 +1370,7 @@ function New-AIOUpdatePreflightBackup {
     Remove-Item -LiteralPath $incompletePath -Force -ErrorAction Stop
 
     Write-AIOUpdateLog -Level INFO -Message ("Respaldo previo completado y verificado: {0} archivo(s), {1:N2} GB, {2} hashes SHA-256, indice={3}, destino '{4}'." -f $records.Count, ($totalBytes / 1GB), $records.Count, $filesIndexSha256, $preflightRoot)
-    Write-Host " [OK] Respaldo previo completado y verificado ($($records.Count) hashes SHA-256)." -ForegroundColor Green
+    Write-Host (Get-AIOString 'actualizaciones.preflight_done' $records.Count) -ForegroundColor Green
 
     return [pscustomobject]@{
         Success             = $true
@@ -2015,12 +2016,12 @@ function Restore-AIOUpdatePreflightBackup {
     }
 
     Write-Host "`n=======================================================" -ForegroundColor DarkCyan
-    Write-Host ' RESTAURANDO RESPALDO PREFLIGHT' -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'actualizaciones.restore_title') -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor DarkCyan
-    Write-Host " Origen  : $($validation.Root)" -ForegroundColor White
-    Write-Host " Destino : $target" -ForegroundColor White
-    Write-Host " Alcance : $Scope" -ForegroundColor White
-    Write-Host " Archivos: $($records.Count)" -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.restore_src' $validation.Root) -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.restore_dst' $target) -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.restore_scope' $Scope) -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.restore_files' $records.Count) -ForegroundColor White
 
     $position = 0
     Write-Progress -Activity 'Restaurando respaldo Preflight' -Status "0/$($records.Count) archivos restaurados (0%)" -PercentComplete 0
@@ -2035,7 +2036,7 @@ function Restore-AIOUpdatePreflightBackup {
             $expectedHash = [string]$record.SHA256
 
             if ($relative -match '(?i)^sources[\\/](install|boot)\.wim$') {
-                Write-Host "   [$position/$($records.Count)] Restaurando $relative..." -ForegroundColor Gray
+                Write-Host (Get-AIOString 'actualizaciones.restore_copying' $position $records.Count $relative) -ForegroundColor Gray
             }
 
             $verifier = {
@@ -2131,9 +2132,9 @@ function Restore-AIOUpdatePreflightBackup {
     $result | Add-Member -NotePropertyName StructuredReport -NotePropertyValue $report
 
     Write-AIOUpdateLog -Level INFO -Message "Restauracion Preflight completada. Alcance=$Scope; archivos=$($restored.Count); extras eliminados=$($removedExtras.Count); destino='$target'."
-    Write-Host " [OK] Restauracion completada y verificada." -ForegroundColor Green
-    Write-Host " Reporte JSON: $($report.JsonPath)" -ForegroundColor DarkGray
-    Write-Host " Reporte HTML: $($report.HtmlPath)" -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'actualizaciones.restore_done') -ForegroundColor Green
+    Write-Host (Get-AIOString 'actualizaciones.report_json_lbl' $report.JsonPath) -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'actualizaciones.report_html_lbl' $report.HtmlPath) -ForegroundColor DarkGray
     return $result
 }
 
@@ -2452,7 +2453,7 @@ function Invoke-AIOUpdateDism {
 
         if (-not $recoveredAfterCaptureError) {
             $prefix = if ($processStarted) { 'Error durante la ejecucion/captura de DISM' } else { 'No se pudo iniciar DISM' }
-            $message = "$prefix para '$Context': $($captureException.Exception.Message). Registro DISM: $dismLog"
+            $message = Get-AIOString 'actualizaciones.dism_err_fmt' $prefix $Context $captureException.Exception.Message $dismLog
             Write-AIOUpdateLog -Level ERROR -Message $message
             Add-AIOUpdateDismTranscriptLine -Line ("ERROR | {0}" -f $message)
             if (-not $NoThrow) { throw $message }
@@ -4661,7 +4662,7 @@ function Remove-AIOUpdateWinPERejuv {
 
     $results = New-Object System.Collections.Generic.List[object]
     foreach ($packageName in $packages) {
-        Write-Host "   [WINPE] Retirando $packageName antes de la LCU..." -ForegroundColor DarkYellow
+        Write-Host (Get-AIOString 'actualizaciones.winpe_removing' $packageName) -ForegroundColor DarkYellow
         $result = Invoke-AIOUpdateDism -Arguments @(
             "/Image:$MountPath",
             '/Remove-Package',
@@ -4694,14 +4695,14 @@ function Remove-AIOUpdateWinPERejuv {
         $advisoryOnly = (-not $removalVerified -and $isNeutralRejuv)
 
         if ($removalVerified) {
-            Write-Host "      [VERIFICADO] Estado inmediato posterior: $stateText" -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.verified_post_state' $stateText) -ForegroundColor DarkGray
         }
         elseif ($advisoryOnly) {
-            Write-Host "      [PENDIENTE] CBS aun informa '$stateText'; se confirmara despues de la LCU y la limpieza." -ForegroundColor DarkYellow
-            Write-Host '      [INFORMATIVO] Es el componente neutro de Rejuv; no bloqueara el mantenimiento si CBS lo conserva o restablece.' -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.cbs_pending' $stateText) -ForegroundColor DarkYellow
+            Write-Host (Get-AIOString 'actualizaciones.cbs_rejuv_info') -ForegroundColor DarkGray
         }
         else {
-            Write-Host "      [AVISO] La identidad localizada sigue activa: $stateText" -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.cbs_localized_warn' $stateText) -ForegroundColor Yellow
         }
 
         [void]$results.Add([pscustomobject]@{
@@ -4967,7 +4968,7 @@ function Get-AIOUpdatePackageInventory {
         [Parameter(Mandatory = $true)] [string]$ScratchRoot
     )
 
-    Write-Host ' Leyendo metadatos del repositorio de actualizaciones...' -ForegroundColor DarkCyan
+    Write-Host (Get-AIOString 'actualizaciones.reading_repo') -ForegroundColor DarkCyan
     $resolvedRoot = (Resolve-Path -LiteralPath $RepositoryRoot -ErrorAction Stop).Path
     $files = @(Get-AIOUpdateRepositoryPackageFiles -RepositoryRoot $resolvedRoot)
     $signatureLines = New-Object System.Collections.Generic.List[string]
@@ -5148,7 +5149,7 @@ function Select-AIOUpdateInstallIndexes {
     )
 
     Write-Host ''
-    Write-Host ' Indices disponibles en install.wim:' -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'actualizaciones.avail_indexes') -ForegroundColor Yellow
     foreach ($image in $Images) {
         $version = if ($image.Version) { $image.Version } else { 'N/D' }
         $architecture = Convert-AIOUpdateArchitectureName -Architecture $image.Architecture
@@ -5156,7 +5157,7 @@ function Select-AIOUpdateInstallIndexes {
     }
 
     while ($true) {
-        $answer = (Read-Host "`nIndices a actualizar separados por coma/espacio, o T para todos").Trim()
+        $answer = (Read-Host (Get-AIOString 'actualizaciones.indexes_prompt')).Trim()
         if ($answer -eq 'T') {
             return @($Images | ForEach-Object { [int]$_.ImageIndex })
         }
@@ -5173,7 +5174,7 @@ function Select-AIOUpdateInstallIndexes {
             return $requested
         }
 
-        Write-Host 'Seleccion invalida. Usa indices existentes o T.' -ForegroundColor Red
+        Write-Host (Get-AIOString 'actualizaciones.indexes_invalid') -ForegroundColor Red
     }
 }
 
@@ -5789,7 +5790,7 @@ function Dismount-AIOUpdateImage {
     )
 
     if (-not (Close-AIOUpdateEsuHives -MountPath $MountPath)) {
-        $message = "ESU: no se puede desmontar '$MountPath' mientras sus colmenas siguen abiertas."
+        $message = Get-AIOString 'actualizaciones.esu_hives_open' $MountPath
         if ($NoThrow) { return [pscustomobject]@{ Success=$false; State='EsuHivesOpen'; ExitCode=-1; Context=$message } }
         throw $message
     }
@@ -5901,7 +5902,7 @@ function Get-AIOUpdateMountedPackageInventory {
         }
     }
     catch {
-        $message = "No se pudo obtener inventario de paquetes en '$MountPath': $($_.Exception.Message)"
+        $message = Get-AIOString 'actualizaciones.pkg_inventory_err' $MountPath $_.Exception.Message
         Write-AIOUpdateLog -Level WARN -Message $message
         if ($Strict) { throw $message }
         return @()
@@ -6503,7 +6504,7 @@ function Add-AIOUpdatePackageList {
     $Packages = @(Get-AIOUpdateUniquePackages -Packages $Packages)
     $results = New-Object System.Collections.Generic.List[object]
     if (@($Packages).Count -eq 0) {
-        Write-Host "   [OMITIDO] ${Context}: no hay paquetes." -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'actualizaciones.ctx_no_pkgs' $Context) -ForegroundColor DarkGray
         return @()
     }
 
@@ -6516,7 +6517,7 @@ function Add-AIOUpdatePackageList {
         $reapplyAttempt = $alreadyPresent
 
         if ($reapplyAttempt) {
-            Write-Host '      [REAPLICAR] El paquete ya esta presente; se enviara nuevamente a DISM sin desinstalarlo.' -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.reapply_present') -ForegroundColor Yellow
             Write-AIOUpdateLog -Level WARN -Message "$Context - $($package.Name): reaplicacion automatica para un paquete Installed/InstallPending/Superseded."
         }
 
@@ -6584,10 +6585,10 @@ function Add-AIOUpdatePackageList {
             $result.State = if ($dismState -eq 'NotApplicable') { 'ReapplyNotApplicable' } else { 'Reapplied' }
 
             if ($result.State -eq 'ReapplyNotApplicable') {
-                Write-Host '      [SIN CAMBIOS] CBS determino que la reaplicacion no era necesaria o aplicable.' -ForegroundColor DarkYellow
+                Write-Host (Get-AIOString 'actualizaciones.reapply_no_change') -ForegroundColor DarkYellow
             }
             else {
-                Write-Host '      [REAPLICADO] DISM acepto nuevamente el paquete.' -ForegroundColor Green
+                Write-Host (Get-AIOString 'actualizaciones.reapply_ok') -ForegroundColor Green
             }
         }
 
@@ -7136,14 +7137,14 @@ function Write-AIOUpdateVerificationReport {
     $status = if ($Report.Success) { 'VERIFICADO' } else { 'ERROR' }
     $color = if ($Report.Success) { 'Green' } else { 'Red' }
     if ($Report.PSObject.Properties['Kind'] -and $Report.Kind -eq 'WimStructure') {
-        Write-Host ("   [{0}] {1} - {2}: indices {3} -> {4}" -f $status, $Report.Target, $Report.Phase, $Report.BeforeCount, $Report.AfterCount) -ForegroundColor $color
+        Write-Host (Get-AIOString 'actualizaciones.wim_struct_row' $status $Report.Target $Report.Phase $Report.BeforeCount $Report.AfterCount) -ForegroundColor $color
         Write-Host "      $($Report.Reason)" -ForegroundColor DarkGray
         foreach ($detail in @($Report.Details)) { Write-Host "      $detail" -ForegroundColor DarkGray }
         return
     }
 
     if ($Report.PSObject.Properties['Kind'] -and $Report.Kind -eq 'SetupLanguagePreservation') {
-        Write-Host ("   [{0}] {1} - {2}: idiomas de Windows Setup" -f $status, $Report.Target, $Report.Phase) -ForegroundColor $color
+        Write-Host (Get-AIOString 'actualizaciones.setup_langs_status' $status $Report.Target $Report.Phase) -ForegroundColor $color
         Write-Host "      $($Report.Reason)" -ForegroundColor DarkGray
         foreach ($detail in @($Report.Details)) { Write-Host "      $detail" -ForegroundColor DarkGray }
         return
@@ -7164,10 +7165,10 @@ function Write-AIOUpdateVerificationReport {
         Write-Host "      Familia CBS observada      : $($Report.ObservedServicingVersion)" -ForegroundColor DarkGray
     }
     if ($Report.NewPackages.Count -gt 0) {
-        Write-Host "      Paquetes nuevos detectados: $($Report.NewPackages.Count)" -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'actualizaciones.new_pkgs_count' $Report.NewPackages.Count) -ForegroundColor DarkGray
     }
     if ($Report.RetiredPackages.Count -gt 0) {
-        Write-Host "      Paquetes retirados/consolidados por supersedencia: $($Report.RetiredPackages.Count)" -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'actualizaciones.retired_pkgs_count' $Report.RetiredPackages.Count) -ForegroundColor DarkGray
     }
 }
 
@@ -7200,8 +7201,8 @@ function Write-AIOUpdateConsolidatedRejuvSummary {
     $uniqueTargets = @($entries | Select-Object -ExpandProperty Target -Unique | Sort-Object)
 
     Write-Host ''
-    Write-Host '   [AVISO CONSOLIDADO] WinPE-Rejuv neutro' -ForegroundColor Yellow
-    Write-Host ("      CBS conservo o restablecio {0} identidad(es) neutra(s) en {1} indice(s)." -f $uniquePackages.Count, $uniqueTargets.Count) -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'actualizaciones.rejuv_consolidated_hdr') -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'actualizaciones.rejuv_consolidated_body' $uniquePackages.Count $uniqueTargets.Count) -ForegroundColor DarkGray
     Write-Host ("      Destinos: {0}" -f ($uniqueTargets -join ', ')) -ForegroundColor DarkGray
     foreach ($package in $uniquePackages) {
         Write-Host "      - $package" -ForegroundColor DarkGray
@@ -7395,7 +7396,7 @@ function Get-AIOUpdateWinREFromInstallWim {
         [Parameter(Mandatory = $true)] [string]$Destination
     )
 
-    Write-Host "   Extrayendo winre.wim del indice $Index sin montar install.wim..." -ForegroundColor DarkCyan
+    Write-Host (Get-AIOString 'actualizaciones.extracting_winre' $Index) -ForegroundColor DarkCyan
     if (Invoke-AIOUpdateWimExtractPath -WimPath $InstallWim -Index $Index -ImagePath 'Windows\System32\Recovery\winre.wim' -DestinationPath $Destination -TemporaryPath $ScratchPath) {
         if (Test-AIOUpdateWimContainerSignature -Path $Destination) { return $Destination }
         Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
@@ -7449,7 +7450,7 @@ function Assert-AIOUpdateWinREIntegrity {
         if (-not (Find-AIOUpdateWimlib)) {
             throw 'Se requiere wimlib-imagex.exe en Tools\wimlib o en PATH para verificar WinRE.'
         }
-        Write-Host '   [VERIFICANDO] Integridad de winre.wim con wimlib antes de reinyectar (sin montaje).' -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'actualizaciones.verifying_winre_wimlib') -ForegroundColor Cyan
         Write-AIOUpdateLog -Level INFO -Message "${context}: wimlib-imagex verify '$WinREPath'."
         # Solo lectura; no usar --nocheck ni limitar la verificacion a metadatos.
         $result = Invoke-AIOUpdateWimlibRead -Arguments @('verify', $WinREPath)
@@ -7464,7 +7465,7 @@ function Assert-AIOUpdateWinREIntegrity {
         }
         $reason = "wimlib verify completado; archivo='$WinREPath'; codigo=0; segundos={0:N2}." -f $timer.Elapsed.TotalSeconds
         Add-AIOUpdateMaintenanceRecord -Context $context -State 'WimIntegrityVerified' -Performed $true -Reason $reason
-        Write-Host '   [VERIFICADO] Integridad de winre.wim correcta; listo para reinyectar.' -ForegroundColor Green
+        Write-Host (Get-AIOString 'actualizaciones.verified_winre_wimlib') -ForegroundColor Green
     }
     catch {
         $reason = "No se reinyectara winre.wim: $($_.Exception.Message)"
@@ -7688,7 +7689,7 @@ function Test-AIOUpdateInstallPostCommitDirect {
     $fileCount = 0; $extractedBytes = [int64]0
     try {
         if (-not (Test-Path -LiteralPath $InstallWim -PathType Leaf)) { throw "No existe '$InstallWim'." }
-        Write-Host "   Verificando install.wim indice $Index con wimlib, sin remontar..." -ForegroundColor DarkCyan
+        Write-Host (Get-AIOString 'actualizaciones.verifying_install_wimlib' $Index) -ForegroundColor DarkCyan
         if ($VerifyEsu) {
             $descriptor = Get-AIOUpdateEsuDescriptor -Architecture $Image.Architecture
             $required = @('Windows/System32/config/SOFTWARE', 'Windows/System32/config/COMPONENTS')
@@ -7720,7 +7721,7 @@ function Test-AIOUpdateInstallPostCommitDirect {
             $hash = Get-AIOUpdateWimFileSha256 -WimPath $InstallWim -Index $Index -ImagePath 'Windows/System32/Recovery/winre.wim'
             if ($hash -ne $ServicedWinRE.Hash) { throw "El hash de winre.wim reinyectado no coincide en el indice $Index." }
             Add-AIOUpdateMaintenanceRecord -Context $context -State 'EmbeddedWinREHashVerified' -Performed $true -Reason "SHA-256=$hash; lectura binaria desde install.wim sin copia temporal de WinRE."
-            Write-Host '   [VERIFICADO] winre.wim reinyectado coincide por SHA-256.' -ForegroundColor Green
+            Write-Host (Get-AIOString 'actualizaciones.verified_winre_sha') -ForegroundColor Green
         }
     }
     catch {
@@ -7783,7 +7784,7 @@ function Update-AIOUpdateInstallWim {
 
         try {
             Write-Host "`n=======================================================" -ForegroundColor DarkCyan
-            Write-Host " INSTALL.WIM $position/$($Indexes.Count) - INDICE $index" -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'actualizaciones.install_wim_banner' $position $Indexes.Count $index) -ForegroundColor Cyan
             Write-Host "=======================================================" -ForegroundColor DarkCyan
 
             Mount-AIOUpdateImage -ImagePath $InstallWim -Index $index -MountPath $InstallMount -ScratchPath $ScratchPath -Context "Montando install.wim indice $index"
@@ -7878,7 +7879,7 @@ function Update-AIOUpdateInstallWim {
                     if ($embeddedHash -ne $indexWinRE.Hash) {
                         throw "El hash de winre.wim reinyectado no coincide en el indice $index."
                     }
-                    Write-Host '   [VERIFICADO] winre.wim reinyectado coincide por SHA-256.' -ForegroundColor Green
+                    Write-Host (Get-AIOString 'actualizaciones.verified_winre_sha') -ForegroundColor Green
                 }
 
                 [void](Dismount-AIOUpdateImage -MountPath $InstallMount -Mode Discard -Context "Cerrando verificacion del indice $index")
@@ -7907,7 +7908,7 @@ function Export-AIOUpdateSingleInstallIndex {
         Remove-Item -LiteralPath $exportPath -Force -ErrorAction Stop
     }
 
-    Write-Host "`nExportando el indice $SourceIndex como install.wim de indice unico..." -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'actualizaciones.exporting_single_idx' $SourceIndex) -ForegroundColor Cyan
     [void](Invoke-AIOUpdateDism -Arguments @(
         '/Export-Image',
         "/SourceImageFile:$InstallWim",
@@ -8286,7 +8287,7 @@ function Repair-AIOUpdateRecoveryDependencies {
                         $reported[$dependency.Name] = $true
                         $state = if ($dependency.Required) { 'DependencyNeedsRuntimeValidation' } else { 'OptionalDependencyNotCopied' }
                         Add-AIOUpdateMaintenanceRecord -Context 'Dependencias de recuperacion' -State $state -Reason "Importacion $($dependency.Name); requerido por $($dependency.RequestedBy). No se infiere resolucion SxS ni se copia automaticamente una dependencia no verificada."
-                        if ($dependency.Required) { Write-Host "   [AVISO] Dependencia para validar al arrancar WinPE: $($dependency.Name). Consulta el reporte." -ForegroundColor Yellow }
+                        if ($dependency.Required) { Write-Host (Get-AIOString 'actualizaciones.winpe_dep_warn' $dependency.Name) -ForegroundColor Yellow }
                     }
                     continue
                 }
@@ -8415,7 +8416,7 @@ function Update-AIOUpdateBootWim {
 
         try {
             Write-Host "`n=======================================================" -ForegroundColor DarkCyan
-            Write-Host " BOOT.WIM $position/$($Images.Count) - INDICE $index" -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'actualizaciones.boot_wim_banner' $position $Images.Count $index) -ForegroundColor Cyan
             Write-Host "=======================================================" -ForegroundColor DarkCyan
 
             Mount-AIOUpdateImage -ImagePath $BootWim -Index $index -MountPath $BootMount -ScratchPath $ScratchPath -Context "Montando boot.wim indice $index"
@@ -8733,7 +8734,7 @@ function Apply-AIOUpdateSetupDU {
     }
 
     Write-Host "`n=======================================================" -ForegroundColor DarkCyan
-    Write-Host ' APLICANDO SETUP DYNAMIC UPDATE' -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'actualizaciones.hdr_setup_du') -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor DarkCyan
 
     $extractRoot = Join-Path $StagingRoot 'SetupDU_Media'
@@ -8951,7 +8952,7 @@ function Get-AIOUpdateBootSignature {
         Subject = ''
         Issuer = ''
         Thumbprint = ''
-        Message = 'El archivo no existe.'
+        Message = (Get-AIOString 'actualizaciones.file_not_found')
     }
     if (Test-Path -LiteralPath $Path -PathType Leaf) {
         $result.Signer = 'Unknown'
@@ -8967,7 +8968,7 @@ function Get-AIOUpdateBootSignature {
             switch ($result.NativeCodeHex) {
                 '0x00000000' { $result.Status = 'Valid'; $result.Message = 'Firma incorporada validada por Windows.' }
                 '0x80096010' { $result.Status = 'HashMismatch'; $result.Message = 'El contenido no coincide con la firma incorporada.' }
-                '0x800B0100' { $result.Status = 'NotSigned'; $result.Message = 'No hay una firma incorporada verificable.' }
+                '0x800B0100' { $result.Status = 'NotSigned'; $result.Message = Get-AIOString 'actualizaciones.sig_not_embedded' }
                 '0x800B0109' { $result.Status = 'UntrustedRoot'; $result.Message = 'El equipo anfitrion no confia en la raiz del certificado.' }
                 '0x800B010A' { $result.Status = 'IncompleteChain'; $result.Message = 'Windows no pudo construir la cadena de confianza.' }
                 '0x800B0101' { $result.Status = 'Expired'; $result.Message = 'Windows rechazo la vigencia de la firma o de su certificado.' }
@@ -9802,7 +9803,7 @@ function Invoke-AIOUpdateMediaIntegration {
                     $winreMetadata = @(Get-AIOUpdateImageMetadata -ImagePath $sourceWinRE)
                     if ($winreMetadata.Count -ne 1) { throw "WinRE del indice $winreIndex no contiene una unica imagen." }
                     $policy = Get-AIOUpdateWinREPolicy -Build ([version]$winreMetadata[0].Version).Build -Inventory $effectiveInventory -Architecture (Convert-AIOUpdateArchitectureName -Architecture $winreMetadata[0].Architecture)
-                    Write-Host "`nPolitica WinRE indice ${winreIndex}: $($policy.Reason)" -ForegroundColor Gray
+                    Write-Host (Get-AIOString 'actualizaciones.winre_policy_line' $winreIndex $policy.Reason) -ForegroundColor Gray
                     $updated = Update-AIOUpdateWinRE -SourceWinRE $sourceWinRE -DestinationWinRE $updatedWinRE -WinREMount $winreMount -ScratchPath $dismScratch -Inventory $effectiveInventory -Policy $policy -OptimizeWim ([bool]$OptimizeWims) -VerifyPrePostCommit $VerifyPrePostCommit -VerificationReports $verificationReports
                     $updated | Add-Member -NotePropertyName SourceHash -NotePropertyValue $originalHash -Force
                     $winreCache[$originalHash] = $updated
@@ -9860,7 +9861,7 @@ function Invoke-AIOUpdateMediaIntegration {
         if ($ApplySetupDU) {
             $script:AIOUpdateCurrentPhase = 'Aplicacion de Setup Dynamic Update'
             if ($setupPackages.Count -eq 0) {
-                Write-Host ' [OMITIDO] SetupDU solicitado, pero no se encontraron paquetes de esa categoria.' -ForegroundColor DarkGray
+                Write-Host (Get-AIOString 'actualizaciones.setupdu_omitted') -ForegroundColor DarkGray
             }
             else {
                 $setupResult = Apply-AIOUpdateSetupDU -MediaRoot $media -Packages $setupPackages -StagingRoot $stagingRoot -DependencyFiles $setupDependencyFiles
@@ -9945,7 +9946,7 @@ function Invoke-AIOUpdateMediaIntegration {
 
         $failed = @($verificationReports | Where-Object { -not $_.Success })
         Write-Host "`n=======================================================" -ForegroundColor DarkCyan
-        Write-Host '             RESUMEN FINAL DE VERIFICACION' -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'actualizaciones.summary_title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor DarkCyan
         foreach ($report in $verificationReports) { Write-AIOUpdateVerificationReport -Report $report }
         Write-AIOUpdateConsolidatedRejuvSummary -Reports ([object[]]($verificationReports.ToArray()))
@@ -9988,8 +9989,8 @@ function Invoke-AIOUpdateMediaIntegration {
 
         Write-AIOUpdateLog -Level INFO -Message "Integracion completada y verificada. Reporte JSON='$($structuredReport.JsonPath)'; HTML='$($structuredReport.HtmlPath)'."
         Write-AIOUpdateLog -Level INFO -Message ("Optimizacion: HashCacheHits={0}; HashCacheMisses={1}; CbsCacheHits={2}; RepositoryCacheHits={3}; DuplicadosOmitidos={4}." -f $script:AIOUpdateOptimizationStats.HashCacheHits, $script:AIOUpdateOptimizationStats.HashCacheMisses, $script:AIOUpdateOptimizationStats.CbsCacheHits, $script:AIOUpdateOptimizationStats.RepositoryCacheHits, $script:AIOUpdateOptimizationStats.DuplicatePackagesSkipped)
-        Write-Host " Reporte JSON: $($structuredReport.JsonPath)" -ForegroundColor DarkGray
-        Write-Host " Reporte HTML: $($structuredReport.HtmlPath)" -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'actualizaciones.report_json_lbl' $structuredReport.JsonPath) -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'actualizaciones.report_html_lbl' $structuredReport.HtmlPath) -ForegroundColor DarkGray
         $script:AIOUpdateLastTerminalState.Status = 'Success'
         $script:AIOUpdateLastTerminalState.Phase = 'Finalizacion'
         $script:AIOUpdateLastTerminalState.Message = 'La integracion de actualizaciones termino correctamente.'
@@ -10020,7 +10021,7 @@ function Invoke-AIOUpdateMediaIntegration {
                 $script:AIOUpdateStructuredReport = $diagnostic.Report
             }
             Write-AIOUpdateLog -Level ERROR -Message "Diagnostico automatico: $($script:AIOUpdateLastDiagnosticPath)"
-            Write-Host "`n Diagnostico automatico: $($script:AIOUpdateLastDiagnosticPath)" -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.auto_diag' $script:AIOUpdateLastDiagnosticPath) -ForegroundColor Yellow
         }
         catch {
             Write-AIOUpdateLog -Level WARN -Message "No se pudo generar el diagnostico automatico: $($_.Exception.Message)"
@@ -10032,18 +10033,18 @@ function Invoke-AIOUpdateMediaIntegration {
             Write-AIOUpdateLog -Level WARN -Message "Restauracion aplazada. Se conserva el respaldo '$($preflightBackup.Root)' y la sesion '$script:AIOUpdateSessionRoot'."
         }
         elseif ($preflightBackup -and $mediaMutationStarted) {
-            Write-Host "`nLa operacion fallo despues de iniciar cambios en el medio." -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.fail_after_mutation') -ForegroundColor Yellow
             if (Read-AIOUpdateYesNo -Prompt 'Restaurar automaticamente el medio al estado inicial' -Default $true) {
                 try {
                     $script:AIOUpdateCurrentPhase = 'Recuperacion'
                     [void](Restore-AIOUpdatePreflightBackup -PreflightRoot $preflightBackup.Root -TargetMediaRoot $media -Scope All)
                     $restorationStatus = 'Restaurado y verificado'
-                    Write-Host 'El medio fue restaurado y verificado correctamente.' -ForegroundColor Green
+                    Write-Host (Get-AIOString 'actualizaciones.media_restored_ok') -ForegroundColor Green
                     Write-AIOUpdateLog -Level INFO -Message "Medio restaurado desde '$($preflightBackup.Root)' despues del error."
                 }
                 catch {
                     $restorationStatus = "Fallo: $($_.Exception.Message)"
-                    Write-Host "[ERROR] No se pudo completar la restauracion automatica: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host (Get-AIOString 'actualizaciones.auto_restore_err' $_.Exception.Message) -ForegroundColor Red
                     Write-AIOUpdateLog -Level ERROR -Message "Fallo la restauracion automatica: $($_.Exception.Message)"
                 }
             }
@@ -10086,13 +10087,13 @@ function Invoke-AIOUpdateMediaIntegration {
                 Remove-Item -LiteralPath $script:AIOUpdateSessionRoot -Recurse -Force -ErrorAction SilentlyContinue
             }
             else {
-                Write-Host "Se conserva la sesion para recuperar los montajes pendientes: $script:AIOUpdateSessionRoot" -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'actualizaciones.session_kept' $script:AIOUpdateSessionRoot) -ForegroundColor Yellow
                 Write-AIOUpdateLog -Level WARN -Message "Limpieza aplazada: $script:AIOUpdateSessionRoot"
             }
             if ($persistentLog) {
                 $script:AIOUpdateLastPersistentLogPath = $persistentLog
                 if ($script:AIOUpdateLastTerminalState) { $script:AIOUpdateLastTerminalState.LogPath = $persistentLog }
-                Write-Host "Log de actualizaciones: $persistentLog" -ForegroundColor DarkGray
+                Write-Host (Get-AIOString 'actualizaciones.update_log_lbl' $persistentLog) -ForegroundColor DarkGray
             }
         }
 
@@ -10142,10 +10143,10 @@ function Read-AIOUpdateYesNo {
 
         if ([string]::IsNullOrWhiteSpace($answer)) {
             if ($null -ne $Default) { return [bool]$Default }
-            Write-Host 'Se requiere confirmacion explicita. Escribe S o N.' -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.yn_explicit') -ForegroundColor Yellow
         }
         else {
-            Write-Host 'Respuesta invalida. Escribe S o N.' -ForegroundColor Red
+            Write-Host (Get-AIOString 'actualizaciones.yn_invalid') -ForegroundColor Red
         }
     }
 }
@@ -10158,7 +10159,7 @@ function Show-AIOUpdateInventorySummary {
 
     foreach ($entry in @(Get-AIOUpdateInventorySummary -Inventory $Inventory)) {
         $color = if ($entry.Count -gt 0) { 'Green' } else { 'DarkGray' }
-        Write-Host (" {0,-11}: {1,3} paquete(s) | {2}" -f $entry.Category, $entry.Count, (Format-AIOUpdateByteSize -Bytes $entry.Size)) -ForegroundColor $color
+        Write-Host (Get-AIOString 'actualizaciones.inv_summary_row' $entry.Category $entry.Count (Format-AIOUpdateByteSize -Bytes $entry.Size)) -ForegroundColor $color
     }
 }
 
@@ -10169,7 +10170,7 @@ function Show-AIOUpdatePreflightRestoreMenu {
 
     Clear-Host
     Write-Host '=======================================================' -ForegroundColor Cyan
-    Write-Host '              Restaurador de respaldo Preflight' -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'actualizaciones.restore_menu_title') -ForegroundColor Cyan
     Write-Host '=======================================================' -ForegroundColor Cyan
     Write-Host ''
 
@@ -10184,18 +10185,18 @@ function Show-AIOUpdatePreflightRestoreMenu {
         if (-not $target) { return }
     }
 
-    Write-Host " Respaldo : $($context.Root)" -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.backup_lbl' $context.Root) -ForegroundColor White
     Write-Host " Creado   : $($manifest.CreatedAt)" -ForegroundColor White
-    Write-Host " Archivos : $($manifest.FileCount)" -ForegroundColor White
-    Write-Host " Destino  : $target" -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.manifest_files' $manifest.FileCount) -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.dest_lbl' $target) -ForegroundColor White
     Write-Host ''
-    Write-Host ' [1] Restaurar todo el medio respaldado' -ForegroundColor White
-    Write-Host ' [2] Restaurar solamente install.wim' -ForegroundColor White
-    Write-Host ' [3] Restaurar solamente boot.wim' -ForegroundColor White
-    Write-Host ' [4] Restaurar Setup, sources y archivos de arranque' -ForegroundColor White
-    Write-Host ' [V] Volver' -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'actualizaciones.restore_opt1') -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.restore_opt2') -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.restore_opt3') -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.restore_opt4') -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.restore_opt_back') -ForegroundColor DarkGray
 
-    $selection = (Read-MenuOption 'Seleccion').Trim().ToUpperInvariant()
+    $selection = (Read-MenuOption (Get-AIOString 'actualizaciones.selection_prompt')).Trim().ToUpperInvariant()
     $scope = switch ($selection) {
         '1' { 'All' }
         '2' { 'InstallWim' }
@@ -10209,10 +10210,10 @@ function Show-AIOUpdatePreflightRestoreMenu {
         throw "El respaldo no es valido: $($validation.Errors -join ' ')"
     }
 
-    Write-Host "`nLa restauracion reemplazara archivos del medio seleccionado." -ForegroundColor Yellow
-    $confirmation = (Read-Host 'Escribe RESTAURAR para confirmar').Trim().ToUpperInvariant()
+    Write-Host (Get-AIOString 'actualizaciones.restore_replace_warn') -ForegroundColor Yellow
+    $confirmation = (Read-Host (Get-AIOString 'actualizaciones.restore_confirm_prompt')).Trim().ToUpperInvariant()
     if ($confirmation -ne 'RESTAURAR') {
-        Write-Host 'Restauracion cancelada.' -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'actualizaciones.restore_cancelled') -ForegroundColor Yellow
         return
     }
 
@@ -10240,33 +10241,33 @@ function Show-UpdatesIntegrator-Menu {
     [void](Initialize-AIOUpdateTerminalState)
     Clear-Host
     Write-Host '=======================================================' -ForegroundColor Cyan
-    Write-Host '             INTEGRADOR DE ACTUALIZACIONES             ' -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'actualizaciones.menu_title') -ForegroundColor Cyan
     Write-Host '=======================================================' -ForegroundColor Cyan
     Write-Host ''
-    Write-Host ' Principal: install.wim | Opcionales: winre.wim + boot.wim + SetupDU' -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.menu_subtitle') -ForegroundColor White
     Write-Host ''
 
     if (-not (Test-AIOUpdateAdministrator)) {
-        Write-Host '[ERROR] Ejecuta AdminImagenOffline como Administrador.' -ForegroundColor Red
+        Write-Host (Get-AIOString 'actualizaciones.admin_required') -ForegroundColor Red
         Wait-AIOUpdateUser
         return
     }
 
     if ($Script:IMAGE_MOUNTED -gt 0) {
-        Write-Host '[BLOQUEADO] Hay una imagen montada en AdminImagenOffline.' -ForegroundColor Yellow
-        Write-Host 'Desmontala antes de iniciar la integracion masiva.' -ForegroundColor Gray
+        Write-Host (Get-AIOString 'actualizaciones.mounted_blocked') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'actualizaciones.mounted_unmount_hint') -ForegroundColor Gray
         Wait-AIOUpdateUser
         return
     }
 
-    Write-Host '   [1] Integrar actualizaciones' -ForegroundColor Green
-    Write-Host '       SSU, LCU, Enablement, SafeOS, .NET y SetupDU sobre install.wim / winre.wim / boot.wim' -ForegroundColor Gray
+    Write-Host (Get-AIOString 'actualizaciones.menu_opt1') -ForegroundColor Green
+    Write-Host (Get-AIOString 'actualizaciones.menu_opt1_desc') -ForegroundColor Gray
     Write-Host ''
-    Write-Host '   [2] Restaurar un respaldo Preflight' -ForegroundColor Yellow
-    Write-Host '       Revierte install.wim, winre.wim y boot.wim al estado previo a la integracion' -ForegroundColor Gray
+    Write-Host (Get-AIOString 'actualizaciones.menu_opt2') -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'actualizaciones.menu_opt2_desc') -ForegroundColor Gray
     Write-Host ''
-    Write-Host '   [V] Volver al menu anterior' -ForegroundColor Red
-    $operationMode = (Read-MenuOption 'Seleccion').Trim().ToUpperInvariant()
+    Write-Host (Get-AIOString 'common.back_previous') -ForegroundColor Red
+    $operationMode = (Read-MenuOption (Get-AIOString 'actualizaciones.selection_prompt')).Trim().ToUpperInvariant()
     if ($operationMode -eq '2') {
         try {
             $adkInfo = Initialize-AIOUpdateServicingEnvironment
@@ -10276,7 +10277,7 @@ function Show-UpdatesIntegrator-Menu {
             Show-AIOUpdatePreflightRestoreMenu
         }
         catch {
-            Write-Host "`n[ERROR] $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host (Get-AIOString 'actualizaciones.err_line' $_.Exception.Message) -ForegroundColor Red
             Write-AIOUpdateLog -Level ERROR -Message "Restauracion Preflight: $($_.Exception.Message)"
             Wait-AIOUpdateUser
         }
@@ -10284,7 +10285,7 @@ function Show-UpdatesIntegrator-Menu {
     }
     if ($operationMode -ne '1') {
         if ($operationMode -ne 'V') {
-            Write-Host 'Opcion invalida.' -ForegroundColor Red
+            Write-Host (Get-AIOString 'common.invalid_option') -ForegroundColor Red
             Start-Sleep -Seconds 1
         }
         return
@@ -10318,7 +10319,7 @@ function Show-UpdatesIntegrator-Menu {
         $defaultRepository = Join-Path $script:AIOUpdateApplicationRoot 'Actualizaciones'
         if (Test-Path -LiteralPath $defaultRepository -PathType Container) {
             $defaultRepository = (Resolve-Path -LiteralPath $defaultRepository -ErrorAction Stop).Path
-            Write-Host "`nRepositorio detectado: $defaultRepository" -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'actualizaciones.repo_detected' $defaultRepository) -ForegroundColor Cyan
             if (Read-AIOUpdateYesNo -Prompt 'Usar este repositorio' -Default $true) {
                 $repositoryRoot = $defaultRepository
             }
@@ -10349,15 +10350,15 @@ function Show-UpdatesIntegrator-Menu {
 
         Clear-Host
         Write-Host '=======================================================' -ForegroundColor Cyan
-        Write-Host '                    RESUMEN PREVIO                     ' -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'actualizaciones.preview_title') -ForegroundColor Cyan
         Write-Host '=======================================================' -ForegroundColor Cyan
-        Write-Host " Medio       : $mediaRoot" -ForegroundColor White
-        Write-Host " Paquetes    : $repositoryRoot" -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.preview_media' $mediaRoot) -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.preview_packages' $repositoryRoot) -ForegroundColor White
         Show-AIOUpdateAdkStatus -AdkInfo $adkInfo
         Write-Host ''
         Show-AIOUpdateInventorySummary -Inventory $inventory
 
-        Write-Host "`n Clasificacion detectada:" -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'actualizaciones.preview_class') -ForegroundColor Yellow
         foreach ($item in @($inventory | Where-Object { $_.Installable } | Sort-Object Category, Name)) {
             $checkpointTag = if ($item.IsCheckpoint) { ' [CHECKPOINT]' } else { '' }
             Write-Host ("   [{0,-10}] {1}{2}" -f $item.Category, $item.Name, $checkpointTag) -ForegroundColor White
@@ -10366,20 +10367,20 @@ function Show-UpdatesIntegrator-Menu {
 
         $auxiliary = @($inventory | Where-Object { $_.Auxiliary })
         if ($auxiliary.Count -gt 0) {
-            Write-Host "`n [PAQUETES AUXILIARES/COMPDB - NO INSTALABLES DIRECTAMENTE]" -ForegroundColor DarkYellow
+            Write-Host (Get-AIOString 'actualizaciones.aux_hdr') -ForegroundColor DarkYellow
             foreach ($item in $auxiliary) { Write-Host "   - $($item.Name)" -ForegroundColor DarkGray }
-            Write-Host '   Los usa para reconstruir MSU cuando existen fragmentos WIM/PSF;' -ForegroundColor DarkGray
-            Write-Host '   con MSU completos no se envian a DISM /Add-Package.' -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.aux_l1') -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.aux_l2') -ForegroundColor DarkGray
         }
 
         $unknown = @($inventory | Where-Object { $_.Category -eq 'Unknown' })
         if ($unknown.Count -gt 0) {
-            Write-Host "`n [NO CLASIFICADOS - OMITIDOS POR SEGURIDAD]" -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.unclass_hdr') -ForegroundColor Yellow
             foreach ($item in $unknown) {
                 Write-Host "   - $($item.Name)" -ForegroundColor Gray
                 Write-Host "     $($item.Reason)" -ForegroundColor DarkGray
             }
-            Write-Host '   Mueve un paquete confirmado a una subcarpeta de categoria para usar una anulacion manual.' -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.unclass_hint') -ForegroundColor DarkGray
         }
 
         $indexes = Select-AIOUpdateInstallIndexes -Images $installImages
@@ -10387,9 +10388,9 @@ function Show-UpdatesIntegrator-Menu {
         $prepareWindows10Esu = $false
         $esuTargets = @(Get-AIOUpdateWindows10EsuTargets -Inventory $inventory -Compatibility $compatibility)
         if ($esuTargets.Count -gt 0) {
-            Write-Host "`n [ESU] Se detectaron acumulativas para Windows 10 cliente no LTSC." -ForegroundColor Yellow
-            Write-Host ' El metodo offline (no oficial) modifica el componente de comprobacion ESU para la integracion offline.' -ForegroundColor DarkGray
-            Write-Host ' La modificacion permanece en install.wim; no activa una licencia ESU. Preflight permite restaurar el medio.' -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.esu_detected') -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.esu_l1') -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.esu_l2') -ForegroundColor DarkGray
             $prepareWindows10Esu = Read-AIOUpdateYesNo -Prompt 'Preparar integracion ESU offline' -Default $false
         }
         Assert-AIOUpdateEsuPrerequisites -Inventory $inventory -Compatibility $compatibility -PrepareWindows10Esu:$prepareWindows10Esu
@@ -10401,7 +10402,7 @@ function Show-UpdatesIntegrator-Menu {
                 }
         )
         if ($incompatible.Count -gt 0) {
-            Write-Host "`n [OMITIDOS POR COMPATIBILIDAD]" -ForegroundColor DarkYellow
+            Write-Host (Get-AIOString 'actualizaciones.compat_skipped_hdr') -ForegroundColor DarkYellow
             foreach ($item in $incompatible) {
                 $test = Test-AIOUpdatePackageCompatibleWithImages -Package $item -Compatibility $compatibility
                 Write-Host "   - $($item.Name): $($test.Reason)" -ForegroundColor DarkGray
@@ -10409,13 +10410,13 @@ function Show-UpdatesIntegrator-Menu {
         }
 
         if (@($inventory | Where-Object { $_.Category -eq 'ESU' }).Count -gt 0) {
-            Write-Host "`n [ESU] Los paquetes de preparacion/licenciamiento se integran por separado; no acreditan activacion ESU." -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.esu_prep_note') -ForegroundColor Yellow
         }
 
-        Write-Host "`n Configuracion:" -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'actualizaciones.config_header') -ForegroundColor Yellow
         $updateWinRE = Read-AIOUpdateYesNo -Prompt 'Actualizar y reinyectar winre.wim' -Default $true
         if ($updateWinRE) {
-            Write-Host ' WinRE: SSU + SafeOS; la LCU combinada solo prepara la pila de mantenimiento.' -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.winre_ssu_note') -ForegroundColor DarkGray
         }
 
         $updateBootWim = $false
@@ -10423,7 +10424,7 @@ function Show-UpdatesIntegrator-Menu {
             $updateBootWim = Read-AIOUpdateYesNo -Prompt 'Actualizar boot.wim y sincronizar binarios de arranque' -Default $true
         }
         else {
-            Write-Host ' [OMITIDO] El medio no contiene sources\boot.wim.' -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.no_boot_wim') -ForegroundColor DarkGray
         }
 
         $setupPackages = @(Get-AIOUpdatePackages -Inventory $inventory -Category @('SetupDU'))
@@ -10432,16 +10433,16 @@ function Show-UpdatesIntegrator-Menu {
             $applySetupDU = Read-AIOUpdateYesNo -Prompt 'Aplicar Setup Dynamic Update al medio' -Default $true
         }
         else {
-            Write-Host ' [OMITIDO] No se detectaron paquetes SetupDU.' -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.no_setupdu') -ForegroundColor DarkGray
         }
 
-        Write-Host ' Reaplicacion de paquetes presentes: Automatica.' -ForegroundColor Yellow
-        Write-Host ' Los paquetes Installed, InstallPending o Superseded se enviaran nuevamente a DISM sin desinstalarlos.' -ForegroundColor DarkGray
-        Write-Host ' CBS puede aceptar el paquete o indicar que la reaplicacion no es necesaria/aplicable.' -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'actualizaciones.reapply_auto') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'actualizaciones.reapply_l1') -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'actualizaciones.reapply_l2') -ForegroundColor DarkGray
 
         $bootSigningPolicy = 'Preserve'
         if ($updateBootWim) {
-            Write-Host ' Arranque UEFI: automatico; se conserva el firmante verificado del medio.' -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.uefi_auto') -ForegroundColor Yellow
         }
         $cleanup = Read-AIOUpdateYesNo -Prompt 'Ejecutar StartComponentCleanup en install.wim'  -Default $true
         $resetBase = $false
@@ -10450,7 +10451,7 @@ function Show-UpdatesIntegrator-Menu {
         }
 
         $verifyPrePostCommit = Read-AIOUpdateYesNo -Prompt 'Ejecutar verificaciones completas Pre/Post-Commit' -Default $true
-        Write-Host ' Las consultas CBS durante la integracion y las comprobaciones de copia e integridad se mantienen.' -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'actualizaciones.cbs_checks_kept') -ForegroundColor DarkGray
 
         $exportSingleIndex = $false
         if ($indexes.Count -eq 1 -and $installImages.Count -gt 1) {
@@ -10463,20 +10464,20 @@ function Show-UpdatesIntegrator-Menu {
             $updateWimCreationTime = Read-AIOUpdateYesNo -Prompt 'Igualar CREATIONTIME interno con LASTMODIFICATIONTIME' -Default $true
         }
         else {
-            Write-Host ' [OMITIDO] Fecha interna del WIM: falta AdminImagenOffline\Tools\wimlib\wimlib-imagex.exe o una instalacion disponible en PATH.' -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.wimlib_missing_date') -ForegroundColor DarkGray
         }
 
         Write-Host "`n=======================================================" -ForegroundColor DarkCyan
-        Write-Host ' PLAN DE EJECUCION' -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'actualizaciones.plan_title') -ForegroundColor Cyan
         Write-Host '=======================================================' -ForegroundColor DarkCyan
-        Write-Host " Indices install.wim : $($indexes -join ', ')" -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.plan_indexes' ($indexes -join ', ')) -ForegroundColor White
         $installOutput = if ($exportSingleIndex) { "solo la edicion seleccionada; indice final 1 (original: $($indexes[0]))" } else { 'se conservan todos los indices del WIM' }
-        Write-Host " Salida install.wim  : $installOutput" -ForegroundColor White
-        Write-Host " WinRE               : $updateWinRE | SSU + SafeOS; MSU combinado solo para SSU" -ForegroundColor White
-        Write-Host " Preparacion ESU     : $prepareWindows10Esu (solo indices Windows 10 cliente no LTSC aplicables)" -ForegroundColor White
-        Write-Host " Limpieza install.wim : $cleanup | ResetBase: $resetBase" -ForegroundColor White
-        if ($updateWinRE -or $updateBootWim) { Write-Host ' Limpieza WinRE/Boot  : Automatica + ResetBase (se aplaza con operaciones pendientes)' -ForegroundColor White }
-        if ($updateBootWim) { Write-Host " Firma UEFI           : $bootSigningPolicy" -ForegroundColor White }
+        Write-Host (Get-AIOString 'actualizaciones.plan_output' $installOutput) -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.plan_winre' $updateWinRE) -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.plan_esu' $prepareWindows10Esu) -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.plan_cleanup' $cleanup $resetBase) -ForegroundColor White
+        if ($updateWinRE -or $updateBootWim) { Write-Host (Get-AIOString 'actualizaciones.plan_cleanup_winre') -ForegroundColor White }
+        if ($updateBootWim) { Write-Host (Get-AIOString 'actualizaciones.plan_uefi' $bootSigningPolicy) -ForegroundColor White }
         $bootPlan = if ($updateBootWim) { 'Si, todos los indices' } else { 'No' }
         $setupPlan = if (-not $applySetupDU) {
             'No'
@@ -10487,17 +10488,17 @@ function Show-UpdatesIntegrator-Menu {
         else {
             'Si (solo medio; boot.wim omitido)'
         }
-        Write-Host " boot.wim            : $bootPlan" -ForegroundColor White
-        Write-Host " SetupDU             : $setupPlan" -ForegroundColor White
-        Write-Host " Reaplicar presentes : Automatico (sin desinstalar)" -ForegroundColor White
-        Write-Host " Verif. Pre/Post     : $verifyPrePostCommit" -ForegroundColor White
-        Write-Host " Optimizar WIM       : $optimizeWims (incluye WinRE si se actualiza)" -ForegroundColor White
-        if ($exportSingleIndex) { Write-Host ' Exportar edicion unica: activado (se eliminaran los demas indices al exportar).' -ForegroundColor DarkGray }
-        Write-Host " Fecha CREATIONTIME  : $updateWimCreationTime" -ForegroundColor White
-        Write-Host " Respaldo previo     : Obligatorio, antes del primer montaje" -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.plan_boot' $bootPlan) -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.plan_setupdu' $setupPlan) -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.plan_reapply') -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.plan_verify' $verifyPrePostCommit) -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.plan_optimize' $optimizeWims) -ForegroundColor White
+        if ($exportSingleIndex) { Write-Host (Get-AIOString 'actualizaciones.plan_single_idx') -ForegroundColor DarkGray }
+        Write-Host (Get-AIOString 'actualizaciones.plan_creationtime' $updateWimCreationTime) -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.plan_backup') -ForegroundColor White
         Write-Host ''
 
-        $start = (Read-MenuOption 'Escribe I para INICIAR o V para volver').Trim().ToUpperInvariant()
+        $start = (Read-MenuOption (Get-AIOString 'actualizaciones.start_prompt')).Trim().ToUpperInvariant()
         if ($start -ne 'I') {
             $script:AIOUpdateLastTerminalState.Status = 'Cancelled'
             $script:AIOUpdateLastTerminalState.Phase = 'Confirmacion del plan'

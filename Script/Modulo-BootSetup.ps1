@@ -303,7 +303,7 @@ function Get-AIOBootLegacySetupStatus {
     try {
         $ini = Join-Path $MountPath 'Windows\System32\winpeshl.ini' -ErrorAction Stop
         if (-not (Test-Path -LiteralPath $ini -ErrorAction Stop)) {
-            return [pscustomobject]@{ State = 'NotConfigured'; Label = '[NO CONFIGURADO]'; Color = 'DarkGray' }
+            return [pscustomobject]@{ State = 'NotConfigured'; Label = (Get-AIOString 'bootsetup.badge_not_configured'); Color = 'DarkGray' }
         }
         # Leer el contenido del montaje cada vez que se dibuja el menu.
         # No depender del respaldo JSON ni de variables de la sesion anterior.
@@ -312,15 +312,15 @@ function Get-AIOBootLegacySetupStatus {
         $launcher = '(?:"(?:%SYSTEMDRIVE%|X:)\\setup\.exe"|(?:%SYSTEMDRIVE%|X:)\\setup\.exe)'
         if ($lines.Count -eq 2 -and $lines[0] -ieq '[LaunchApps]' -and
             $lines[1] -match ('(?i)^' + $launcher + '\s*,\s*/legacy\s*$')) {
-            return [pscustomobject]@{ State = 'Legacy'; Label = '[LEGACY ACTIVO]'; Color = 'Green' }
+            return [pscustomobject]@{ State = 'Legacy'; Label = (Get-AIOString 'bootsetup.badge_legacy_active'); Color = 'Green' }
         }
         if (Test-AIOBootStandardShell -Path $ini) {
-            return [pscustomobject]@{ State = 'NotConfigured'; Label = '[NO CONFIGURADO]'; Color = 'DarkGray' }
+            return [pscustomobject]@{ State = 'NotConfigured'; Label = (Get-AIOString 'bootsetup.badge_not_configured'); Color = 'DarkGray' }
         }
-        return [pscustomobject]@{ State = 'Custom'; Label = '[OTRA CONFIGURACION]'; Color = 'Yellow' }
+        return [pscustomobject]@{ State = 'Custom'; Label = (Get-AIOString 'bootsetup.badge_other_config'); Color = 'Yellow' }
     } catch {
         # Un error de lectura no equivale a que el archivo no exista.
-        return [pscustomobject]@{ State = 'Unreadable'; Label = '[NO SE PUDO LEER]'; Color = 'Red' }
+        return [pscustomobject]@{ State = 'Unreadable'; Label = (Get-AIOString 'bootsetup.badge_unreadable'); Color = 'Red' }
     }
 }
 
@@ -437,7 +437,7 @@ function Set-AIOBootSetupMode {
     Assert-AIOBootSetupConfiguration -MountPath $MountPath -Expected $expected
     $launchDescription = if ($Mode -eq 'Legacy') { 'Lanzador: %SYSTEMDRIVE%\setup.exe, /legacy.' } else { 'Inicio original recuperado.' }
     Write-Log -LogLevel INFO -Message "BootWimManager: Configuracion Setup verificada en el montaje. Modo: $Mode. $launchDescription"
-    Write-Host '[OK] Configuracion preparada y verificada. Elige T y luego S para guardarla en boot.wim.' -ForegroundColor Green
+    Write-Host (Get-AIOString 'bootsetup.ok_prepared') -ForegroundColor Green
     return $expected
 }
 
@@ -496,14 +496,14 @@ function Get-AIOBootBackgroundStatus {
         $relative = if ($Media) { 'AdminImagenOffline.SetupMediaBackground.json' } else { 'Windows\System32\AdminImagenOffline.SetupBackground.json' }
         $path = Join-Path $MountPath $relative -ErrorAction Stop
         if (-not (Test-Path -LiteralPath $path -ErrorAction Stop)) {
-            return [pscustomobject]@{ Label = '[SIN REGISTRO]'; Color = 'DarkGray' }
+            return [pscustomobject]@{ Label = (Get-AIOString 'bootsetup.badge_no_record'); Color = 'DarkGray' }
         }
         $backup = Get-AIOBootBackgroundBackup -Path $path -Media:$Media
         foreach ($entry in @($backup.Files)) {
             $file = Join-Path $MountPath $entry.RelativePath
             if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or
                 (Get-FileHash -LiteralPath $file -Algorithm SHA256 -ErrorAction Stop).Hash -ne $entry.AppliedHash) {
-                return [pscustomobject]@{ Label = '[MODIFICADO/INCOMPLETO]'; Color = 'Yellow' }
+                return [pscustomobject]@{ Label = (Get-AIOString 'bootsetup.badge_modified_incomplete'); Color = 'Yellow' }
             }
         }
         $recorded = @($backup.Files | ForEach-Object { $_.RelativePath })
@@ -511,17 +511,17 @@ function Get-AIOBootBackgroundStatus {
             Test-Path -LiteralPath (Join-Path $MountPath $_) -PathType Leaf
         })
         if ($present.Count -ne $recorded.Count -or @($present | Where-Object { $_ -notin $recorded }).Count -gt 0) {
-            return [pscustomobject]@{ Label = '[MODIFICADO/INCOMPLETO]'; Color = 'Yellow' }
+            return [pscustomobject]@{ Label = (Get-AIOString 'bootsetup.badge_modified_incomplete'); Color = 'Yellow' }
         }
         if (@($backup.Files | Where-Object { Get-AIOBootBackgroundSkipReason $_ }).Count -gt 0) {
-            return [pscustomobject]@{ Label = '[PARCIAL: ASISTENTE PENDIENTE]'; Color = 'Yellow' }
+            return [pscustomobject]@{ Label = (Get-AIOString 'bootsetup.badge_partial_wizard'); Color = 'Yellow' }
         }
-        return [pscustomobject]@{ Label = '[PERSONALIZADO]'; Color = 'Green' }
+        return [pscustomobject]@{ Label = (Get-AIOString 'bootsetup.badge_customized'); Color = 'Green' }
     } catch {
         if ($_.Exception.Message -like 'Respaldo de fondo incompatible:*') {
-            return [pscustomobject]@{ Label = '[RESPALDO INCOMPATIBLE]'; Color = 'Yellow' }
+            return [pscustomobject]@{ Label = (Get-AIOString 'bootsetup.badge_incompat_backup'); Color = 'Yellow' }
         }
-        return [pscustomobject]@{ Label = '[NO VERIFICABLE]'; Color = 'Red' }
+        return [pscustomobject]@{ Label = (Get-AIOString 'bootsetup.badge_unverifiable'); Color = 'Red' }
     }
 }
 
@@ -712,7 +712,7 @@ function ConvertTo-AIOBootWizardBackgroundState {
         }
         if (@($probes | Where-Object { $_.Result.MissingError -eq 0 }).Count -eq 0) {
             Write-Log -LogLevel WARN -Message "BootBackground: $origin no contiene BITMAP/517 ni IMAGE/517 reconocidos. DLL conservada sin escribir; personalizacion parcial del asistente."
-            Write-Warning "Se conserva ${origin}: no contiene un fondo 517 reconocido. Se prepararan los recursos compatibles; el fondo de esta variante del asistente queda pendiente."
+            Write-Warning (Get-AIOString 'bootsetup.warn_keep_origin' $origin)
             return [pscustomobject]@{ RelativePath = $Entry.RelativePath; State = $Entry.State; SkipReason = 'MissingBackground517' }
         }
         $plans = @()
@@ -1014,9 +1014,9 @@ function Set-AIOBootBackground {
     $prepared = @($desired | Where-Object { -not (Get-AIOBootBackgroundSkipReason $_) })
     Write-Log -LogLevel INFO -Message "BootWimManager: Recursos de fondo $Mode verificados; preparados=$($prepared.Count), DLL sin modificar=$($skipped.Count). Preparados: $($prepared.RelativePath -join ', '). Validacion visual pendiente de arranque."
     if ($skipped.Count -gt 0) {
-        Write-Warning 'Personalizacion parcial: se prepararon los fondos compatibles y se conservaron DLL sin fondos BITMAP/517 o IMAGE/517 reconocidos. El fondo de esas variantes del asistente queda pendiente.'
+        Write-Warning (Get-AIOString 'bootsetup.warn_partial_bg')
     }
-    Write-Host '[OK] Recursos compatibles preparados. Elige T y S para guardar; comprueba el resultado al arrancar.' -ForegroundColor Green
+    Write-Host (Get-AIOString 'bootsetup.ok_compat_prepared') -ForegroundColor Green
     return $expected
 }
 
@@ -1855,7 +1855,7 @@ function Show-BootSetup-GUI {
     Add-Type -AssemblyName System.Drawing -ErrorAction Stop
     $view = [pscustomobject]@{ Busy = $false }
     $form = New-Object Windows.Forms.Form
-    $form.Text = 'Setup Legacy, clasico Windows 10 y fondos - boot.wim'
+    $form.Text = Get-AIOString 'bootsetup.form_title'
     $form.AutoScaleDimensions = New-Object Drawing.SizeF(96,96)
     $form.AutoScaleMode = 'Dpi'
     $form.ClientSize = New-Object Drawing.Size(1080,720)
@@ -1906,9 +1906,9 @@ function Show-BootSetup-GUI {
         return $control
     }
 
-    $title = New-SetupLabel $form 'Personalizar Windows Setup' 18 12 1040 30
+    $title = New-SetupLabel $form (Get-AIOString 'bootsetup.ui_title') 18 12 1040 30
     $title.Font = $titleFont
-    $target = New-SetupLabel $form ("boot.wim: $($Session.BootPath)`r`nMontaje: $($Session.MountPath)") 18 45 1040 32
+    $target = New-SetupLabel $form (Get-AIOString 'bootsetup.ui_target_fmt' $Session.BootPath $Session.MountPath) 18 45 1040 32
     $target.Anchor = 'Top,Left,Right'
     $target.AutoEllipsis = $true
     $target.ForeColor = [Drawing.Color]::Silver
@@ -1920,9 +1920,9 @@ function Show-BootSetup-GUI {
     $tabs.Anchor = 'Top,Bottom,Left'
     $form.Controls.Add($tabs)
     $pageSetup = New-Object Windows.Forms.TabPage
-    $pageSetup.Text = 'Inicio y requisitos'
+    $pageSetup.Text = Get-AIOString 'bootsetup.tab_setup'
     $pageBackground = New-Object Windows.Forms.TabPage
-    $pageBackground.Text = 'Fondo de instalacion'
+    $pageBackground.Text = Get-AIOString 'bootsetup.tab_bg'
     foreach ($page in @($pageSetup,$pageBackground)) {
         $page.BackColor = $form.BackColor
         $page.ForeColor = $form.ForeColor
@@ -1932,30 +1932,30 @@ function Show-BootSetup-GUI {
     $tips.SetToolTip($tabs,'Configura el inicio y los requisitos, o abre la pestana Fondo de instalacion.')
     if (Get-Command Set-AIOTabControlStyle -ErrorAction SilentlyContinue) { Set-AIOTabControlStyle -TabControl $tabs }
 
-    $legacyGroup = New-SetupGroup $pageSetup 'Setup Legacy' 10 10 488 130
+    $legacyGroup = New-SetupGroup $pageSetup (Get-AIOString 'bootsetup.grp_legacy') 10 10 488 130
     $legacyStatus = New-SetupLabel $legacyGroup '' 12 23 464 20
-    $null = New-SetupLabel $legacyGroup 'Inicia el instalador con /legacy. El cambio conserva el inicio original para poder restaurarlo.' 12 46 464 34
-    $btnLegacy = New-SetupButton $legacyGroup 'Activar Setup Legacy' 12 87 222 'Configura winpeshl.ini: [LaunchApps] seguido de %SYSTEMDRIVE%\setup.exe, /legacy. No cambia BIOS/UEFI.' -Primary
-    $btnOriginal = New-SetupButton $legacyGroup 'Restaurar inicio original' 247 87 228 'Recupera el inicio original y elimina su respaldo al verificar la restauracion.'
+    $null = New-SetupLabel $legacyGroup (Get-AIOString 'bootsetup.desc_legacy') 12 46 464 34
+    $btnLegacy = New-SetupButton $legacyGroup (Get-AIOString 'bootsetup.btn_legacy') 12 87 222 (Get-AIOString 'bootsetup.tip_legacy') -Primary
+    $btnOriginal = New-SetupButton $legacyGroup (Get-AIOString 'bootsetup.btn_original') 247 87 228 (Get-AIOString 'bootsetup.tip_original')
 
-    $win10Group = New-SetupGroup $pageSetup 'Setup clasico estilo Windows 10' 10 150 488 152
+    $win10Group = New-SetupGroup $pageSetup (Get-AIOString 'bootsetup.grp_win10') 10 150 488 152
     $win10Status = New-SetupLabel $win10Group '' 12 22 464 32
     $win10Status.AutoEllipsis = $true
-    $null = New-SetupLabel $win10Group 'Renombra setupprep.exe en sources del indice y del medio. Necesita el medio completo; permite restaurar ambos.' 12 60 464 36
-    $btnWin10 = New-SetupButton $win10Group 'Activar estilo Windows 10' 12 106 222 'Renombra a setupprep.exe.aio.bak. El indice cambia al preparar; el medio externo cambia al guardar. Esta opcion es independiente de Legacy.' -Primary
-    $btnRestoreWin10 = New-SetupButton $win10Group 'Restaurar setupprep.exe' 247 106 228 'Devuelve el nombre original en ambas ubicaciones y conserva cualquier archivo ajeno al respaldo.'
+    $null = New-SetupLabel $win10Group (Get-AIOString 'bootsetup.desc_win10') 12 60 464 36
+    $btnWin10 = New-SetupButton $win10Group (Get-AIOString 'bootsetup.btn_win10') 12 106 222 (Get-AIOString 'bootsetup.tip_win10') -Primary
+    $btnRestoreWin10 = New-SetupButton $win10Group (Get-AIOString 'bootsetup.btn_restore_win10') 247 106 228 (Get-AIOString 'bootsetup.tip_restore_win10')
 
-    $bypassGroup = New-SetupGroup $pageSetup 'Requisitos de Windows 11' 10 312 488 134
+    $bypassGroup = New-SetupGroup $pageSetup (Get-AIOString 'bootsetup.grp_bypass') 10 312 488 134
     $bypassStatus = New-SetupLabel $bypassGroup '' 12 22 464 20
     $bypassStatus.AutoEllipsis = $true
-    $null = New-SetupLabel $bypassGroup 'Integra los bypass de TPM, Secure Boot y RAM para instalar al arrancar desde este medio.' 12 47 464 32
-    $btnBypass = New-SetupButton $bypassGroup 'Integrar bypass Win11' 12 89 222 'Activa los tres valores LabConfig en el SYSTEM offline del indice. No modifica el registro del equipo anfitrion ni elimina limites fisicos de CPU.' -Primary
-    $btnRestoreBypass = New-SetupButton $bypassGroup 'Restaurar requisitos' 247 89 228 'Restaura los valores previos de TPM, Secure Boot y RAM; si no existian, los elimina. Respeta otros valores del registro.'
+    $null = New-SetupLabel $bypassGroup (Get-AIOString 'bootsetup.desc_bypass') 12 47 464 32
+    $btnBypass = New-SetupButton $bypassGroup (Get-AIOString 'bootsetup.btn_bypass') 12 89 222 (Get-AIOString 'bootsetup.tip_bypass') -Primary
+    $btnRestoreBypass = New-SetupButton $bypassGroup (Get-AIOString 'bootsetup.btn_restore_bypass') 247 89 228 (Get-AIOString 'bootsetup.tip_restore_bypass')
 
     $backgroundStatus = New-SetupLabel $pageBackground '' 14 18 480 24
     $mediaStatus = New-SetupLabel $pageBackground '' 14 50 480 56
     $mediaStatus.AutoEllipsis = $true
-    $null = New-SetupLabel $pageBackground 'Elige un PNG, JPG o BMP de hasta 64 megapixeles. Recomendado: 1024 x 768 (4:3).' 14 116 480 38
+    $null = New-SetupLabel $pageBackground (Get-AIOString 'bootsetup.desc_bg_spec') 14 116 480 38
     $imagePath = New-Object Windows.Forms.TextBox
     $imagePath.Location = New-Object Drawing.Point(14,165)
     $imagePath.Size = New-Object Drawing.Size(480,25)
@@ -1964,13 +1964,13 @@ function Show-BootSetup-GUI {
     $imagePath.ForeColor = $form.ForeColor
     $pageBackground.Controls.Add($imagePath)
     $tips.SetToolTip($imagePath,'Ruta de la imagen elegida. Seleccionarla solo actualiza la vista previa; pulsa Preparar fondo para aplicarla al montaje.')
-    $btnBrowse = New-SetupButton $pageBackground 'Elegir imagen...' 14 204 200 'Selecciona la imagen y muestra su vista previa. Cancelar conserva la seleccion anterior.'
-    $btnBackground = New-SetupButton $pageBackground 'Preparar fondo elegido' 14 254 230 'Convierte y prepara los fondos compatibles, conservando formato, permisos y respaldos. El externo se escribe al guardar.' -Primary
-    $btnRestoreBackground = New-SetupButton $pageBackground 'Restaurar fondo original' 258 254 236 'Restaura los fondos internos y externos respaldados. No modifica las opciones de inicio ni los bypass.'
-    $null = New-SetupLabel $pageBackground 'La imagen se ajusta completa y centrada, sin deformar. Las DLL sin recurso de fondo compatible se conservan y aparecen en el resumen.' 14 308 480 53
-    $null = New-SetupLabel $pageBackground 'La silueta de la derecha es una referencia visual. No forma parte de la imagen que se integra.' 14 383 480 42
+    $btnBrowse = New-SetupButton $pageBackground (Get-AIOString 'bootsetup.btn_browse_img') 14 204 200 (Get-AIOString 'bootsetup.tip_browse_img')
+    $btnBackground = New-SetupButton $pageBackground (Get-AIOString 'bootsetup.btn_prepare_bg') 14 254 230 (Get-AIOString 'bootsetup.tip_prepare_bg') -Primary
+    $btnRestoreBackground = New-SetupButton $pageBackground (Get-AIOString 'bootsetup.btn_restore_bg') 258 254 236 (Get-AIOString 'bootsetup.tip_restore_bg')
+    $null = New-SetupLabel $pageBackground (Get-AIOString 'bootsetup.desc_bg_fit') 14 308 480 53
+    $null = New-SetupLabel $pageBackground (Get-AIOString 'bootsetup.desc_bg_silhouette') 14 383 480 42
 
-    $previewGroup = New-SetupGroup $form 'Vista previa ampliada' 553 84 509 490
+    $previewGroup = New-SetupGroup $form (Get-AIOString 'bootsetup.grp_preview') 553 84 509 490
     $previewGroup.Anchor = 'Top,Bottom,Left,Right'
     $preview = New-Object Windows.Forms.PictureBox
     $preview.Location = New-Object Drawing.Point(14,32)
@@ -1982,7 +1982,7 @@ function Show-BootSetup-GUI {
     $previewGroup.Controls.Add($preview)
     $tips.SetToolTip($preview,'Vista orientativa en 4:3. El aspecto final depende de la version de Setup, la resolucion y los recursos del medio.')
     $chkWizard = New-Object Windows.Forms.CheckBox
-    $chkWizard.Text = 'Mostrar silueta del asistente (simulacion)'
+    $chkWizard.Text = Get-AIOString 'bootsetup.chk_wizard'
     $chkWizard.Location = New-Object Drawing.Point(14,407)
     $chkWizard.Size = New-Object Drawing.Size(480,25)
     $chkWizard.Anchor = 'Bottom,Left,Right'
@@ -2002,11 +2002,11 @@ function Show-BootSetup-GUI {
     $summary.ForeColor = [Drawing.Color]::LightBlue
     $form.Controls.Add($summary)
     $tips.SetToolTip($summary,'Cambios pendientes, omisiones y errores. Un error de operacion bloquea guardar hasta corregirlo o descartar el montaje.')
-    $saveHint = New-SetupLabel $form 'Al volver: T y S para guardar, o T y N para descartar.' 18 685 655 22
+    $saveHint = New-SetupLabel $form (Get-AIOString 'bootsetup.save_hint') 18 685 655 22
     $saveHint.Anchor = 'Bottom,Left,Right'
-    $btnRefresh = New-SetupButton $form 'Actualizar estado' 702 677 158 'Vuelve a leer el estado de los archivos, respaldos y bypass del montaje.'
+    $btnRefresh = New-SetupButton $form (Get-AIOString 'bootsetup.btn_refresh') 702 677 158 (Get-AIOString 'bootsetup.tip_refresh')
     $btnRefresh.Anchor = 'Bottom,Right'
-    $btnClose = New-SetupButton $form 'Volver al menu' 875 677 187 'Cierra la ventana y conserva los cambios pendientes. Desde el menu puedes guardar o descartar.' -Primary
+    $btnClose = New-SetupButton $form (Get-AIOString 'bootsetup.btn_close_menu') 875 677 187 (Get-AIOString 'bootsetup.tip_close_menu') -Primary
     $btnClose.Anchor = 'Bottom,Right'; $btnClose.DialogResult = 'Cancel'; $form.CancelButton = $btnClose
 
     function Update-SetupView {
@@ -2017,7 +2017,7 @@ function Show-BootSetup-GUI {
         $tips.SetToolTip($legacyStatus,'Indica si winpeshl.ini inicia Setup con /legacy o conserva otro lanzador.')
         $internal = Get-AIOBootWin10Status -SourcesPath (Join-Path $Session.MountPath 'sources')
         $external = Get-AIOBootWin10Status -SourcesPath $Session.MediaSources -Media
-        $win10Status.Text = "Indice: $internal`r`nMedio: $external"
+        $win10Status.Text = Get-AIOString 'bootsetup.win10_status_fmt' $internal $external
         $tips.SetToolTip($win10Status,$win10Status.Text)
         $btnWin10.Enabled = -not [string]::IsNullOrWhiteSpace($Session.MediaSources)
         $hasWin10 = Test-Path -LiteralPath (Join-Path $Session.MountPath 'sources\AdminImagenOffline.SetupWin10.json')
@@ -2027,13 +2027,13 @@ function Show-BootSetup-GUI {
         $tips.SetToolTip($bypassStatus,$bypassStatus.Text)
         $btnRestoreBypass.Enabled = Test-Path -LiteralPath (Join-Path $Session.MountPath 'Windows\System32\AdminImagenOffline.SetupBypass.json')
         $state = Get-AIOBootBackgroundStatus -MountPath $Session.MountPath
-        $backgroundStatus.Text = "Fondo interno: $($state.Label)"
+        $backgroundStatus.Text = Get-AIOString 'bootsetup.bg_internal_fmt' $state.Label
         $hasBackground = Test-Path -LiteralPath (Join-Path $Session.MountPath 'Windows\System32\AdminImagenOffline.SetupBackground.json')
         if ($Session.MediaSources) {
             $state = Get-AIOBootBackgroundStatus -MountPath $Session.MediaSources -Media
-            $mediaStatus.Text = "Fondo externo: $($state.Label)`r`n$($Session.MediaSources)"
+            $mediaStatus.Text = Get-AIOString 'bootsetup.bg_external_fmt' $state.Label $Session.MediaSources
             $hasBackground = $hasBackground -or (Test-Path -LiteralPath (Join-Path $Session.MediaSources 'AdminImagenOffline.SetupMediaBackground.json'))
-        } else { $mediaStatus.Text = 'boot.wim aislado: los fondos se modifican solo dentro del indice. Para estilo Windows 10 abre sources\boot.wim del medio completo.' }
+        } else { $mediaStatus.Text = Get-AIOString 'bootsetup.bg_isolated' }
         $tips.SetToolTip($mediaStatus,$mediaStatus.Text)
         $tips.SetToolTip($backgroundStatus,'Estado verificado de los fondos internos. PARCIAL indica DLL conservadas sin recurso 517 compatible.')
         $btnRestoreBackground.Enabled = $hasBackground
@@ -2051,7 +2051,7 @@ function Show-BootSetup-GUI {
             $bitmap = [Drawing.Bitmap]::new(1024,768)
             $graphics = [Drawing.Graphics]::FromImage($bitmap)
             $graphics.Clear([Drawing.Color]::FromArgb(32,35,74))
-            $caption = 'Fondo de referencia. Elige una imagen en Fondo de instalacion.'
+            $caption = Get-AIOString 'bootsetup.preview_default'
             if ($Path) {
                 $source = [Drawing.Image]::FromFile($Path)
                 $formats = @([Drawing.Imaging.ImageFormat]::Jpeg.Guid,[Drawing.Imaging.ImageFormat]::Png.Guid,[Drawing.Imaging.ImageFormat]::Bmp.Guid)
@@ -2061,7 +2061,7 @@ function Show-BootSetup-GUI {
                 $scale = [Math]::Min(1024.0/$source.Width,768.0/$source.Height)
                 $width = [int][Math]::Round($source.Width*$scale); $height = [int][Math]::Round($source.Height*$scale)
                 $graphics.DrawImage($source,[Drawing.Rectangle]::new([int]((1024-$width)/2),[int]((768-$height)/2),$width,$height))
-                $caption = "Imagen: $($source.Width) x $($source.Height) px. Simulacion en 4:3."
+                $caption = Get-AIOString 'bootsetup.preview_loaded' $source.Width $source.Height
             }
             $old = $preview.Image; $preview.Image = $bitmap; $bitmap = $null
             if ($null -ne $old) { $old.Dispose() }
@@ -2119,7 +2119,7 @@ function Show-BootSetup-GUI {
         try { $ErrorActionPreference = 'Stop'; & $Action }
         catch {
             Write-Log -LogLevel ERROR -Message "BootSetupGUI: ${Description}: $($_.Exception.Message)"
-            [void][Windows.Forms.MessageBox]::Show($form,($_.Exception.Message + "`r`n`r`nRevisa el resumen. Para descartar: vuelve al menu y elige T y N."),'Setup y fondos','OK','Error')
+            [void][Windows.Forms.MessageBox]::Show($form,($_.Exception.Message + (Get-AIOString 'bootsetup.err_footer')),(Get-AIOString 'bootsetup.err_title'),'OK','Error')
         } finally {
             try { Update-SetupView }
             finally {
@@ -2138,8 +2138,8 @@ function Show-BootSetup-GUI {
     $btnRestoreBackground.Add_Click({ Invoke-SetupUIAction -Description 'Restaurando fondo' -Action { Set-AIOBootSetupSessionBackground -Session $Session -Mode Original; Set-SetupPreview '' } })
     $btnBrowse.Add_Click({
         $dialog = New-Object Windows.Forms.OpenFileDialog
-        $dialog.Title = 'Selecciona el fondo de Windows Setup'
-        $dialog.Filter = 'Imagenes PNG, JPG o BMP|*.png;*.jpg;*.jpeg;*.bmp'
+        $dialog.Title = Get-AIOString 'bootsetup.dialog_bg_title'
+        $dialog.Filter = Get-AIOString 'bootsetup.filter_images'
         $dialog.CheckFileExists = $true; $dialog.Multiselect = $false; $dialog.RestoreDirectory = $true
         try {
             if ($dialog.ShowDialog($form) -eq [Windows.Forms.DialogResult]::OK) {
@@ -2148,7 +2148,7 @@ function Show-BootSetup-GUI {
                 $imagePath.Text = $dialog.FileName
                 $btnBackground.Enabled = $true
             }
-        } catch { [void][Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,'No se pudo abrir la imagen','OK','Error') }
+        } catch { [void][Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,(Get-AIOString 'bootsetup.err_open_img_title'),'OK','Error') }
         finally { $dialog.Dispose() }
     })
     $btnRefresh.Add_Click({ Invoke-SetupUIAction -Description 'Leyendo estado' -Action { } })
@@ -2157,7 +2157,7 @@ function Show-BootSetup-GUI {
     try {
         Update-SetupView
         try { Set-SetupPreview -Path $Session.SelectedImagePath }
-        catch { Set-SetupPreview ''; $previewCaption.Text = 'Imagen anterior no disponible. Elige otra en Fondo de instalacion.' }
+        catch { Set-SetupPreview ''; $previewCaption.Text = Get-AIOString 'bootsetup.prev_img_unavailable' }
         [void]$form.ShowDialog()
     } finally {
         if ($null -ne $preview.Image) { $preview.Image.Dispose(); $preview.Image = $null }

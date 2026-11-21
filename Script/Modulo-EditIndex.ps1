@@ -46,7 +46,7 @@ function Read-AIOExistingIndex {
     param([string]$ImagePath)
     $indexes = @(Get-AIOWimIndexes -ImagePath $ImagePath)
     $selected = 0
-    if (-not [int]::TryParse((Read-Host 'Selecciona un indice de la lista'), [ref]$selected) -or $selected -notin $indexes) {
+    if (-not [int]::TryParse((Read-Host (Get-AIOString 'editindex.select_index_prompt')), [ref]$selected) -or $selected -notin $indexes) {
         throw 'El indice no figura en el inventario del archivo.'
     }
     return $selected
@@ -58,10 +58,10 @@ function Export-Index {
 
     if (-not $Script:WIM_FILE_PATH) {
         Write-Log -LogLevel INFO -Message "IndexManager: No hay un WIM global cargado. Solicitando archivo origen al usuario."
-        $path = Select-PathDialog -DialogType File -Title "Seleccione el archivo WIM de origen" -Filter "Archivos WIM (*.wim)|*.wim|Todos (*.*)|*.*"
+        $path = Select-PathDialog -DialogType File -Title (Get-AIOString 'editindex.dialog_source_wim') -Filter (Get-AIOString 'editindex.wim_filter_all')
         if (-not $path) {
             Write-Log -LogLevel INFO -Message "IndexManager: El usuario cancelo la seleccion del archivo WIM de origen."
-            Write-Warning "Operacion cancelada."
+            Write-Warning (Get-AIOString 'common.operation_cancelled')
             Pause
             return
         }
@@ -76,23 +76,23 @@ function Export-Index {
         Write-Log -LogLevel WARN -Message "IndexManager: Bloqueo activado. Intento de exportar indices desde un disco virtual."
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Red
-        Write-Host "      OPERACION NO PERMITIDA EN DISCOS VIRTUALES       " -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'editindex.vhd_not_allowed_title') -ForegroundColor Yellow
         Write-Host "=======================================================" -ForegroundColor Red
         Write-Host ""
-        Write-Host "Has intentado exportar un indice desde un archivo VHD o VHDX." -ForegroundColor White
-        Write-Host "EXPLICACION TECNICA:" -ForegroundColor Cyan
-        Write-Host "Los discos virtuales usan particiones (bloques), no indices de imagen como los WIM/ESD." -ForegroundColor Gray
-        Write-Host "Para extraer Windows de un VHD, usa la opcion 'Convertir VHD/VHDX a WIM' en el menu de Conversion." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'editindex.vhd_export_attempted') -ForegroundColor White
+        Write-Host (Get-AIOString 'editindex.tech_header') -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'editindex.vhd_export_tech1') -ForegroundColor Gray
+        Write-Host (Get-AIOString 'editindex.vhd_export_tech2') -ForegroundColor Gray
         Write-Host ""
         Pause
         return
     }
 
-    Write-Host "Archivo WIM actual: $Script:WIM_FILE_PATH" -ForegroundColor Gray
+    Write-Host (Get-AIOString 'editindex.current_wim' $Script:WIM_FILE_PATH) -ForegroundColor Gray
     Write-Log -LogLevel INFO -Message "IndexManager: Consultando a DISM la estructura de indices del archivo origen."
     
     # MENSAJE DE ESPERA AÑADIDO AQUI
-    Write-Host "Por favor, espere. DISM esta leyendo la estructura del archivo (Esto puede tardar unos segundos)..." -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'editindex.reading_structure') -ForegroundColor Cyan
     try { $INDEX_TO_EXPORT = Read-AIOExistingIndex -ImagePath $Script:WIM_FILE_PATH }
     catch { Write-Warning $_.Exception.Message; Pause; return }
     Write-Log -LogLevel INFO -Message "IndexManager: Indice objetivo ingresado por el usuario -> [$INDEX_TO_EXPORT]"
@@ -100,25 +100,25 @@ function Export-Index {
     $wimFileObject = Get-Item -Path $Script:WIM_FILE_PATH
     $DEFAULT_DEST_PATH = Join-Path $wimFileObject.DirectoryName "$($wimFileObject.BaseName)_indice_$($INDEX_TO_EXPORT).wim"
 
-    $DEST_WIM_PATH = Select-SavePathDialog -Title "Exportar indice como..." -Filter "Archivos WIM (*.wim)|*.wim" -DefaultFileName $DEFAULT_DEST_PATH
+    $DEST_WIM_PATH = Select-SavePathDialog -Title (Get-AIOString 'editindex.dialog_export_as') -Filter (Get-AIOString 'editindex.wim_filter') -DefaultFileName $DEFAULT_DEST_PATH
     if (-not $DEST_WIM_PATH) { 
         Write-Log -LogLevel INFO -Message "IndexManager: El usuario cancelo la seleccion de la ruta de destino."
-        Write-Warning "Operacion cancelada."; Pause; return 
+        Write-Warning (Get-AIOString 'common.operation_cancelled'); Pause; return 
     }
     Write-Log -LogLevel INFO -Message "IndexManager: Ruta de destino establecida -> $DEST_WIM_PATH"
 
-    Write-Host "[+] Exportando Indice $INDEX_TO_EXPORT a '$DEST_WIM_PATH'..." -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'editindex.export_start' $INDEX_TO_EXPORT $DEST_WIM_PATH) -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "IndexManager: Ejecutando DISM /Export-Image para clonar el Indice $INDEX_TO_EXPORT de '$($Script:WIM_FILE_PATH)' hacia '$DEST_WIM_PATH'."
     
     # MENSAJE DE ESPERA AÑADIDO AQUI
-    Write-Host "Por favor, espere. DISM esta iniciando el proceso de exportacion (No cierre la ventana)..." -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'editindex.export_wait') -ForegroundColor Cyan
     dism /export-image /sourceimagefile:"$Script:WIM_FILE_PATH" /sourceindex:$INDEX_TO_EXPORT /destinationimagefile:"$DEST_WIM_PATH" /Compress:max /CheckIntegrity /ScratchDir:"$Script:Scratch_DIR"
 
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "[OK] Indice exportado exitosamente." -ForegroundColor Green
+        Write-Host (Get-AIOString 'editindex.export_ok') -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "IndexManager: Exportacion completada exitosamente. El indice $INDEX_TO_EXPORT ha sido extraido a un nuevo archivo."
     } else {
-        Write-Host "[ERROR] Fallo al exportar el Indice (Codigo: $LASTEXITCODE)."
+        Write-Host (Get-AIOString 'editindex.export_error' $LASTEXITCODE)
         Write-Log -LogLevel ERROR -Message "IndexManager: Fallo la exportacion del indice en DISM. Codigo LASTEXITCODE: $LASTEXITCODE"
     }
     Pause
@@ -130,10 +130,10 @@ function Delete-Index {
 
     if (-not $Script:WIM_FILE_PATH) {
         Write-Log -LogLevel INFO -Message "IndexManager: No hay un WIM global cargado. Solicitando archivo al usuario."
-        $path = Select-PathDialog -DialogType File -Title "Seleccione WIM para borrar indice" -Filter "Archivos WIM (*.wim)|*.wim|Todos (*.*)|*.*"
+        $path = Select-PathDialog -DialogType File -Title (Get-AIOString 'editindex.dialog_delete_wim') -Filter (Get-AIOString 'editindex.wim_filter_all')
         if (-not $path) { 
             Write-Log -LogLevel INFO -Message "IndexManager: El usuario cancelo la seleccion del archivo WIM."
-            Write-Warning "Operacion cancelada."; Pause; return 
+            Write-Warning (Get-AIOString 'common.operation_cancelled'); Pause; return 
         }
         $Script:WIM_FILE_PATH = $path
         Write-Log -LogLevel INFO -Message "IndexManager: Archivo WIM seleccionado -> $Script:WIM_FILE_PATH"
@@ -146,47 +146,47 @@ function Delete-Index {
         Write-Log -LogLevel WARN -Message "IndexManager: Bloqueo activado. Intento de eliminar indices en un disco virtual."
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Red
-        Write-Host "      OPERACION NO PERMITIDA EN DISCOS VIRTUALES       " -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'editindex.vhd_not_allowed_title') -ForegroundColor Yellow
         Write-Host "=======================================================" -ForegroundColor Red
         Write-Host ""
-        Write-Host "Has intentado eliminar un indice de un archivo VHD o VHDX." -ForegroundColor White
-        Write-Host "EXPLICACION TECNICA:" -ForegroundColor Cyan
-        Write-Host "Los discos virtuales no contienen indices gestionables por DISM." -ForegroundColor Gray
-        Write-Host "Si deseas eliminar el sistema operativo o particiones de un VHD, debes montarlo y usar el Administrador de Discos de Windows (diskmgmt.msc)." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'editindex.vhd_delete_attempted') -ForegroundColor White
+        Write-Host (Get-AIOString 'editindex.tech_header') -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'editindex.vhd_delete_tech1') -ForegroundColor Gray
+        Write-Host (Get-AIOString 'editindex.vhd_delete_tech2') -ForegroundColor Gray
         Write-Host ""
         Pause
         return
     }
 
-    Write-Host "Archivo WIM actual: $Script:WIM_FILE_PATH" -ForegroundColor Gray
+    Write-Host (Get-AIOString 'editindex.current_wim' $Script:WIM_FILE_PATH) -ForegroundColor Gray
     Write-Log -LogLevel INFO -Message "IndexManager: Consultando a DISM la estructura de indices del archivo."
     
     # MENSAJE DE ESPERA AÑADIDO AQUI
-    Write-Host "Por favor, espere. DISM esta leyendo la estructura del archivo (Esto puede tardar unos segundos)..." -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'editindex.reading_structure') -ForegroundColor Cyan
     try { $INDEX_TO_DELETE = Read-AIOExistingIndex -ImagePath $Script:WIM_FILE_PATH }
     catch { Write-Warning $_.Exception.Message; Pause; return }
     Write-Log -LogLevel INFO -Message "IndexManager: Indice objetivo ingresado por el usuario -> [$INDEX_TO_DELETE]"
 
-    $CONFIRM = Read-Host "Esta seguro que desea eliminar el Indice $INDEX_TO_DELETE de forma PERMANENTE? (S/N)"
+    $CONFIRM = Read-Host (Get-AIOString 'editindex.delete_confirm' $INDEX_TO_DELETE)
 
-    if ($CONFIRM -match '^(s|S)$') {
-        Write-Host "[+] Eliminando Indice $INDEX_TO_DELETE..." -ForegroundColor Yellow
+    if (Test-AIOYesResponse $CONFIRM) {
+        Write-Host (Get-AIOString 'editindex.delete_start' $INDEX_TO_DELETE) -ForegroundColor Yellow
         Write-Log -LogLevel ACTION -Message "IndexManager: Ejecutando DISM /Delete-Image para eliminar el Indice $INDEX_TO_DELETE de '$($Script:WIM_FILE_PATH)'."
         
         # MENSAJE DE ESPERA AÑADIDO AQUI
-        Write-Host "Por favor, espere. DISM esta procediendo a borrar el indice (La operacion tomara algo de tiempo)..." -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'editindex.delete_wait') -ForegroundColor Cyan
         dism /delete-image /imagefile:"$Script:WIM_FILE_PATH" /index:$INDEX_TO_DELETE
         
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "[OK] Indice eliminado exitosamente." -ForegroundColor Green
+            Write-Host (Get-AIOString 'editindex.delete_ok') -ForegroundColor Green
             Write-Log -LogLevel INFO -Message "IndexManager: Eliminacion completada exitosamente. Indice $INDEX_TO_DELETE purgado del WIM."
         } else {
-            Write-Host "[ERROR] Error al eliminar el Indice (Codigo: $LASTEXITCODE). Puede que este montado o en uso."
+            Write-Host (Get-AIOString 'editindex.delete_error' $LASTEXITCODE)
             Write-Log -LogLevel ERROR -Message "IndexManager: Fallo la eliminacion del indice en DISM. Codigo LASTEXITCODE: $LASTEXITCODE. Posible bloqueo de archivo o WIM montado."
         }
     } else {
         Write-Log -LogLevel INFO -Message "IndexManager: El usuario cancelo la eliminacion en la confirmacion de seguridad."
-        Write-Warning "Operacion cancelada."
+        Write-Warning (Get-AIOString 'common.operation_cancelled')
     }
     Pause
 }

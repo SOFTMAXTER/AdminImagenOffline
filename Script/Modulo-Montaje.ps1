@@ -225,14 +225,14 @@ function Repair-InvalidMounts {
         $root = if ($script:logDir) { $script:logDir } else { Join-Path (Split-Path -Parent $PSScriptRoot) 'Logs' }
         $reportDir = Join-Path $root ('Montajes_' + (Get-Date -Format 'yyyyMMdd_HHmmss') + '_' + [guid]::NewGuid().ToString('N'))
         New-Item -Path $reportDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
-        Write-Host "`n[1/3] Consultando montajes y avisos de DISM..." -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'montaje.repair_step1') -ForegroundColor Yellow
         $before = Get-AIOMountSnapshot -LogPath (Join-Path $reportDir 'Antes.log')
         $report.Before = @($before.Mounts); $report.BeforeLogRead = $before.LogRead; $report.BeforeLogComplete = $before.LogComplete
         $before.Mounts | Format-Table MountDir, ImageFile, ImageIndex, Status -AutoSize | Out-Host
-        if (-not $before.LogComplete) { Write-Warning 'El log no se pudo comprobar por completo; puede haber montajes omitidos del inventario.' }
+        if (-not $before.LogComplete) { Write-Warning (Get-AIOString 'montaje.repair_log_incomplete') }
 
-        Write-Host '[2/3] Limpiando recursos corruptos no recuperables del equipo...' -ForegroundColor Yellow
-        Write-Host 'DISM conserva montajes validos y recuperables. No se ejecuta Discard.' -ForegroundColor Gray
+        Write-Host (Get-AIOString 'montaje.repair_step2') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'montaje.repair_step2_note') -ForegroundColor Gray
         Write-Log -LogLevel ACTION -Message "MountRepair: Cleanup-Mountpoints. Diagnostico: $reportDir"
         $global:LASTEXITCODE = $null
         $PSNativeCommandUseErrorActionPreference = $false
@@ -246,7 +246,7 @@ function Repair-InvalidMounts {
         if ($null -eq $report.CleanupExitCode) { throw 'No se pudo ejecutar dism.exe. No se dispone de un codigo de salida.' }
         if ($report.CleanupExitCode -ne 0) { throw "La limpieza fallo (codigo $($report.CleanupExitCode)). Se conserva el estado de la sesion." }
 
-        Write-Host '[3/3] Verificando el resultado...' -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'montaje.repair_step3') -ForegroundColor Yellow
         $report.Status = 'VerificacionPendiente'
         $after = Get-AIOMountSnapshot -LogPath (Join-Path $reportDir 'Despues.log')
         $report.After = @($after.Mounts); $report.AfterLogRead = $after.LogRead; $report.AfterLogComplete = $after.LogComplete
@@ -262,7 +262,7 @@ function Repair-InvalidMounts {
             # sobre una sesion que desaparecio o fue sustituida por otro proceso.
             $Script:IMAGE_MOUNTED = 0; $Script:CachedControlSet = $null
             $Script:AIODashboardCache = $null; $Script:ForceMenuRefresh = $false
-            Write-Warning 'La sesion seleccionada cambio durante la limpieza. Se deshabilito su edicion; se conservan la ruta y el indice para revisarlos.'
+            Write-Warning (Get-AIOString 'montaje.repair_session_changed')
         } elseif ($Script:IMAGE_MOUNTED -eq 1 -and $null -eq $current -and $after.LogComplete -and
             ($null -eq $oldCurrent -or $oldCurrent.Status -eq 'Invalid')) {
             $Script:IMAGE_MOUNTED = 0; $Script:WIM_FILE_PATH = $null; $Script:MOUNTED_INDEX = $null
@@ -272,20 +272,20 @@ function Repair-InvalidMounts {
         $report.Status = 'Completada'
         if ($comparison.Pending.Count -gt 0 -or $comparison.ProtectedChanged.Count -gt 0 -or -not $before.LogComplete -or -not $after.LogComplete) {
             $report.Status = 'RequiereRevision'
-            Write-Warning 'DISM termino, pero quedan registros pendientes, cambios en montajes protegidos o una verificacion parcial. Revisa el informe.'
+            Write-Warning (Get-AIOString 'montaje.repair_pending_warn')
         } else {
-            Write-Host '[OK] Limpieza completada; inventario y log comprobados.' -ForegroundColor Green
+            Write-Host (Get-AIOString 'montaje.repair_ok') -ForegroundColor Green
         }
-        Write-Host ("Registros anteriores que ya no aparecen: {0}. Pendientes: {1}." -f $comparison.NoLongerListed.Count, $comparison.Pending.Count)
+        Write-Host (Get-AIOString 'montaje.repair_counts' $comparison.NoLongerListed.Count $comparison.Pending.Count)
         if ($comparison.ProtectedChanged.Count -gt 0) {
-            Write-Warning 'Un montaje valido o recuperable cambio durante la operacion. Puede haber actividad de otro proceso; su ausencia no se presenta como una limpieza correcta.'
+            Write-Warning (Get-AIOString 'montaje.repair_valid_changed')
         }
         $after.Mounts | Format-Table MountDir, ImageFile, ImageIndex, ReadWrite, Status -AutoSize | Out-Host
         foreach ($pending in $comparison.Pending) {
             if ($pending.Status -eq 'Needs Remount') {
-                Write-Host ("Recuperable: {0}. Requiere Remount-Image sobre esa ruta." -f $pending.MountDir) -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'montaje.repair_recoverable' $pending.MountDir) -ForegroundColor Yellow
             } else {
-                Write-Host ("Pendiente: {0} ({1}). Consulta Despues.log." -f $pending.MountDir, $pending.Status) -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'montaje.repair_pending_item' $pending.MountDir $pending.Status) -ForegroundColor Yellow
             }
         }
     } catch {
@@ -298,9 +298,9 @@ function Repair-InvalidMounts {
         if ($reportDir) {
             try {
                 $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $reportDir 'Informe.json') -Encoding UTF8 -ErrorAction Stop
-                Write-Host "Diagnostico guardado en: $reportDir" -ForegroundColor Gray
+                Write-Host (Get-AIOString 'montaje.repair_diag_saved' $reportDir) -ForegroundColor Gray
                 Write-Log -LogLevel INFO -Message "MountRepair: Resultado $($report.Status). Informe: $reportDir"
-            } catch { Write-Warning "No se pudo guardar el informe: $($_.Exception.Message)" }
+            } catch { Write-Warning (Get-AIOString 'montaje.repair_report_error' $_.Exception.Message) }
         }
     }
 }
@@ -380,7 +380,7 @@ function Publish-AIOVerifiedFile {
     $backup = "$Pending.anterior"
     [IO.File]::Replace($Pending,$Destination,$backup)
     try { Remove-Item -LiteralPath $backup -Force -ErrorAction Stop }
-    catch { Write-Warning "Copia anterior conservada en $backup" }
+    catch { Write-Warning (Get-AIOString 'montaje.backup_kept' $backup) }
 }
 
 function Get-AIOVerifiedVhdDisk {
@@ -424,7 +424,7 @@ function Restore-AIOVhdSession {
         $Script:MOUNT_DIR = "$($part.DriveLetter):\"
         $Script:IMAGE_MOUNTED = 2
         Write-Log -LogLevel INFO -Message "Sesion VHD verificada: $($saved.Path) en $Script:MOUNT_DIR."
-    } catch { Write-Warning "Sesion VHD sin recuperar: $($_.Exception.Message)" }
+    } catch { Write-Warning (Get-AIOString 'montaje.vhd_session_unrecovered' $_.Exception.Message) }
 }
 
 function Select-WindowsMediaSource {
@@ -439,33 +439,33 @@ function Select-WindowsMediaSource {
 
     # --- 1. SELECCION DE ISO ---
     $ofd = New-Object System.Windows.Forms.OpenFileDialog
-    $ofd.Filter = "Archivos ISO (*.iso)|*.iso"
-    $ofd.Title = "SELECCIONA TU ISO DE WINDOWS"
+    $ofd.Filter = Get-AIOString 'montaje.iso_filter'
+    $ofd.Title = Get-AIOString 'montaje.iso_dialog_title'
     
     if ($ofd.ShowDialog() -ne 'OK') { 
         Write-Log -LogLevel INFO -Message "SourceSelector: Usuario cancelo la seleccion de ISO."
-        Write-Warning "Operacion cancelada."
+        Write-Warning (Get-AIOString 'common.operation_cancelled')
         return $null 
     }
     
     $IsoPath = $ofd.FileName
 	Clear-Host
 	Write-Host ""
-    Write-Host "ISO Seleccionada: $IsoPath" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'montaje.iso_selected' $IsoPath) -ForegroundColor Yellow
     Write-Log -LogLevel INFO -Message "SourceSelector: ISO seleccionada -> $IsoPath"
 
         if ([string]::IsNullOrWhiteSpace($ExtractDir)) {
             $ExtractDir = Join-Path $parentDir "ISO_Extract"
-            Write-Host "`nCarpeta de extraccion por defecto: " -NoNewline; Write-Host $ExtractDir -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'montaje.iso_default_dir') -NoNewline; Write-Host $ExtractDir -ForegroundColor Cyan
             
-            if ((Read-Host "Deseas elegir una carpeta destino diferente para la extraccion? (S/N)").ToUpper() -eq 'S') {
-                $customExtract = Select-PathDialog -DialogType Folder -Title "Selecciona la carpeta destino para extraer la ISO"
+            if (Test-AIOYesResponse (Read-Host (Get-AIOString 'montaje.iso_custom_prompt'))) {
+                $customExtract = Select-PathDialog -DialogType Folder -Title (Get-AIOString 'montaje.iso_custom_dialog')
                 if ($customExtract) { 
                     $ExtractDir = $customExtract 
-                    Write-Host "Nueva ruta establecida: $ExtractDir" -ForegroundColor Green
+                    Write-Host (Get-AIOString 'montaje.iso_new_path' $ExtractDir) -ForegroundColor Green
                     Write-Log -LogLevel INFO -Message "SourceSelector: El usuario cambio la ruta de extraccion a -> $ExtractDir"
                 } else {
-                    Write-Host "Manteneniendo ruta por defecto: $ExtractDir" -ForegroundColor Gray
+                    Write-Host (Get-AIOString 'montaje.iso_keep_path' $ExtractDir) -ForegroundColor Gray
                 }
             }
         }
@@ -526,7 +526,7 @@ function Expand-AIOSelectedIso {
         } catch {}
 
         Write-Host ""
-        Write-Host "  >> Copiando archivos de la ISO ($totalFiles archivos, $([Math]::Round($totalBytes / 1GB, 2)) GB)..." -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'montaje.iso_copying' $totalFiles ([Math]::Round($totalBytes / 1GB, 2))) -ForegroundColor Cyan
         Write-Log -LogLevel ACTION -Message "SourceSelector: Copiando contenido de $driveRoot a $ExtractDir via Robocopy (/A-:R /R:2 /W:2). Total=$totalFiles archivos, $totalBytes bytes."
 
         $barWidth = 24
@@ -672,13 +672,13 @@ public sealed class AIOMountProcReaderV1 : IDisposable {
             throw "Error al copiar la ISO (Robocopy $roboExit). Carpeta parcial: $ExtractDir"
         }
         $SelectedPath = $ExtractDir
-        Write-Host ("  [OK] ISO extraida ({0} archivos, {1:N2} GB en {2}). Atributos de solo lectura retirados." -f $copiedFiles, ($completedBytes / 1GB), $swCopy.Elapsed.ToString('mm\:ss')) -ForegroundColor Green
+        Write-Host (Get-AIOString 'montaje.iso_extracted_ok' $copiedFiles ($completedBytes / 1GB) $swCopy.Elapsed.ToString('mm\:ss')) -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "SourceSelector: Extraccion completada. Archivos=$copiedFiles, Bytes=$completedBytes, Tiempo=$($swCopy.Elapsed.ToString('mm\:ss')), Destino='$ExtractDir'."
 
     } catch {
         if ($progState.Active) { Write-Host ''; $progState.Active = $false }
         Write-Log -LogLevel ERROR -Message "SourceSelector: Fallo al procesar la ISO - $($_.Exception.Message)"
-        Write-Warning "No se pudo extraer la ISO: $($_.Exception.Message)"
+        Write-Warning (Get-AIOString 'montaje.iso_extract_error' $_.Exception.Message)
 
         return $null
     } finally {
@@ -694,7 +694,7 @@ function Mount-Image {
 
     if ($Script:IMAGE_MOUNTED -gt 0) {
         Write-Log -LogLevel WARN -Message "MountManager: Operacion cancelada. Ya existe una imagen montada en el entorno."
-        Write-Warning "La imagen ya se encuentra montada."
+        Write-Warning (Get-AIOString 'montaje.already_mounted')
         Pause; return
     }
 
@@ -702,16 +702,16 @@ function Mount-Image {
     #  NUEVA LÓGICA: SELECCIÓN DE ORIGEN (ISO vs Archivo)
     # =======================================================
     Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host "               SELECCION DE FUENTE                     " -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'montaje.source_title') -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host " Que deseas montar?`n"
-    Write-Host "   [1] Archivo Individual (.wim, .vhd, .vhdx)"
-    Write-Host "   [2] Extraer desde una ISO de Windows" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'montaje.source_question')
+    Write-Host (Get-AIOString 'montaje.source_opt1')
+    Write-Host (Get-AIOString 'montaje.source_opt2') -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "   [V] Cancelar y Volver" -ForegroundColor Red
+    Write-Host (Get-AIOString 'montaje.source_cancel') -ForegroundColor Red
     Write-Host ""
     
-    $sourceType = Read-MenuOption "Elige una opcion"
+    $sourceType = Read-MenuOption (Get-AIOString 'montaje.source_prompt')
 
     if ($sourceType.ToUpper() -eq 'V') { return }
 
@@ -732,37 +732,37 @@ function Mount-Image {
 
         if (Test-Path -LiteralPath $wimPath) {
             $Script:WIM_FILE_PATH = $wimPath
-            Write-Host "`n[OK] Imagen base detectada: install.wim" -ForegroundColor Green
+            Write-Host (Get-AIOString 'montaje.iso_wim_found') -ForegroundColor Green
         } elseif (Test-Path -LiteralPath $esdPath) {
             Clear-Host
             Write-Host "=======================================================" -ForegroundColor Red
-            Write-Host "             FORMATO ESD DETECTADO                     " -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'montaje.esd_detected_title') -ForegroundColor Yellow
             Write-Host "=======================================================" -ForegroundColor Red
-            Write-Host "La ISO extraida contiene un archivo 'install.esd' (Compresion Solida)." -ForegroundColor White
-            Write-Host "DISM no permite montar archivos .esd para realizar ediciones directas." -ForegroundColor Gray
+            Write-Host (Get-AIOString 'montaje.esd_detected_line1') -ForegroundColor White
+            Write-Host (Get-AIOString 'montaje.esd_detected_line2') -ForegroundColor Gray
             Write-Host ""
-            Write-Host "SOLUCION:" -ForegroundColor Cyan
-            Write-Host "Ve al Menu Principal -> [2] Convertir Formatos."
-            Write-Host "Selecciona 'Convertir ESD a WIM' y apunta a este archivo:" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'montaje.esd_solution_header') -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'montaje.esd_solution_line1')
+            Write-Host (Get-AIOString 'montaje.esd_solution_line2') -ForegroundColor Gray
             Write-Host $esdPath -ForegroundColor Yellow
             Write-Host ""
             Write-Log -LogLevel WARN -Message "MountManager: install.esd detectado. Abortando montaje directo."
             Pause; return
         } else {
-            Write-Warning "No se encontro install.wim ni install.esd en la ruta: $ExtractPath\sources"
+            Write-Warning (Get-AIOString 'montaje.iso_no_install_found' $ExtractPath)
             Write-Log -LogLevel ERROR -Message "MountManager: No se encontro imagen base en la ISO extraida."
             Pause; return
         }
 
     } elseif ($sourceType -eq '1') {
-        $path = Select-PathDialog -DialogType File -Title "Seleccione la imagen a montar" -Filter "Archivos Soportados (*.wim, *.vhd, *.vhdx)|*.wim;*.vhd;*.vhdx|Todos (*.*)|*.*"
+        $path = Select-PathDialog -DialogType File -Title (Get-AIOString 'montaje.dialog_select_image') -Filter (Get-AIOString 'montaje.filter_supported')
         if ([string]::IsNullOrEmpty($path)) { 
             Write-Log -LogLevel INFO -Message "MountManager: El usuario cancelo el dialogo de seleccion de archivo individual."
-            Write-Warning "Operacion cancelada."; Pause; return 
+            Write-Warning (Get-AIOString 'common.operation_cancelled'); Pause; return 
         }
         $Script:WIM_FILE_PATH = $path
     } else {
-        Write-Warning "Opción no válida."
+        Write-Warning (Get-AIOString 'common.invalid_option')
         Pause; return
     }
     
@@ -775,22 +775,22 @@ function Mount-Image {
     if ($extension -eq ".VHD" -or $extension -eq ".VHDX") {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Yellow
-        Write-Host "         MODO DE MONTAJE DE DISCO VIRTUAL (VHD)        " -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'montaje.vhd_mode_title') -ForegroundColor Yellow
         Write-Host "=======================================================" -ForegroundColor Yellow
-        Write-Host "1. NO se usa la carpeta de montaje temporal."
-        Write-Host "2. El VHD se monta como unidad nativa (Letra)."
-        Write-Host "3. Los cambios son EN TIEMPO REAL." -ForegroundColor Red
+        Write-Host (Get-AIOString 'montaje.vhd_mode_line1')
+        Write-Host (Get-AIOString 'montaje.vhd_mode_line2')
+        Write-Host (Get-AIOString 'montaje.vhd_mode_line3') -ForegroundColor Red
         Write-Host ""
         
         Write-Log -LogLevel INFO -Message "MountManager: Cambiando a motor de virtualizacion (Hyper-V/VHD). Solicitando confirmacion al usuario."
-        if ((Read-Host "Escribe 'SI' para adjuntar").ToUpper() -ne 'SI') {
+        if (-not (Test-AIOYesResponse (Read-Host (Get-AIOString 'montaje.vhd_attach_prompt')))) {
             Write-Log -LogLevel INFO -Message "MountManager: El usuario aborto el montaje del disco virtual en la confirmacion."
             $Script:WIM_FILE_PATH = $null; return
         }
 
         $attachedHere = $false
         try {
-            Write-Host "[+] Montando VHD..." -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'montaje.vhd_mounting') -ForegroundColor Yellow
             Write-Log -LogLevel ACTION -Message "MountManager: Ejecutando Mount-VHD para adjuntar el disco virtual."
             $vhdInfo = Get-VHD -Path $Script:WIM_FILE_PATH -ErrorAction Stop
             if (-not $vhdInfo.Attached) {
@@ -834,13 +834,13 @@ function Mount-Image {
             # 2. Seleccion (Automatica o Manual)
             if ($windowsParts.Count -eq 1) {
                 $targetPart = $windowsParts[0]
-                Write-Host "[AUTO] Windows detectado en particion $($targetPart.DriveLetter):" -ForegroundColor Green
+                Write-Host (Get-AIOString 'montaje.vhd_auto_detected' $targetPart.DriveLetter) -ForegroundColor Green
                 $selectedPart = $targetPart
             } else {
                 # Fallback: Menu manual si no detectamos Windows
                 Write-Log -LogLevel INFO -Message "MountManager: Seleccion manual. Instalaciones Windows detectadas: $($windowsParts.Count)."
-                Write-Host "Instalaciones Windows detectadas: $($windowsParts.Count)."
-                Write-Host "Seleccione la particion manualmente:" -ForegroundColor Cyan
+                Write-Host (Get-AIOString 'montaje.vhd_multi_detected' $windowsParts.Count)
+                Write-Host (Get-AIOString 'montaje.vhd_select_partition') -ForegroundColor Cyan
                 
                 $menuItems = @{}
                 $i = 1
@@ -850,12 +850,12 @@ function Mount-Image {
                 
                 foreach ($p in $allParts) {
                     $gb = [math]::Round($p.Size / 1GB, 2)
-                    Write-Host "   [$i] Unidad $($p.DriveLetter): ($gb GB)"
+                    Write-Host (Get-AIOString 'montaje.vhd_partition_item' $i $p.DriveLetter $gb)
                     $menuItems[$i] = $p
                     $i++
                 }
                 
-                $choice = Read-Host "Numero de particion"
+                $choice = Read-Host (Get-AIOString 'montaje.vhd_partition_prompt')
                 $number = 0
                 if ([int]::TryParse($choice, [ref]$number) -and $menuItems.ContainsKey($number)) { 
                     $selectedPart = $menuItems[$number] 
@@ -892,11 +892,11 @@ function Mount-Image {
             $Script:AIODashboardCache = $null
             $Script:ForceMenuRefresh = $false
             
-            Write-Host "[OK] VHD Montado en: $Script:MOUNT_DIR" -ForegroundColor Green
+            Write-Host (Get-AIOString 'montaje.vhd_mounted_ok' $Script:MOUNT_DIR) -ForegroundColor Green
             Write-Log -LogLevel INFO -Message "MountManager: VHD Montado y vinculado exitosamente. Entorno local redireccionado a $Script:MOUNT_DIR"
 
         } catch {
-            Write-Host "Error VHD: $_"
+            Write-Host (Get-AIOString 'montaje.vhd_error' $_)
             Write-Log -LogLevel ERROR -Message "MountManager: Fallo critico durante montaje/escaneo VHD: $($_.Exception.Message)"
             if ($attachedHere) { Dismount-VHD -Path $Script:WIM_FILE_PATH -ErrorAction SilentlyContinue }
             $Script:WIM_FILE_PATH = $null
@@ -908,10 +908,10 @@ function Mount-Image {
     #  MODO WIM (DISM)
     # =======================================================
     if ($extension -ne '.WIM') {
-        Write-Warning 'Selecciona un archivo .wim, .vhd o .vhdx. Convierte un .esd a WIM antes de montarlo.'
+        Write-Warning (Get-AIOString 'montaje.invalid_ext_warn')
         Pause; return
     }
-    Write-Host "`n[+] Leyendo estructura del WIM..." -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'montaje.wim_reading') -ForegroundColor Yellow
     Write-Log -LogLevel INFO -Message "MountManager: Consultando indices de '$Script:WIM_FILE_PATH'."
     try {
         $availableIndexes = @(Get-AIOWimIndexes -ImagePath $Script:WIM_FILE_PATH)
@@ -922,11 +922,11 @@ function Mount-Image {
     }
 
     while ($true) {
-        $selection = (Read-Host "`nNumero de indice a montar (V = Volver)").Trim()
+        $selection = (Read-Host (Get-AIOString 'montaje.wim_index_prompt')).Trim()
         if ($selection -eq 'V') { return }
         $INDEX = 0
         if ([int]::TryParse($selection, [ref]$INDEX) -and $INDEX -gt 0 -and $INDEX -in $availableIndexes) { break }
-        Write-Warning "Indice no valido. Elige uno de los indices mostrados: $($availableIndexes -join ', ')."
+        Write-Warning (Get-AIOString 'montaje.wim_index_invalid' ($availableIndexes -join ', '))
     }
     Write-Log -LogLevel INFO -Message "MountManager: Indice validado -> [$INDEX]"
 
@@ -939,7 +939,7 @@ function Mount-Image {
     }
 
     Write-Host ""
-    Write-Host "[+] Montando (Indice: $INDEX)..." -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'montaje.wim_mounting' $INDEX) -ForegroundColor Yellow
     Write-Log -LogLevel ACTION -Message "MountManager: Ejecutando DISM /Mount-Wim para adjuntar indice $INDEX en $Script:MOUNT_DIR."
     
     dism /mount-wim /wimfile:"$Script:WIM_FILE_PATH" /index:$INDEX /mountdir:"$Script:MOUNT_DIR"
@@ -950,14 +950,14 @@ function Mount-Image {
         $Script:CachedControlSet = $null
         $Script:AIODashboardCache = $null
         $Script:ForceMenuRefresh = $false
-        Write-Host "[OK] Imagen montada." -ForegroundColor Green
+        Write-Host (Get-AIOString 'montaje.wim_mounted_ok') -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "MountManager: Montaje WIM completado exitosamente. Entorno listo para personalizacion."
     } else {
-        Write-Host "[ERROR] Fallo montaje (Code: $LASTEXITCODE)."
+        Write-Host (Get-AIOString 'montaje.wim_mount_error' $LASTEXITCODE)
         # DISM puede devolver HRESULT con signo; el cast directo a uint32 lanza otra excepcion.
         $exitCodeHex = ([int64]$LASTEXITCODE -band 0xFFFFFFFFL).ToString("X8")
         if ($exitCodeHex -match "C1420116|C1420117") {
-            Write-Warning "Posible bloqueo de archivos. Reinicia o ejecuta Limpieza."
+            Write-Warning (Get-AIOString 'montaje.wim_lock_warn')
             Write-Log -LogLevel ERROR -Message "MountManager: Fallo montaje WIM. Codigo DISM ($LASTEXITCODE) indica directorio no vacio o error de acceso (C1420116/C1420117)."
         } else {
             Write-Log -LogLevel ERROR -Message "MountManager: Fallo montaje WIM. Code: $LASTEXITCODE"
@@ -970,12 +970,12 @@ function Unmount-Image {
     param([switch]$Commit)
     
     Clear-Host
-    $modeText = if ($Commit) { "Commit (Guardar y Desmontar)" } else { "Discard (Descartar Cambios)" }
+    $modeText = if ($Commit) { Get-AIOString 'montaje.mode_commit' } else { Get-AIOString 'montaje.mode_discard' }
     Write-Log -LogLevel ACTION -Message "UnmountManager: Solicitud de desmontaje iniciada. Modo: [$modeText]"
 
     if ($Script:IMAGE_MOUNTED -eq 0) {
         Write-Log -LogLevel WARN -Message "UnmountManager: Operacion rechazada. No hay ninguna imagen montada."
-        Write-Warning "No hay ninguna imagen montada."
+        Write-Warning (Get-AIOString 'montaje.no_image_mounted')
         Pause; return
     }
 
@@ -984,18 +984,18 @@ function Unmount-Image {
     if ($Commit -and $isEsd) {
         Write-Log -LogLevel WARN -Message "UnmountManager: Bloqueo de seguridad activado. Intento de 'Commit' sobre archivo de compresion solida (.ESD)."
         Write-Host "=======================================================" -ForegroundColor Yellow
-        Write-Host "      OPERACION NO PERMITIDA EN ARCHIVOS .ESD          " -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'save.esd_title') -ForegroundColor Yellow
         Write-Host "=======================================================" -ForegroundColor Yellow
-        Write-Host "No puedes hacer 'Guardar y Desmontar' sobre una imagen ESD comprimida." -ForegroundColor Red
-        Write-Host "Debes usar la opcion 'Desmontar (Descartar Cambios)' o convertirla a WIM primero." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'montaje.esd_unmount_line1') -ForegroundColor Red
+        Write-Host (Get-AIOString 'montaje.esd_unmount_line2') -ForegroundColor Gray
         Pause
         return
     }
 
-    Write-Host "[INFO] Iniciando secuencia de desmontaje segura..." -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'montaje.unmount_start') -ForegroundColor Cyan
 
     # 1. Cierre proactivo de Hives (CRÍTICO)
-    Write-Host "   > Descargando hives del registro..." -ForegroundColor Gray
+    Write-Host (Get-AIOString 'montaje.unmount_hives') -ForegroundColor Gray
     Write-Log -LogLevel INFO -Message "UnmountManager: Ejecutando Unmount-Hives para liberar bloqueos de registro."
     Unmount-Hives
     
@@ -1007,15 +1007,15 @@ function Unmount-Image {
     # 3. Desmontaje VHD (Logica separada)
     if ($Script:IMAGE_MOUNTED -eq 2) {
         try {
-            Write-Host "   > Desmontando disco virtual (VHD)..." -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'montaje.unmount_vhd') -ForegroundColor Yellow
             Write-Log -LogLevel ACTION -Message "UnmountManager: Ejecutando Dismount-VHD para el disco virtual en $Script:WIM_FILE_PATH"
             Dismount-VHD -Path $Script:WIM_FILE_PATH -ErrorAction Stop
             Remove-Item -LiteralPath (Join-Path (Split-Path -Parent $script:configFile) 'vhd-session.json') -ErrorAction SilentlyContinue
             
             if ($Commit) {
-                Write-Host "[OK] VHD Desmontado (Los cambios en VHD se guardan automaticamente en tiempo real)." -ForegroundColor Green
+                Write-Host (Get-AIOString 'montaje.unmount_vhd_commit_ok') -ForegroundColor Green
             } else {
-                Write-Host "[OK] VHD Desmontado." -ForegroundColor Green
+                Write-Host (Get-AIOString 'montaje.unmount_vhd_ok') -ForegroundColor Green
             }
             
             $Script:IMAGE_MOUNTED = 0
@@ -1030,7 +1030,7 @@ function Unmount-Image {
         } catch {
             Write-Log -LogLevel ERROR -Message "UnmountManager: Fallo al desmontar VHD - $($_.Exception.Message)"
             Write-Error "Fallo al desmontar VHD: $_"
-            Write-Warning "Cierre cualquier carpeta abierta en la unidad virtual e intente de nuevo."
+            Write-Warning (Get-AIOString 'montaje.unmount_vhd_close_warn')
         }
         Pause; return
     }
@@ -1042,21 +1042,21 @@ function Unmount-Image {
     
     # Determinamos los argumentos de DISM en base al parametro $Commit
     $dismArg = if ($Commit) { "/commit" } else { "/discard" }
-    $actionText = if ($Commit) { "Guardando y Desmontando (Commit)" } else { "Desmontando (Discard)" }
+    $actionText = if ($Commit) { Get-AIOString 'montaje.action_commit' } else { Get-AIOString 'montaje.action_discard' }
 
     Write-Log -LogLevel ACTION -Message "UnmountManager: Iniciando bucle de desmontaje WIM para '$Script:MOUNT_DIR' con parametros: $dismArg"
 
     while ($retry -lt $maxRetries -and -not $success) {
         $retry++
-        Write-Host "   > Intento $retry de $($maxRetries): $actionText WIM..." -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'montaje.unmount_attempt' $retry $maxRetries $actionText) -ForegroundColor Yellow
         Write-Log -LogLevel INFO -Message "UnmountManager: Ejecutando DISM (Intento $retry de $maxRetries)..."
         
         if ($Commit) {
-            Write-Host "   [!] Empaquetando y comprimiendo cambios en el archivo WIM..." -ForegroundColor Cyan
-            Write-Host "   [!] DISM tardara varios minutos en iniciar la barra de progreso. Por favor, no interrumpa el proceso..." -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'montaje.unmount_commit_msg1') -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'montaje.unmount_commit_msg2') -ForegroundColor DarkGray
         } else {
-            Write-Host "   [!] Revirtiendo estructura de directorios y liberando bloqueos..." -ForegroundColor Cyan
-            Write-Host "   [!] Esto tomara unos instantes. Por favor, espere..." -ForegroundColor Gray
+            Write-Host (Get-AIOString 'montaje.unmount_discard_msg1') -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'montaje.unmount_discard_msg2') -ForegroundColor Gray
         }
 
         dism /unmount-wim /mountdir:"$Script:MOUNT_DIR" $dismArg
@@ -1064,13 +1064,13 @@ function Unmount-Image {
         if ($LASTEXITCODE -eq 0) {
             $success = $true
         } else {
-            Write-Warning "Fallo la operacion (Codigo: $LASTEXITCODE). Esperando 3 segundos..."
+            Write-Warning (Get-AIOString 'montaje.unmount_retry_warn' $LASTEXITCODE)
             Write-Log -LogLevel WARN -Message "UnmountManager: Intento $retry fallo con LASTEXITCODE $LASTEXITCODE. Pausando 3 segundos para liberar bloqueos."
             Start-Sleep -Seconds 3
             
             # Intento de limpieza intermedio
             if ($retry -eq 2) {
-                Write-Host "   > Intentando limpieza de recursos (cleanup-wim)..." -ForegroundColor Red
+                Write-Host (Get-AIOString 'montaje.unmount_cleanup_try') -ForegroundColor Red
                 Write-Log -LogLevel WARN -Message "UnmountManager: Ejecutando DISM /cleanup-wim de emergencia antes del ultimo intento."
                 dism /cleanup-wim
             }
@@ -1086,11 +1086,11 @@ function Unmount-Image {
         $Script:AIODashboardCache = $null
         $Script:ForceMenuRefresh = $false
 
-		Write-Host "[OK] Imagen desmontada correctamente." -ForegroundColor Green
+		Write-Host (Get-AIOString 'montaje.unmount_ok') -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "UnmountManager: Operacion WIM completada exitosamente. Entorno local limpio."
     } else {
-        Write-Host "[ERROR FATAL] No se pudo desmontar la imagen." -ForegroundColor Red
-        Write-Host "Posibles causas: Antivirus escaneando, carpeta abierta en Explorador o CMD." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'montaje.unmount_fatal') -ForegroundColor Red
+        Write-Host (Get-AIOString 'montaje.unmount_fatal_causes') -ForegroundColor Gray
         Write-Log -LogLevel ERROR -Message "UnmountManager: Fallo critico y definitivo al intentar desmontar el WIM tras $retry intentos. (Ultimo LASTEXITCODE: $LASTEXITCODE)"
     }
     Pause
@@ -1098,7 +1098,7 @@ function Unmount-Image {
 
 function Reload-Image {
     if ($Script:IMAGE_MOUNTED -ne 1) {
-        Write-Warning 'Recargar y descartar requiere un WIM montado. Los cambios en un VHD son inmediatos.'
+        Write-Warning (Get-AIOString 'montaje.reload_requires_wim')
         Pause
         return $false
     }
@@ -1118,7 +1118,7 @@ function Reload-Image {
         $result = Invoke-AIOConsoleSystemTool -Tool dism.exe -WaitForToolOnly -Arguments @('/Mount-Image',"/ImageFile:$Script:WIM_FILE_PATH","/Index:$Script:MOUNTED_INDEX","/MountDir:$Script:MOUNT_DIR")
         if ($result.ExitCode -ne 0) { throw "Error al volver a montar el WIM: $($result.ExitCode)" }
         $Script:IMAGE_MOUNTED = 1
-        Write-Host '[OK] WIM recargado.' -ForegroundColor Green
+        Write-Host (Get-AIOString 'montaje.reload_ok') -ForegroundColor Green
         return $true
     } catch {
         Write-Warning $_.Exception.Message

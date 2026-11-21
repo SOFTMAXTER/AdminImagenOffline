@@ -179,7 +179,7 @@ function Publish-AIOWinREFile {
                     throw 'El archivo nuevo cambio despues de publicarse; se conserva para revision.'
                 }
                 [IO.File]::Move($Destination, $rejected)
-                Write-Warning "Publicacion cancelada; copia no validada conservada en $rejected."
+                Write-Warning (Get-AIOString 'environments.winre_pub_cancelled' $rejected)
             } catch {
                 throw "Fallo al publicar: $publishError. RECUPERACION REQUERIDA: $($_.Exception.Message). Consulta $WorkRoot\publicacion.json."
             }
@@ -201,7 +201,7 @@ function Publish-AIOWinREFile {
                     $restored.Sddl -cne $Metadata.Sddl -or $restored.Attributes -ne $Metadata.Attributes) {
                     throw 'No se pudo verificar la restauracion del original.'
                 }
-                Write-Warning 'Guardado cancelado; el WinRE original ha sido verificado.'
+                Write-Warning (Get-AIOString 'environments.winre_save_cancelled')
             } catch {
                 throw "Fallo al publicar: $publishError. RECUPERACION REQUERIDA: $($_.Exception.Message). Consulta $WorkRoot\publicacion.json."
             }
@@ -213,7 +213,7 @@ function Publish-AIOWinREFile {
             foreach ($path in @($backup, $pending, $rejected)) {
                 if (Test-Path -LiteralPath $path) {
                     try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
-                    catch { Write-Warning "WinRE guardado; no se pudo borrar el temporal $path." }
+                    catch { Write-Warning (Get-AIOString 'environments.winre_temp_keep' $path) }
                 }
             }
         }
@@ -237,7 +237,7 @@ function Get-AIOWinRECandidates {
             ($paths -contains $windowsRoot) -or ($_.DriveLetter -and $windowsRoot -eq "$($_.DriveLetter):")
         })
         if ($windowsParts.Count -ne 1) { throw 'El volumen Windows montado no se pudo vincular al VHD de la sesion.' }
-        $roots[0].Label = "Disco $($disks[0].Number), particion $($windowsParts[0].PartitionNumber) (Windows)"
+        $roots[0].Label = Get-AIOString 'environments.disk_part_windows' $disks[0].Number $windowsParts[0].PartitionNumber
         foreach ($part in $parts) {
             if ($part.PartitionNumber -eq $windowsParts[0].PartitionNumber) { continue }
             if ($part.Type -ne 'Recovery' -and
@@ -251,7 +251,7 @@ function Get-AIOWinRECandidates {
                 $TemporaryAccessPaths.Add([pscustomobject]@{ Partition = $part; AccessPath = $root })
                 Add-PartitionAccessPath -InputObject $part -AccessPath $root -ErrorAction Stop
             }
-            $roots.Add([pscustomobject]@{ Root = $root; Label = "Disco $($disks[0].Number), particion $($part.PartitionNumber) (Recovery)"; Embedded = $false })
+            $roots.Add([pscustomobject]@{ Root = $root; Label = (Get-AIOString 'environments.disk_part_recovery' $disks[0].Number $part.PartitionNumber); Embedded = $false })
         }
     }
     foreach ($root in $roots) {
@@ -277,29 +277,29 @@ function Restore-AIOWinREContext {
 function Manage-WinRE-Menu {
     Clear-Host
     Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host "       Gestor Avanzado de Entorno de Recuperacion      " -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'environments.winre_title') -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor Cyan
 
     Write-Log -LogLevel INFO -Message "WinRE_Manager: Iniciando el modulo de gestion de Entorno de Recuperacion (WinRE)."
 
     # Si no se pudieron cerrar los hives de una sesion anterior, no mezclar registros.
     if ($Script:AIOWinREPendingContext) {
-        Write-Host "`n[!] Detectado contexto WinRE pendiente de cierre. Liberando colmenas..." -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'environments.winre_pending_ctx') -ForegroundColor Yellow
         try {
             Unmount-Hives | Out-Null
             Restore-AIOWinREContext -Context $Script:AIOWinREPendingContext
             $Script:AIOWinREPendingContext = $null
-            Write-Host "[OK] Contexto previo restaurado correctamente." -ForegroundColor Green
+            Write-Host (Get-AIOString 'environments.winre_ctx_restored') -ForegroundColor Green
         } catch {
             Write-Log -LogLevel WARN -Message "WinRE_Manager: Aun no se pueden liberar los hives de WinRE: $($_.Exception.Message)"
-            Write-Warning "Aun no se pueden liberar los hives de WinRE: $($_.Exception.Message)"
+            Write-Warning (Get-AIOString 'environments.winre_hives_busy' $_.Exception.Message)
             Pause; return
         }
     }
 
     if ($Script:IMAGE_MOUNTED -notin @(1, 2)) {
         Write-Log -LogLevel WARN -Message "WinRE_Manager: Acceso denegado. No hay imagen montada."
-        Write-Warning "Debes montar una imagen de Windows (install.wim o VHD/VHDX) primero."
+        Write-Warning (Get-AIOString 'environments.winre_need_mount')
         Pause; return
     }
 
@@ -317,7 +317,7 @@ function Manage-WinRE-Menu {
             throw 'El punto de montaje no contiene una instalacion de Windows reconocible.'
         }
 
-        Write-Host "`n[1/5] Preparando espacio aislado y buscando imagenes WinRE..." -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'environments.winre_step1') -ForegroundColor Yellow
         $workRoot = Join-Path $Script:Scratch_DIR ("WinRE_" + [guid]::NewGuid().ToString('N'))
         New-Item -Path $workRoot -ItemType Directory -ErrorAction Stop | Out-Null
 
@@ -328,25 +328,25 @@ function Manage-WinRE-Menu {
 
         $selected = $candidates[0]
         if ($candidates.Count -gt 1) {
-            Write-Host "`nSe detectaron multiples copias de WinRE en la sesion:" -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'environments.winre_multi_found') -ForegroundColor Cyan
             Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
             for ($i = 0; $i -lt $candidates.Count; $i++) {
                 $candItem = Get-Item -LiteralPath $candidates[$i].Path -Force -ErrorAction SilentlyContinue
                 $candSizeMB = if ($candItem) { "{0:N2} MB" -f ($candItem.Length / 1MB) } else { "N/D" }
                 Write-Host "   [$($i + 1)] $($candidates[$i].Label)" -ForegroundColor White -NoNewline
                 Write-Host " ($candSizeMB)" -ForegroundColor Yellow
-                Write-Host "       Ruta: $($candidates[$i].Path)" -ForegroundColor Gray
+                Write-Host (Get-AIOString 'environments.winre_path_label' $candidates[$i].Path) -ForegroundColor Gray
             }
             Write-Host ""
-            Write-Host "   [V] Cancelar y volver al menu anterior (o Enter vacio)" -ForegroundColor Red
+            Write-Host (Get-AIOString 'environments.cancel_back_enter') -ForegroundColor Red
             Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
 
             $choice = 0
             do {
                 $answer = if (Get-Command Read-MenuOption -ErrorAction SilentlyContinue) {
-                    ([string](Read-MenuOption " Selecciona el numero de WinRE a editar")).Trim()
+                    ([string](Read-MenuOption (Get-AIOString 'environments.winre_select_prompt'))).Trim()
                 } else {
-                    ([string](Read-Host " Selecciona el numero de WinRE a editar (Enter o V cancela)")).Trim()
+                    ([string](Read-Host (Get-AIOString 'environments.winre_select_prompt_fb'))).Trim()
                 }
                 if ([string]::IsNullOrWhiteSpace($answer) -or $answer.ToUpperInvariant() -eq 'V') {
                     Write-Log -LogLevel INFO -Message "WinRE_Manager: Seleccion de candidato WinRE cancelada por el usuario."
@@ -354,7 +354,7 @@ function Manage-WinRE-Menu {
                     return
                 }
                 if (-not ([int]::TryParse($answer, [ref]$choice) -and $choice -ge 1 -and $choice -le $candidates.Count)) {
-                    Write-Warning "Seleccion invalida. Ingresa un numero entre 1 y $($candidates.Count), o V para cancelar."
+                    Write-Warning (Get-AIOString 'environments.winre_select_invalid' $candidates.Count)
                 }
             } until ($choice -ge 1 -and $choice -le $candidates.Count)
             $selected = $candidates[$choice - 1]
@@ -365,19 +365,19 @@ function Manage-WinRE-Menu {
         $destinationPath = Join-Path $Script:MOUNT_DIR 'Windows\System32\Recovery\winre.wim'
         $origItem = Get-Item -LiteralPath $winrePath -Force -ErrorAction Stop
         $origSizeMB = [math]::Round($origItem.Length / 1MB, 2)
-        $baseModeLabel = if ($Script:IMAGE_MOUNTED -eq 2) { "VHD / VHDX" } else { "Imagen WIM" }
+        $baseModeLabel = if ($Script:IMAGE_MOUNTED -eq 2) { "VHD / VHDX" } else { Get-AIOString 'environments.base_wim' }
 
         Write-Host ""
         Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
-        Write-Host "  Modo de sesion base : " -NoNewline -ForegroundColor Gray; Write-Host $baseModeLabel -ForegroundColor White
-        Write-Host "  Origen seleccionado : " -NoNewline -ForegroundColor Gray; Write-Host $selected.Label -ForegroundColor Cyan
-        Write-Host "  Tamano de origen    : " -NoNewline -ForegroundColor Gray; Write-Host "$origSizeMB MB" -ForegroundColor Yellow
-        Write-Host "  Destino final       : " -NoNewline -ForegroundColor Gray; Write-Host $destinationPath -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'environments.winre_lbl_base_mode') -NoNewline -ForegroundColor Gray; Write-Host $baseModeLabel -ForegroundColor White
+        Write-Host (Get-AIOString 'environments.winre_lbl_source') -NoNewline -ForegroundColor Gray; Write-Host $selected.Label -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'environments.winre_lbl_size') -NoNewline -ForegroundColor Gray; Write-Host "$origSizeMB MB" -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'environments.winre_lbl_dest') -NoNewline -ForegroundColor Gray; Write-Host $destinationPath -ForegroundColor Cyan
         Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
 
         Write-Log -LogLevel INFO -Message "WinRE_Manager: Origen -> $winrePath ($origSizeMB MB); destino -> $destinationPath; trabajo -> $workRoot"
 
-        Write-Host "`n[2/5] Respaldando metadatos SDDL/ACL y preparando copia de trabajo..." -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'environments.winre_step2') -ForegroundColor Yellow
         Enable-Privileges | Out-Null
         $metadata = Get-AIOWinREMetadata -Path $winrePath
         $originalHash = (Get-FileHash -LiteralPath $winrePath -Algorithm SHA256 -ErrorAction Stop).Hash
@@ -410,12 +410,12 @@ function Manage-WinRE-Menu {
         if ($images.Count -ne 1 -or $images[0].ImageIndex -ne 1) { throw 'Se esperaba un WinRE con un unico indice (1).' }
         $winreImgName = if ($images[0].ImageName) { $images[0].ImageName } else { 'Microsoft Windows Recovery Environment' }
         $winreImgVer  = if ($images[0].Version)   { $images[0].Version }   else { 'N/D' }
-        Write-Host "[OK] Copia aislada verificada (SHA-256 identico | $winreImgName v$winreImgVer)." -ForegroundColor Green
+        Write-Host (Get-AIOString 'environments.winre_copy_verified' $winreImgName $winreImgVer) -ForegroundColor Green
 
         $winreMount = Join-Path $workRoot 'Mount'
         New-Item -Path $winreMount -ItemType Directory -ErrorAction Stop | Out-Null
 
-        Write-Host "`n[3/5] Montando winre.wim con verificacion de integridad (/CheckIntegrity)..." -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'environments.winre_step3') -ForegroundColor Yellow
         Write-Log -LogLevel ACTION -Message "WinRE_Manager: Montando $tempWinrePath en $winreMount..."
         # Un montaje fallido puede quedar registrado: conservar la carpeta en ese caso.
         $activeMount = $true
@@ -423,8 +423,8 @@ function Manage-WinRE-Menu {
         foreach ($relative in @('Windows\System32\config\SYSTEM', 'Windows\System32\config\SOFTWARE', 'Windows\System32\winpeshl.exe')) {
             if (-not (Test-Path -LiteralPath (Join-Path $winreMount $relative) -PathType Leaf)) { throw "La imagen WinRE no contiene $relative." }
         }
-        Write-Host "[OK] Entorno WinRE montado y validado exitosamente." -ForegroundColor Green
-        Write-Host " -> Aislando contexto de registro para la sesion WinRE..." -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'environments.winre_mounted_ok') -ForegroundColor Green
+        Write-Host (Get-AIOString 'environments.winre_isolating_reg') -ForegroundColor DarkGray
         Unmount-Hives | Out-Null
         foreach ($name in @('MOUNT_DIR', 'IMAGE_MOUNTED', 'WIM_FILE_PATH', 'MOUNTED_INDEX', 'CachedControlSet',
             'OfflineUserClassesPresent', 'SDDL_Backups', 'FileSDDL_Backups', 'AIODashboardCache', 'ForceMenuRefresh')) {
@@ -448,25 +448,25 @@ function Manage-WinRE-Menu {
         do {
             Clear-Host
             Write-Host "=======================================================" -ForegroundColor Magenta
-            Write-Host "          MODO DE EDICION EN WINRE ACTIVO              " -ForegroundColor Magenta
+            Write-Host (Get-AIOString 'environments.winre_edit_title') -ForegroundColor Magenta
             Write-Host "=======================================================" -ForegroundColor Magenta
-            Write-Host "  Imagen WinRE     : " -NoNewline -ForegroundColor Gray; Write-Host "$winreImgName (v$winreImgVer)" -ForegroundColor White
-            Write-Host "  Origen           : " -NoNewline -ForegroundColor Gray; Write-Host "$($selected.Label) ($origSizeMB MB)" -ForegroundColor Cyan
-            Write-Host "  Montaje activo   : " -NoNewline -ForegroundColor Gray; Write-Host $winreMount -ForegroundColor Yellow
-            Write-Host "  Destino final    : " -NoNewline -ForegroundColor Gray; Write-Host $destinationPath -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'environments.winre_edit_img') -NoNewline -ForegroundColor Gray; Write-Host "$winreImgName (v$winreImgVer)" -ForegroundColor White
+            Write-Host (Get-AIOString 'environments.winre_edit_src') -NoNewline -ForegroundColor Gray; Write-Host "$($selected.Label) ($origSizeMB MB)" -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'environments.winre_edit_mnt') -NoNewline -ForegroundColor Gray; Write-Host $winreMount -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'environments.winre_edit_dst') -NoNewline -ForegroundColor Gray; Write-Host $destinationPath -ForegroundColor Cyan
             Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
             Write-Host ""
-            Write-Host "   [1] Inyectar Addons y Paquetes (.tpk, .bpk, .cab, .reg)" -ForegroundColor White
-            Write-Host "       (Integrar Microsoft DaRT, herramientas de diagnostico o paquetes WinPE)" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'environments.opt_inject_addons') -ForegroundColor White
+            Write-Host (Get-AIOString 'environments.winre_opt1_desc') -ForegroundColor Gray
             Write-Host ""
-            Write-Host "   [2] Inyectar Drivers / Controladores (.inf)" -ForegroundColor Cyan
-            Write-Host "       (Vital para soporte de discos NVMe, Intel VMD, RAID y red en recuperacion)" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'environments.opt_inject_drivers') -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'environments.winre_opt2_desc') -ForegroundColor Gray
             Write-Host ""
             Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
-            Write-Host "   [T] Terminar edicion y proceder a Guardar" -ForegroundColor Green
+            Write-Host (Get-AIOString 'environments.opt_finish_save') -ForegroundColor Green
             Write-Host ""
 
-            $option = ([string](Read-Host ' Elige una opcion')).Trim().ToUpperInvariant()
+            $option = ([string](Read-Host (Get-AIOString 'common.select_option_spaced'))).Trim().ToUpperInvariant()
             switch ($option) {
                 '1' {
                     try {
@@ -492,7 +492,7 @@ function Manage-WinRE-Menu {
                     Write-Log -LogLevel INFO -Message 'WinRE_Manager: El usuario finalizo la edicion interactiva.'
                 }
                 default {
-                    Write-Warning 'Opcion invalida. Selecciona 1, 2 o T.'
+                    Write-Warning (Get-AIOString 'environments.winre_opt_invalid')
                     Start-Sleep -Seconds 1
                 }
             }
@@ -500,22 +500,23 @@ function Manage-WinRE-Menu {
 
         Write-Host ""
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "           FINALIZAR SESION DE EDICION WINRE           " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'environments.winre_finish_title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "   [S] Guardar, optimizar (/Compress:max /Bootable) y publicar en destino" -ForegroundColor Green
-        Write-Host "   [N] Descartar todos los cambios y conservar el WinRE original intacto" -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'environments.winre_finish_yes') -ForegroundColor Green
+        Write-Host (Get-AIOString 'environments.winre_finish_no') -ForegroundColor Yellow
         Write-Host ""
 
         $save = $null
         do {
-            $save = ([string](Read-Host ' Guardar WinRE en Windows\System32\Recovery\winre.wim de la imagen principal? (S/N)')).Trim().ToUpperInvariant()
+            $rawSave = ([string](Read-Host (Get-AIOString 'environments.winre_save_prompt'))).Trim()
+            $save = if (Test-AIOYesResponse $rawSave) { 'S' } elseif (Test-AIONoResponse $rawSave) { 'N' } else { '' }
             if ($save -notin @('S', 'N')) {
-                Write-Warning 'Opcion invalida. Responde S (Guardar) o N (Descartar).'
+                Write-Warning (Get-AIOString 'environments.save_invalid_sn')
             }
         } until ($save -in @('S', 'N'))
 
         # Los hives deben quedar descargados antes de CUALQUIER desmontaje DISM.
-        $step4Label = if ($save -eq 'N') { "[4/4] Descargando colmenas y descartando montaje temporal de WinRE..." } else { "[4/5] Descargando colmenas y guardando montaje temporal de WinRE..." }
+        $step4Label = if ($save -eq 'N') { Get-AIOString 'environments.winre_step4_discard' } else { Get-AIOString 'environments.winre_step4_commit' }
         Write-Host "`n$step4Label" -ForegroundColor Yellow
         Unmount-Hives | Out-Null
         $hivesClosed = $true
@@ -525,20 +526,20 @@ function Manage-WinRE-Menu {
             Invoke-AIOWinREDism -DismArguments @('/Unmount-Image', "/MountDir:$winreMount", '/Discard')
             $activeMount = $false
             $cleanWork = $true
-            Write-Host "[OK] Cambios descartados; el WinRE original se conserva intacto." -ForegroundColor Gray
+            Write-Host (Get-AIOString 'environments.winre_discarded_ok') -ForegroundColor Gray
         } else {
             Write-Log -LogLevel ACTION -Message "WinRE_Manager: Guardando cambios en el montaje temporal (/Commit /CheckIntegrity)..."
             Invoke-AIOWinREDism -DismArguments @('/Unmount-Image', "/MountDir:$winreMount", '/Commit', '/CheckIntegrity')
             $activeMount = $false
             Wait-AIOWinREFile -Path $tempWinrePath
 
-            Write-Host "`n[5/5] Optimizando diccionario WIM (/Compress:max /Bootable), verificando y publicando..." -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'environments.winre_step5') -ForegroundColor Cyan
             $finalPath = Join-Path $workRoot 'winre_final.wim'
             Invoke-AIOWinREDism -DismArguments @('/Export-Image', "/SourceImageFile:$tempWinrePath", '/SourceIndex:1',
                 "/DestinationImageFile:$finalPath", '/Compress:max', '/Bootable', '/CheckIntegrity')
             Wait-AIOWinREFile -Path $finalPath
 
-            Write-Host " -> Verificando estructura interna del WinRE optimizado (montaje ReadOnly)..." -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'environments.winre_verify_ro') -ForegroundColor DarkGray
             $activeMount = $true
             Invoke-AIOWinREDism -DismArguments @('/Mount-Image', "/ImageFile:$finalPath", '/Index:1', "/MountDir:$winreMount", '/ReadOnly', '/CheckIntegrity')
             foreach ($relative in @('Windows\System32\config\SYSTEM', 'Windows\System32\config\SOFTWARE', 'Windows\System32\winpeshl.exe')) {
@@ -548,7 +549,7 @@ function Manage-WinRE-Menu {
             $activeMount = $false
             Wait-AIOWinREFile -Path $finalPath
 
-            Write-Host " -> Publicando atomicamente y restaurando SDDL/ACL de TrustedInstaller..." -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'environments.winre_pub_atomic') -ForegroundColor DarkGray
             Publish-AIOWinREFile -Source $finalPath -Destination $destinationPath -OriginalHash $destinationHash -Metadata $destinationMetadata -WorkRoot $workRoot
             $cleanWork = $true
 
@@ -557,13 +558,13 @@ function Manage-WinRE-Menu {
 
             Write-Host ""
             Write-Host "=======================================================" -ForegroundColor Green
-            Write-Host "  [EXITO] WinRE guardado, optimizado y verificado      " -ForegroundColor Green
+            Write-Host (Get-AIOString 'environments.winre_success_title') -ForegroundColor Green
             Write-Host "=======================================================" -ForegroundColor Green
-            Write-Host "  Destino    : $destinationPath" -ForegroundColor White
-            Write-Host "  Tamano     : $origSizeMB MB (original) -> $finalSizeMB MB (final)" -ForegroundColor Cyan
-            Write-Host "  Seguridad  : Hash SHA-256, SDDL, propietario y atributos verificados" -ForegroundColor Green
+            Write-Host (Get-AIOString 'environments.winre_success_dest' $destinationPath) -ForegroundColor White
+            Write-Host (Get-AIOString 'environments.winre_success_size' $origSizeMB $finalSizeMB) -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'environments.winre_success_sec') -ForegroundColor Green
             if ($context.IMAGE_MOUNTED.Value -eq 1) {
-                Write-Host "  Nota WIM   : Recuerda guardar tambien la imagen principal (install.wim) al desmontarla." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'environments.winre_success_note') -ForegroundColor Yellow
             }
             Write-Log -LogLevel INFO -Message "WinRE_Manager: Guardado y verificado en $destinationPath ($origSizeMB MB -> $finalSizeMB MB)."
         }
@@ -574,27 +575,27 @@ function Manage-WinRE-Menu {
         if ($contextChanged) {
             if (-not $hivesClosed) {
                 try { Unmount-Hives | Out-Null; $hivesClosed = $true }
-                catch { Write-Warning "Hives de WinRE aun abiertos: $($_.Exception.Message)" }
+                catch { Write-Warning (Get-AIOString 'environments.winre_hives_open' $_.Exception.Message) }
             }
             if ($hivesClosed) { Restore-AIOWinREContext -Context $context }
             else {
                 # Mantener la identidad real del registro hasta que pueda descargarse.
                 $Script:AIOWinREPendingContext = $context
-                Write-Warning 'El contexto sigue en WinRE. Vuelve a entrar en este gestor para liberar los hives y restaurar el contexto principal.'
+                Write-Warning (Get-AIOString 'environments.winre_ctx_still_open')
             }
         }
         $accessPathsRemoved = $true
         foreach ($access in $temporaryAccessPaths) {
             try { Remove-PartitionAccessPath -InputObject $access.Partition -AccessPath $access.AccessPath -ErrorAction Stop }
-            catch { $accessPathsRemoved = $false; Write-Warning "No se pudo retirar el acceso temporal $($access.AccessPath). Se conserva la carpeta." }
+            catch { $accessPathsRemoved = $false; Write-Warning (Get-AIOString 'environments.winre_access_keep' $access.AccessPath) }
         }
         if ($workRoot) {
             if ($cleanWork -and -not $activeMount -and $accessPathsRemoved -and $hivesClosed) {
                 try { Remove-Item -LiteralPath $workRoot -Recurse -Force -ErrorAction Stop }
-                catch { Write-Warning "No se pudo limpiar la carpeta temporal $workRoot." }
+                catch { Write-Warning (Get-AIOString 'environments.winre_temp_err' $workRoot) }
             } else {
-                Write-Warning "Se conserva el trabajo para recuperacion: $workRoot"
-                if ($activeMount) { Write-Warning "Revisa el montaje DISM antes de borrar carpetas: $winreMount" }
+                Write-Warning (Get-AIOString 'environments.winre_work_kept' $workRoot)
+                if ($activeMount) { Write-Warning (Get-AIOString 'environments.winre_check_dism' $winreMount) }
             }
         }
     }
@@ -605,7 +606,7 @@ function Manage-BootWim-Menu {
     $bootEditorSource = $MyInvocation.MyCommand.ScriptBlock.File
     Clear-Host
     Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host "        Gestor Inteligente de Arranque (boot.wim)      " -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'environments.boot_title') -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor Cyan
 
     Write-Log -LogLevel INFO -Message "BootWimManager: Iniciando modulo de gestion de arranque (boot.wim)."
@@ -613,14 +614,14 @@ function Manage-BootWim-Menu {
     # 1. Seguridad: Verificar que no haya nada montado
     if ($Script:IMAGE_MOUNTED -ne 0) {
         Write-Log -LogLevel WARN -Message "BootWimManager: Acceso bloqueado. Ya existe una imagen montada en $Script:MOUNT_DIR."
-        Write-Warning "Ya tienes una imagen montada ($Script:MOUNT_DIR)."
-        Write-Host "Debes desmontarla antes de editar el boot.wim para evitar conflictos." -ForegroundColor Gray
+        Write-Warning (Get-AIOString 'environments.boot_already_mounted' $Script:MOUNT_DIR)
+        Write-Host (Get-AIOString 'environments.boot_unmount_first') -ForegroundColor Gray
         Pause; return
     }
 
     # 2. Seleccionar archivo
-    Write-Host "`n[1/4] Seleccionando e inspeccionando archivo 'boot.wim'..." -ForegroundColor Yellow
-    $bootPath = Select-PathDialog -DialogType File -Title "Selecciona boot.wim" -Filter "Archivos WIM|*.wim"
+    Write-Host (Get-AIOString 'environments.boot_step1') -ForegroundColor Yellow
+    $bootPath = Select-PathDialog -DialogType File -Title (Get-AIOString 'environments.boot_dialog_title') -Filter (Get-AIOString 'environments.boot_filter')
     if (-not $bootPath) { 
         Write-Log -LogLevel INFO -Message "BootWimManager: El usuario cancelo la seleccion del archivo boot.wim."
         return 
@@ -628,21 +629,21 @@ function Manage-BootWim-Menu {
 
     $bootItem = Get-Item -LiteralPath $bootPath -Force -ErrorAction SilentlyContinue
     $bootSizeMB = if ($bootItem) { [math]::Round($bootItem.Length / 1MB, 2) } else { 0 }
-    Write-Host "Archivo seleccionado: " -NoNewline -ForegroundColor Gray
+    Write-Host (Get-AIOString 'environments.boot_selected_lbl') -NoNewline -ForegroundColor Gray
     Write-Host "$bootPath ($bootSizeMB MB)" -ForegroundColor Cyan
     Write-Log -LogLevel INFO -Message "BootWimManager: Archivo seleccionado -> $bootPath ($bootSizeMB MB)"
 
     # 3. Analizar Indices
-    Write-Host "`n[2/4] Analizando estructura de indices del boot.wim..." -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'environments.boot_step2') -ForegroundColor Yellow
     try {
         $images = @(Get-WindowsImage -ImagePath $bootPath -ErrorAction Stop)
     } catch {
         Write-Log -LogLevel ERROR -Message "BootWimManager: Fallo al leer la estructura de indices del WIM. Probable corrupcion. - $($_.Exception.Message)"
-        Write-Warning "Error leyendo el WIM. Esta corrupto?"
+        Write-Warning (Get-AIOString 'environments.boot_read_err')
         Pause; return
     }
 
-    Write-Host "`nIndices detectados en el archivo:" -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'environments.boot_indexes_found') -ForegroundColor Cyan
     Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
     $idxSetup = $null
     $idxPE = $null
@@ -668,25 +669,25 @@ function Manage-BootWim-Menu {
 
     # 4. Seleccion Inteligente
     Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host "        Que indice de boot.wim deseas editar?          " -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'environments.boot_which_idx_title') -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor Cyan
-    $peLabel = if ($null -ne $idxPE) { "Indice $idxPE" } else { "No detectado automaticamente" }
-    $setupLabel = if ($null -ne $idxSetup) { "Indice $idxSetup" } else { "No detectado automaticamente" }
+    $peLabel = if ($null -ne $idxPE) { Get-AIOString 'environments.idx_fmt' $idxPE } else { Get-AIOString 'environments.not_auto_detected' }
+    $setupLabel = if ($null -ne $idxSetup) { Get-AIOString 'environments.idx_fmt' $idxSetup } else { Get-AIOString 'environments.not_auto_detected' }
 
-    Write-Host "   [1] En Windows PE ($peLabel)" -ForegroundColor White
-    Write-Host "       (Para crear un USB booteable exclusivo de diagnostico y rescate)" -ForegroundColor Gray
+    Write-Host (Get-AIOString 'environments.boot_opt1_pe' $peLabel) -ForegroundColor White
+    Write-Host (Get-AIOString 'environments.boot_opt1_desc') -ForegroundColor Gray
     Write-Host ""
-    Write-Host "   [2] En el Instalador ($setupLabel)" -ForegroundColor White
-    Write-Host "       (Configurar Setup, bypass y fondo, inyectar DaRT o controladores)" -ForegroundColor Gray
+    Write-Host (Get-AIOString 'environments.boot_opt2_setup' $setupLabel) -ForegroundColor White
+    Write-Host (Get-AIOString 'environments.boot_opt2_desc') -ForegroundColor Gray
     Write-Host ""
-    Write-Host "   [M] Seleccion Manual por numero de Indice" -ForegroundColor DarkGray
-    Write-Host "   [V] Cancelar y volver al menu anterior (o Enter vacio)" -ForegroundColor Red
+    Write-Host (Get-AIOString 'environments.boot_opt_manual') -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'environments.cancel_back_enter') -ForegroundColor Red
     Write-Host ""
 
     $sel = if (Get-Command Read-MenuOption -ErrorAction SilentlyContinue) {
-        ([string](Read-MenuOption " Selecciona una opcion")).Trim().ToUpperInvariant()
+        ([string](Read-MenuOption (Get-AIOString 'environments.boot_select_prompt'))).Trim().ToUpperInvariant()
     } else {
-        ([string](Read-Host " Selecciona una opcion (Enter o V cancela)")).Trim().ToUpperInvariant()
+        ([string](Read-Host (Get-AIOString 'environments.boot_select_prompt_fb'))).Trim().ToUpperInvariant()
     }
 
     if ([string]::IsNullOrWhiteSpace($sel) -or $sel -eq 'V') {
@@ -698,14 +699,14 @@ function Manage-BootWim-Menu {
     switch ($sel) {
         "1" { $targetIndex = $idxPE }
         "2" { $targetIndex = $idxSetup }
-        "M" { $targetIndex = Read-Host " Introduce el numero de Indice manualmente" }
+        "M" { $targetIndex = Read-Host (Get-AIOString 'environments.boot_manual_prompt') }
     }
 
     $parsedIndex = 0
     if (-not [int]::TryParse([string]$targetIndex, [ref]$parsedIndex) -or
         $parsedIndex -lt 1 -or $parsedIndex -notin @($images | ForEach-Object { [int]$_.ImageIndex })) { 
         Write-Log -LogLevel WARN -Message "BootWimManager: Seleccion de indice invalida o vacia."
-        Write-Warning "Seleccion invalida."; Pause; return 
+        Write-Warning (Get-AIOString 'conversion.index_invalid'); Pause; return 
     }
 
     $targetIndex = $parsedIndex
@@ -715,7 +716,7 @@ function Manage-BootWim-Menu {
     $isSetupIndex = ([string]$selectedImage.ImageName -match $setupNamePattern)
     $selectedImgName = if ($selectedImage -and $selectedImage.ImageName) { $selectedImage.ImageName } else { "Indice $targetIndex" }
     $selectedImgVer  = if ($selectedImage -and $selectedImage.Version)   { $selectedImage.Version }   else { "N/D" }
-    $selectedRole    = if ($isSetupIndex) { "Instalador de Windows (Setup)" } elseif ([string]$selectedImage.ImageName -match "PE|Preinstallation") { "Windows PE (Rescate/Live)" } else { "Generico" }
+    $selectedRole    = if ($isSetupIndex) { Get-AIOString 'environments.role_setup' } elseif ([string]$selectedImage.ImageName -match "PE|Preinstallation") { Get-AIOString 'environments.role_winpe' } else { Get-AIOString 'environments.role_generic' }
 
     Write-Log -LogLevel INFO -Message "BootWimManager: Indice objetivo fijado en -> [$targetIndex] ($selectedImgName - $selectedRole)"
 
@@ -732,14 +733,14 @@ function Manage-BootWim-Menu {
 
         # Montaje Real
         Write-Log -LogLevel ACTION -Message "BootWimManager: Iniciando montaje del boot.wim (Indice: $targetIndex)..."
-        Write-Host "`n[3/4] Montando boot.wim (Indice $($targetIndex): $selectedImgName)..." -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'environments.boot_step3' $targetIndex $selectedImgName) -ForegroundColor Yellow
         dism /mount-wim /wimfile:"$Script:WIM_FILE_PATH" /index:$Script:MOUNTED_INDEX /mountdir:"$Script:MOUNT_DIR"
 
         if ($LASTEXITCODE -eq 0) {
             $bootMountActive = $true
             $Script:IMAGE_MOUNTED = 1
             $setupSession = New-AIOBootSetupSession -MountPath $Script:MOUNT_DIR -BootPath $bootPath -IsSetupIndex:$isSetupIndex
-            Write-Host "[OK] boot.wim montado exitosamente en $Script:MOUNT_DIR." -ForegroundColor Green
+            Write-Host (Get-AIOString 'environments.boot_mounted_ok' $Script:MOUNT_DIR) -ForegroundColor Green
             Write-Log -LogLevel INFO -Message "BootWimManager: Montaje exitoso. Desplegando menu de edicion en vivo."
 
             # --- MINI-MENU DE EDICION BOOT.WIM ---
@@ -747,23 +748,23 @@ function Manage-BootWim-Menu {
             while (-not $doneEditingBoot) {
                 Clear-Host
                 Write-Host "=======================================================" -ForegroundColor Magenta
-                Write-Host "             MODO EDICION BOOT.WIM ACTIVO              " -ForegroundColor Magenta
+                Write-Host (Get-AIOString 'environments.boot_edit_title') -ForegroundColor Magenta
                 Write-Host "=======================================================" -ForegroundColor Magenta
-                Write-Host "  Archivo boot.wim : " -NoNewline -ForegroundColor Gray; Write-Host "$bootPath ($bootSizeMB MB)" -ForegroundColor Cyan
-                Write-Host "  Indice montado   : " -NoNewline -ForegroundColor Gray; Write-Host "[$targetIndex] $selectedImgName (v$selectedImgVer)" -ForegroundColor White
-                Write-Host "  Rol detectado    : " -NoNewline -ForegroundColor Gray; Write-Host $selectedRole -ForegroundColor Yellow
-                Write-Host "  Montaje activo   : " -NoNewline -ForegroundColor Gray; Write-Host $Script:MOUNT_DIR -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'environments.boot_edit_file') -NoNewline -ForegroundColor Gray; Write-Host "$bootPath ($bootSizeMB MB)" -ForegroundColor Cyan
+                Write-Host (Get-AIOString 'environments.boot_edit_idx') -NoNewline -ForegroundColor Gray; Write-Host "[$targetIndex] $selectedImgName (v$selectedImgVer)" -ForegroundColor White
+                Write-Host (Get-AIOString 'environments.boot_edit_role') -NoNewline -ForegroundColor Gray; Write-Host $selectedRole -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'environments.winre_edit_mnt') -NoNewline -ForegroundColor Gray; Write-Host $Script:MOUNT_DIR -ForegroundColor Yellow
                 Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
                 Write-Host ""
-                Write-Host "   [1] Inyectar Addons y Paquetes (.tpk, .bpk, .cab, .reg)" -ForegroundColor White
-                Write-Host "       (Integrar Microsoft DaRT, herramientas de rescate o paquetes WinPE)" -ForegroundColor Gray
+                Write-Host (Get-AIOString 'environments.opt_inject_addons') -ForegroundColor White
+                Write-Host (Get-AIOString 'environments.boot_opt1_edit_desc') -ForegroundColor Gray
                 Write-Host ""
-                Write-Host "   [2] Inyectar Drivers / Controladores (.inf)" -ForegroundColor Cyan
-                Write-Host "       (Vital para detectar unidades NVMe, Intel VMD, RAID y red en el arranque)" -ForegroundColor Gray
+                Write-Host (Get-AIOString 'environments.opt_inject_drivers') -ForegroundColor Cyan
+                Write-Host (Get-AIOString 'environments.boot_opt2_edit_desc') -ForegroundColor Gray
                 if ($isSetupIndex) {
                     Write-Host ""
-                    Write-Host "   [3] Setup Legacy, clasico Windows 10, bypass y fondo (GUI)" -ForegroundColor Yellow
-                    Write-Host "       (Activar, personalizar o restaurar los recursos originales del instalador)" -ForegroundColor Gray
+                    Write-Host (Get-AIOString 'environments.boot_opt3_setup') -ForegroundColor Yellow
+                    Write-Host (Get-AIOString 'environments.boot_opt3_desc') -ForegroundColor Gray
                     $summaryText = Get-AIOBootSetupSessionSummary -Session $setupSession
                     foreach ($sLine in ($summaryText -split "\r?\n")) {
                         if (-not [string]::IsNullOrWhiteSpace($sLine)) {
@@ -774,10 +775,10 @@ function Manage-BootWim-Menu {
                 }
                 Write-Host ""
                 Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
-                Write-Host "   [T] Terminar edicion y proceder a Guardar" -ForegroundColor Green
+                Write-Host (Get-AIOString 'environments.opt_finish_save') -ForegroundColor Green
                 Write-Host ""
                 
-                $opcionBoot = ([string](Read-Host " Elige una opcion")).Trim().ToUpperInvariant()
+                $opcionBoot = ([string](Read-Host (Get-AIOString 'common.select_option_spaced'))).Trim().ToUpperInvariant()
                 switch ($opcionBoot) {
                     "1" {
                         try {
@@ -812,21 +813,22 @@ function Manage-BootWim-Menu {
                     "T" {
                         Write-Host ""
                         Write-Host "=======================================================" -ForegroundColor Cyan
-                        Write-Host "          FINALIZAR SESION DE EDICION BOOT.WIM         " -ForegroundColor Cyan
+                        Write-Host (Get-AIOString 'environments.boot_finish_title') -ForegroundColor Cyan
                         Write-Host "=======================================================" -ForegroundColor Cyan
-                        Write-Host "   [S] Guardar cambios en boot.wim y aplicar recursos externos preparados (Commit)" -ForegroundColor Green
-                        Write-Host "   [N] Descartar todos los cambios y revertir modificaciones externas (Discard)" -ForegroundColor Yellow
+                        Write-Host (Get-AIOString 'environments.boot_finish_yes') -ForegroundColor Green
+                        Write-Host (Get-AIOString 'environments.boot_finish_no') -ForegroundColor Yellow
                         Write-Host ""
 
                         $saveBoot = $null
                         do {
-                            $saveBoot = ([string](Read-Host " Deseas GUARDAR boot.wim y los cambios externos preparados (fondo/setupprep)? (S/N)")).Trim().ToUpperInvariant()
+                            $rawSaveBoot = ([string](Read-Host (Get-AIOString 'environments.boot_save_prompt'))).Trim()
+                            $saveBoot = if (Test-AIOYesResponse $rawSaveBoot) { 'S' } elseif (Test-AIONoResponse $rawSaveBoot) { 'N' } else { '' }
                             if ($saveBoot -notin @('S', 'N')) {
-                                Write-Warning 'Opcion invalida. Responde S (Guardar) o N (Descartar).'
+                                Write-Warning (Get-AIOString 'environments.save_invalid_sn')
                             }
                         } until ($saveBoot -in @('S', 'N'))
 
-                        Write-Host "`n[4/4] Procesando cierre y desmontaje de boot.wim..." -ForegroundColor Yellow
+                        Write-Host (Get-AIOString 'environments.boot_step4') -ForegroundColor Yellow
                         $unmountCalled = $false
                         try {
                             if ($saveBoot -eq 'S') {
@@ -837,7 +839,7 @@ function Manage-BootWim-Menu {
                                 if ($Script:IMAGE_MOUNTED -ne 0) { throw 'DISM no completo el guardado. El montaje sigue activo.' }
                                 try { Complete-AIOBootSetupCommit -Session $setupSession }
                                 catch {
-                                    Write-Warning "boot.wim guardado, pero revisa los cambios del medio externo: $($_.Exception.Message)"
+                                    Write-Warning (Get-AIOString 'environments.boot_external_warn' $_.Exception.Message)
                                     Pause
                                 }
                                 $afterItem = Get-Item -LiteralPath $bootPath -Force -ErrorAction SilentlyContinue
@@ -867,7 +869,7 @@ function Manage-BootWim-Menu {
                             }
                         }
                     }
-                    default { Write-Warning "Opcion invalida."; Start-Sleep -Seconds 1 }
+                    default { Write-Warning (Get-AIOString 'common.invalid_option'); Start-Sleep -Seconds 1 }
                 }
             }
 
@@ -890,7 +892,7 @@ function Manage-BootWim-Menu {
             $Script:WIM_FILE_PATH = $null
             $Script:MOUNTED_INDEX = $null
         } else {
-            Write-Warning 'boot.wim sigue montado. Usa Gestion de Imagen para recuperarlo o descartar los cambios.'
+            Write-Warning (Get-AIOString 'environments.boot_still_mounted')
         }
         Pause
     }

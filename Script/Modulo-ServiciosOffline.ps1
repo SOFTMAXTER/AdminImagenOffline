@@ -48,7 +48,7 @@ function Show-Services-Offline-GUI {
 
     # 1. Validaciones
     if ($Script:IMAGE_MOUNTED -eq 0) { 
-        [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
+        [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'drivers.mount_first'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         return 
     }
 
@@ -59,7 +59,7 @@ function Show-Services-Offline-GUI {
     if (Test-Path $servicesFile) { 
         . $servicesFile 
     } else { 
-        [System.Windows.Forms.MessageBox]::Show("No se encontro Servicios.ps1", "Error", 'OK', 'Error')
+        [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'servicios.catalog_missing'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         return 
     }
 
@@ -72,7 +72,7 @@ function Show-Services-Offline-GUI {
 
     # 4. Configuracion del Formulario
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Optimizador de Servicios Offline - $Script:MOUNT_DIR"
+    $form.Text = Get-AIOString 'servicios.form_title' $Script:MOUNT_DIR
     $form.Size = New-Object System.Drawing.Size(1100, 750)
     $form.StartPosition = "CenterScreen"
     $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -89,7 +89,7 @@ function Show-Services-Offline-GUI {
 
     # Titulo
     $lblTitle = New-Object System.Windows.Forms.Label
-    $lblTitle.Text = "Gestion de Servicios por Categoria"
+    $lblTitle.Text = Get-AIOString 'servicios.title'
     $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
     $lblTitle.Location = New-Object System.Drawing.Point(20, 10)
     $lblTitle.AutoSize = $true
@@ -113,7 +113,7 @@ function Show-Services-Offline-GUI {
     $txtServiceDesc.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
     $txtServiceDesc.ForeColor = [System.Drawing.Color]::White
     $txtServiceDesc.BorderStyle = "FixedSingle"
-    $txtServiceDesc.Text = "Seleccione un servicio para leer su descripcion detallada..."
+    $txtServiceDesc.Text = Get-AIOString 'servicios.desc_placeholder'
     $form.Controls.Add($txtServiceDesc)
 
     # --- PANEL DE ACCIONES ---
@@ -126,7 +126,7 @@ function Show-Services-Offline-GUI {
 
     # Barra de Estado
     $lblStatus = New-Object System.Windows.Forms.Label
-    $lblStatus.Text = "Cargando Hives... espera."
+    $lblStatus.Text = Get-AIOString 'servicios.status_loading_hives'
     $lblStatus.Location = New-Object System.Drawing.Point(10, 10)
     $lblStatus.AutoSize = $true
     $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
@@ -134,7 +134,7 @@ function Show-Services-Offline-GUI {
 
     # Boton Marcar Todo
     $btnSelectAll = New-Object System.Windows.Forms.Button
-    $btnSelectAll.Text = "Marcar Todo"
+    $btnSelectAll.Text = Get-AIOString 'servicios.btn_select_all'
     $btnSelectAll.Location = New-Object System.Drawing.Point(10, 40)
     $btnSelectAll.Size = New-Object System.Drawing.Size(140, 40)
     $btnSelectAll.BackColor = [System.Drawing.Color]::Gray
@@ -144,7 +144,7 @@ function Show-Services-Offline-GUI {
 
     # Boton Restaurar (NUEVO)
     $btnRestore = New-Object System.Windows.Forms.Button
-    $btnRestore.Text = "RESTAURAR ORIGINALES"
+    $btnRestore.Text = Get-AIOString 'servicios.btn_restore'
     $btnRestore.Location = New-Object System.Drawing.Point(400, 40)
     $btnRestore.Size = New-Object System.Drawing.Size(280, 40)
     $btnRestore.BackColor = [System.Drawing.Color]::FromArgb(200, 100, 0)
@@ -156,7 +156,7 @@ function Show-Services-Offline-GUI {
 
     # Boton Deshabilitar
     $btnApply = New-Object System.Windows.Forms.Button
-    $btnApply.Text = "DESHABILITAR SELECCION"
+    $btnApply.Text = Get-AIOString 'servicios.btn_disable'
     $btnApply.Location = New-Object System.Drawing.Point(700, 40)
     $btnApply.Size = New-Object System.Drawing.Size(320, 40)
     $btnApply.BackColor = [System.Drawing.Color]::Crimson
@@ -200,10 +200,10 @@ function Show-Services-Offline-GUI {
             $lv.ForeColor = [System.Drawing.Color]::White
             $lv.BorderStyle = "None"
 
-            $lv.Columns.Add("Servicio", 200) | Out-Null
-            $lv.Columns.Add("Estado Actual", 120) | Out-Null
-            $lv.Columns.Add("Config. Original", 120) | Out-Null
-            $lv.Columns.Add("Descripcion", 450) | Out-Null
+            $lv.Columns.Add((Get-AIOString 'servicios.col_service'), 200) | Out-Null
+            $lv.Columns.Add((Get-AIOString 'servicios.col_current_state'), 120) | Out-Null
+            $lv.Columns.Add((Get-AIOString 'servicios.col_orig_config'), 120) | Out-Null
+            $lv.Columns.Add((Get-AIOString 'servicios.col_description'), 450) | Out-Null
 
             $lv.Add_SelectedIndexChanged({
                 if ($this.SelectedItems.Count -gt 0) {
@@ -211,7 +211,7 @@ function Show-Services-Offline-GUI {
                     $txtServiceDesc.Text = $svcObj.Description
                     $txtServiceDesc.ForeColor = [System.Drawing.Color]::White
                 } else {
-                    $txtServiceDesc.Text = "Seleccione un servicio para leer su descripción detallada..."
+                    $txtServiceDesc.Text = Get-AIOString 'servicios.desc_placeholder'
                     $txtServiceDesc.ForeColor = [System.Drawing.Color]::DarkGray
                 }
             })
@@ -283,7 +283,7 @@ function Show-Services-Offline-GUI {
         }
 
         $tabControl.ResumeLayout()
-        $lblStatus.Text = "Carga lista. $totalServices servicios encontrados."
+        $lblStatus.Text = Get-AIOString 'servicios.status_loaded' $totalServices
         $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
     })
 
@@ -300,12 +300,12 @@ function Show-Services-Offline-GUI {
 
         if ($allChecked.Count -eq 0) { 
             Write-Log -LogLevel WARN -Message "ServiceManager: Intento de ejecucion sin servicios seleccionados."
-            [System.Windows.Forms.MessageBox]::Show("No hay servicios seleccionados.", "Aviso", 'OK', 'Warning')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'servicios.msg_none_selected'), (Get-AIOString 'servicios.notice_title'), 'OK', 'Warning')
             return 
         }
 
-        $actionTxt = if ($Mode -eq 'Disable') { "DESHABILITAR" } else { "RESTAURAR" }
-        $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a $actionTxt $($allChecked.Count) servicios.`nEstas seguro?", "Confirmar", 'YesNo', 'Warning')
+        $actionTxt = if ($Mode -eq 'Disable') { Get-AIOString 'servicios.action_disable' } else { Get-AIOString 'servicios.action_restore' }
+        $confirm = [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'servicios.confirm_action' $actionTxt $allChecked.Count), (Get-AIOString 'drivers.confirm_title'), 'YesNo', 'Warning')
         if ($confirm -eq 'No') { 
             Write-Log -LogLevel INFO -Message "ServiceManager: Operacion cancelada por el usuario."
             return 
@@ -335,7 +335,7 @@ function Show-Services-Offline-GUI {
                 $ctrlSetProc = Get-OfflineControlSet
                 $regPath = "Registry::HKLM\OfflineSystem\$ctrlSetProc\Services\$svcName"
                 
-                $lblStatus.Text = "$actionTxt Servicio: $svcName..."
+                $lblStatus.Text = Get-AIOString 'servicios.status_processing' $actionTxt $svcName
                 $form.Refresh()
 
                 # Determinar Valor
@@ -362,11 +362,11 @@ function Show-Services-Offline-GUI {
                     Set-ItemProperty -Path $regPath -Name "Start" -Value $targetVal -Type DWord -Force -ErrorAction Stop
                     
                     if ($Mode -eq 'Disable') {
-                        $item.SubItems[1].Text = "Deshabilitado"
+                        $item.SubItems[1].Text = Get-AIOString 'servicios.state_disabled'
                         $item.ForeColor = [System.Drawing.Color]::LightGreen
                     } else {
                         $restoredText = if ($targetVal -eq 2) { "Automatico" } else { "Manual" }
-                        $item.SubItems[1].Text = "$restoredText (Restaurado)"
+                        $item.SubItems[1].Text = Get-AIOString 'servicios.state_restored_fmt' $restoredText
                         $item.ForeColor = [System.Drawing.Color]::Cyan
                     }
                     
@@ -382,10 +382,10 @@ function Show-Services-Offline-GUI {
                     
                     if ($proc.ExitCode -eq 0) {
                         if ($Mode -eq 'Disable') {
-                            $item.SubItems[1].Text = "Deshabilitado"
+                            $item.SubItems[1].Text = Get-AIOString 'servicios.state_disabled'
                             $item.ForeColor = [System.Drawing.Color]::LightGreen
                         } else {
-                            $item.SubItems[1].Text = "Restaurado"
+                            $item.SubItems[1].Text = Get-AIOString 'servicios.state_restored'
                             $item.ForeColor = [System.Drawing.Color]::Cyan
                         }
                         $item.Checked = $false
@@ -394,7 +394,7 @@ function Show-Services-Offline-GUI {
                     } else {
                         $errCount++
                         $item.ForeColor = [System.Drawing.Color]::Red
-                        $item.SubItems[1].Text = "ERROR ACCESO"
+                        $item.SubItems[1].Text = Get-AIOString 'servicios.state_access_error'
                         Write-Log -LogLevel ERROR -Message "ServiceManager: Falla critica para [$svcName]. Fallback reg.exe devolvio codigo: $($proc.ExitCode)"
                     }
                 } finally {
@@ -408,12 +408,12 @@ function Show-Services-Offline-GUI {
             }
 
             Write-Log -LogLevel ACTION -Message "ServiceManager: Proceso finalizado. Exitos: $successCount | Errores: $errCount"
-            $lblStatus.Text = "Proceso finalizado."
-            [System.Windows.Forms.MessageBox]::Show("Procesados: $successCount`nErrores: $errCount", "Informe", 'OK', 'Information')
+            $lblStatus.Text = Get-AIOString 'servicios.status_done'
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'servicios.msg_report' $successCount $errCount), (Get-AIOString 'servicios.report_title'), 'OK', 'Information')
 
         } catch {
             Write-Log -LogLevel ERROR -Message "ServiceManager: Error inesperado durante el proceso - $($_.Exception.Message)"
-            [System.Windows.Forms.MessageBox]::Show("Ocurrio un error inesperado durante el proceso:`n`n$($_.Exception.Message)", "Error", 'OK', 'Error')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'servicios.msg_unexpected_err' $_.Exception.Message), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         } finally {
             $progressBar.Visible = $false
             $form.Cursor = [System.Windows.Forms.Cursors]::Default
@@ -442,14 +442,14 @@ function Show-Services-Offline-GUI {
     # Cierre Seguro
     $form.Add_FormClosing({ 
         if (-not $btnApply.Enabled) {
-            [System.Windows.Forms.MessageBox]::Show("Hay una operacion en curso. Espera a que finalice antes de cerrar.", "Advertencia", 'OK', 'Warning')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'servicios.warn_wait_finish'), (Get-AIOString 'drivers.warn_title'), 'OK', 'Warning')
             $_.Cancel = $true
             return
         }
 
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Estas seguro de que deseas salir?", 
-            "Confirmar Salida", 
+            (Get-AIOString 'metadata.confirm_exit_body'),
+            (Get-AIOString 'metadata.confirm_exit_title'), 
             [System.Windows.Forms.MessageBoxButtons]::YesNo, 
             [System.Windows.Forms.MessageBoxIcon]::Question
         )
@@ -457,7 +457,7 @@ function Show-Services-Offline-GUI {
         if ($confirm -eq 'No') {
             $_.Cancel = $true
         } else {
-            $lblStatus.Text = "Desmontando Hives..."
+            $lblStatus.Text = Get-AIOString 'servicios.status_unloading_hives'
             $form.Refresh()
             Start-Sleep -Milliseconds 500
             Unmount-Hives

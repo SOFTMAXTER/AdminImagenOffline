@@ -49,7 +49,7 @@ function Show-RegPreview-GUI {
     # 1. Configuracion de la Ventana (Optimizada)
     Add-Type -AssemblyName System.Windows.Forms
     $pForm = New-Object System.Windows.Forms.Form
-    $pForm.Text = "Vista Previa Rapida - $([System.IO.Path]::GetFileName($FilePath))"
+    $pForm.Text = Get-AIOString 'tweaks.preview_title' ([System.IO.Path]::GetFileName($FilePath))
     $pForm.Size = New-Object System.Drawing.Size(1200, 600)
     $pForm.StartPosition = "CenterParent"
     $pForm.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -58,7 +58,7 @@ function Show-RegPreview-GUI {
     $pForm.MaximizeBox = $false
 
     $lbl = New-Object System.Windows.Forms.Label
-    $lbl.Text = "Analizando cambios... (Modo Turbo .NET)"
+    $lbl.Text = Get-AIOString 'tweaks.preview_analyzing'
     $lbl.Location = New-Object System.Drawing.Point(15, 10)
     $lbl.AutoSize = $true
     $lbl.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
@@ -75,15 +75,15 @@ function Show-RegPreview-GUI {
     # Doble buffer para evitar parpadeo
     $lvP.GetType().GetProperty("DoubleBuffered", [System.Reflection.BindingFlags]"NonPublic,Instance").SetValue($lvP, $true, $null)
 
-    $lvP.Columns.Add("Tipo", 80) | Out-Null
-    $lvP.Columns.Add("Nombre / Ruta", 550) | Out-Null
-    $lvP.Columns.Add("Valor en Imagen (Actual)", 250) | Out-Null
-    $lvP.Columns.Add("Valor en Archivo (Nuevo)", 250) | Out-Null
+    $lvP.Columns.Add((Get-AIOString 'tweaks.col_type'), 80) | Out-Null
+    $lvP.Columns.Add((Get-AIOString 'tweaks.col_name_path'), 550) | Out-Null
+    $lvP.Columns.Add((Get-AIOString 'tweaks.col_val_img'), 250) | Out-Null
+    $lvP.Columns.Add((Get-AIOString 'tweaks.col_val_file'), 250) | Out-Null
 
     $pForm.Controls.Add($lvP)
 
     $btnConfirm = New-Object System.Windows.Forms.Button
-    $btnConfirm.Text = "CONFIRMAR IMPORTACION"
+    $btnConfirm.Text = Get-AIOString 'tweaks.btn_confirm_import'
     $btnConfirm.Location = New-Object System.Drawing.Point(965, 530)
     $btnConfirm.Size = New-Object System.Drawing.Size(200, 30)
     $btnConfirm.BackColor = [System.Drawing.Color]::SeaGreen
@@ -93,7 +93,7 @@ function Show-RegPreview-GUI {
     $btnConfirm.Enabled = $false # Deshabilitado hasta terminar carga
 
     $btnCancel = New-Object System.Windows.Forms.Button
-    $btnCancel.Text = "Cancelar"
+    $btnCancel.Text = Get-AIOString 'tweaks.btn_cancel'
     $btnCancel.Location = New-Object System.Drawing.Point(850, 530)
     $btnCancel.Size = New-Object System.Drawing.Size(100, 30)
     $btnCancel.BackColor = [System.Drawing.Color]::Crimson
@@ -163,12 +163,12 @@ function Show-RegPreview-GUI {
                         if ($currentSubKeyObj) { $exists = $true }
                     } catch {}
 
-                    $item = New-Object System.Windows.Forms.ListViewItem("CLAVE")
+                    $item = New-Object System.Windows.Forms.ListViewItem((Get-AIOString 'tweaks.preview_key'))
                     $item.SubItems.Add($keyRaw) | Out-Null
                     
                     if ($isDelete) {
                         $item.SubItems.Add("EXISTE") | Out-Null
-                        $item.SubItems.Add(">>> ELIMINAR <<<") | Out-Null
+                        $item.SubItems.Add((Get-AIOString 'tweaks.preview_delete')) | Out-Null
                         $item.ForeColor = [System.Drawing.Color]::Salmon
                     } else {
                         $item.SubItems.Add( $(if($exists){"EXISTE"}else{"NUEVA"}) ) | Out-Null
@@ -191,7 +191,7 @@ function Show-RegPreview-GUI {
                         }
                     }
 
-                    $item = New-Object System.Windows.Forms.ListViewItem("   Valor")
+                    $item = New-Object System.Windows.Forms.ListViewItem((Get-AIOString 'tweaks.preview_value'))
                     $item.SubItems.Add($valName) | Out-Null
                     $item.SubItems.Add("$currVal") | Out-Null
                     $item.SubItems.Add("$newVal") | Out-Null
@@ -228,7 +228,7 @@ function Show-RegPreview-GUI {
                         }
                     }
 
-                    $item = New-Object System.Windows.Forms.ListViewItem("   Valor")
+                    $item = New-Object System.Windows.Forms.ListViewItem((Get-AIOString 'tweaks.preview_value'))
                     $item.SubItems.Add($valName) | Out-Null
                     $item.SubItems.Add("$currVal") | Out-Null
                     $item.SubItems.Add("$newVal") | Out-Null
@@ -240,11 +240,11 @@ function Show-RegPreview-GUI {
             if ($currentSubKeyObj) { $currentSubKeyObj.Close() }
             
         } catch {
-            [System.Windows.Forms.MessageBox]::Show("Error leyendo vista previa: $_", "Error", 'OK', 'Error')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.preview_err' $_), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         } finally {
             $lvP.EndUpdate()
             $pForm.Cursor = [System.Windows.Forms.Cursors]::Default
-            $lbl.Text = "Analisis completado."
+            $lbl.Text = Get-AIOString 'tweaks.preview_done'
             $btnConfirm.Enabled = $true
         }
     })
@@ -261,14 +261,14 @@ function Show-RegQueue-GUI {
     Add-Type -AssemblyName System.Windows.Forms
 
     if ($Script:IMAGE_MOUNTED -eq 0) {
-        [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
+        [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'drivers.mount_first'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         return
     }
 
     Add-Type -AssemblyName System.Drawing
 
     $frmQ = New-Object System.Windows.Forms.Form
-    $frmQ.Text = "Gestor de Importacion en Lote y Perfiles (.REG)"
+    $frmQ.Text = Get-AIOString 'tweaks.queue_title'
     $frmQ.Size = New-Object System.Drawing.Size(950, 650)
     $frmQ.StartPosition = "CenterParent"
     $frmQ.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -277,7 +277,7 @@ function Show-RegQueue-GUI {
     $frmQ.MaximizeBox = $false
 
     $lblQ = New-Object System.Windows.Forms.Label
-    $lblQ.Text = "Cola de Procesamiento de Registro"
+    $lblQ.Text = Get-AIOString 'tweaks.queue_header'
     $lblQ.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
     $lblQ.Location = "20, 15"; $lblQ.AutoSize = $true
     $frmQ.Controls.Add($lblQ)
@@ -293,14 +293,14 @@ function Show-RegQueue-GUI {
     $lvQ.ForeColor = [System.Drawing.Color]::White
     $lvQ.HideSelection = $false
 
-    $lvQ.Columns.Add("Estado", 140) | Out-Null
-    $lvQ.Columns.Add("Archivo", 250) | Out-Null
-    $lvQ.Columns.Add("Ruta Completa", 480) | Out-Null
+    $lvQ.Columns.Add((Get-AIOString 'addons.col_status'), 140) | Out-Null
+    $lvQ.Columns.Add((Get-AIOString 'addons.col_file'), 250) | Out-Null
+    $lvQ.Columns.Add((Get-AIOString 'addons.col_path'), 480) | Out-Null
     $frmQ.Controls.Add($lvQ)
 
     # --- BOTONES DE CONTROL DE COLA ---
     $btnAdd = New-Object System.Windows.Forms.Button
-    $btnAdd.Text = "+ Agregar"
+    $btnAdd.Text = Get-AIOString 'tweaks.btn_add'
     $btnAdd.Location = "20, 460"
     $btnAdd.Size = "100, 35"
     $btnAdd.BackColor = [System.Drawing.Color]::RoyalBlue
@@ -308,7 +308,7 @@ function Show-RegQueue-GUI {
     $frmQ.Controls.Add($btnAdd)
 
     $btnRemove = New-Object System.Windows.Forms.Button
-    $btnRemove.Text = "- Quitar"
+    $btnRemove.Text = Get-AIOString 'tweaks.btn_remove'
     $btnRemove.Location = "130, 460"
     $btnRemove.Size = "100, 35"
     $btnRemove.BackColor = [System.Drawing.Color]::Crimson
@@ -316,7 +316,7 @@ function Show-RegQueue-GUI {
     $frmQ.Controls.Add($btnRemove)
 
     $btnClear = New-Object System.Windows.Forms.Button
-    $btnClear.Text = "Limpiar"
+    $btnClear.Text = Get-AIOString 'tweaks.btn_clear'
     $btnClear.Location = "240, 460"
     $btnClear.Size = "100, 35"
     $btnClear.BackColor = [System.Drawing.Color]::Gray
@@ -324,7 +324,7 @@ function Show-RegQueue-GUI {
     $frmQ.Controls.Add($btnClear)
 
     $btnPreview = New-Object System.Windows.Forms.Button
-    $btnPreview.Text = "Auditar (Vista Previa)"
+    $btnPreview.Text = Get-AIOString 'tweaks.btn_preview'
     $btnPreview.Location = "350, 460"
     $btnPreview.Size = "160, 35"
     $btnPreview.BackColor = [System.Drawing.Color]::Teal
@@ -333,7 +333,7 @@ function Show-RegQueue-GUI {
 
     # --- NUEVOS BOTONES DE PERFIL ---
     $btnLoadProfile = New-Object System.Windows.Forms.Button
-    $btnLoadProfile.Text = "Cargar Perfil"
+    $btnLoadProfile.Text = Get-AIOString 'tweaks.btn_load_profile'
     $btnLoadProfile.Location = "20, 510"
     $btnLoadProfile.Size = "140, 35"
     $btnLoadProfile.BackColor = [System.Drawing.Color]::DarkOrchid
@@ -341,7 +341,7 @@ function Show-RegQueue-GUI {
     $frmQ.Controls.Add($btnLoadProfile)
 
     $btnSaveProfile = New-Object System.Windows.Forms.Button
-    $btnSaveProfile.Text = "Guardar Perfil"
+    $btnSaveProfile.Text = Get-AIOString 'tweaks.btn_save_profile'
     $btnSaveProfile.Location = "170, 510"
     $btnSaveProfile.Size = "140, 35"
     $btnSaveProfile.BackColor = [System.Drawing.Color]::Indigo
@@ -350,7 +350,7 @@ function Show-RegQueue-GUI {
 
     # --- BOTON DE PROCESO ---
     $btnProcess = New-Object System.Windows.Forms.Button
-    $btnProcess.Text = "PROCESAR LOTE MAESTRO"
+    $btnProcess.Text = Get-AIOString 'tweaks.btn_process_batch'
     $btnProcess.Location = "640, 470"
     $btnProcess.Size = "270, 60"
     $btnProcess.BackColor = [System.Drawing.Color]::SeaGreen
@@ -366,7 +366,7 @@ function Show-RegQueue-GUI {
     $frmQ.Controls.Add($progressBarQ)
 
     $lblStatus = New-Object System.Windows.Forms.Label
-    $lblStatus.Text = "Agregue archivos o cargue un perfil para comenzar."
+    $lblStatus.Text = Get-AIOString 'tweaks.queue_initial'
     $lblStatus.Location = "20, 570"
     $lblStatus.AutoSize = $true
     $lblStatus.ForeColor = [System.Drawing.Color]::Cyan
@@ -375,7 +375,7 @@ function Show-RegQueue-GUI {
     # --- EVENTOS BÁSICOS ---
     $btnAdd.Add_Click({
         $ofd = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "Archivos de Registro (*.reg)|*.reg"
+        $ofd.Filter = Get-AIOString 'tweaks.reg_filter'
         $ofd.Multiselect = $true
         
         if ($ofd.ShowDialog() -eq 'OK') {
@@ -396,23 +396,23 @@ function Show-RegQueue-GUI {
                 }
             }
             $lvQ.EndUpdate()
-            $lblStatus.Text = "Archivos en cola: $($lvQ.Items.Count)"
+            $lblStatus.Text = Get-AIOString 'tweaks.queue_count' $lvQ.Items.Count
         }
     })
 
     $btnRemove.Add_Click({
         foreach ($item in $lvQ.SelectedItems) { $lvQ.Items.Remove($item) }
-        $lblStatus.Text = "Archivos en cola: $($lvQ.Items.Count)"
+        $lblStatus.Text = Get-AIOString 'tweaks.queue_count' $lvQ.Items.Count
     })
 
     $btnClear.Add_Click({
         $lvQ.Items.Clear()
-        $lblStatus.Text = "Cola vacia."
+        $lblStatus.Text = Get-AIOString 'tweaks.queue_empty'
     })
 
     $btnPreview.Add_Click({
         if ($lvQ.SelectedItems.Count -ne 1) {
-            [System.Windows.Forms.MessageBox]::Show("Selecciona exactamente un (1) archivo de la lista para auditarlo.", "Aviso", 'OK', 'Warning')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.select_one_audit'), (Get-AIOString 'servicios.notice_title'), 'OK', 'Warning')
             return
         }
         $selectedFilePath = $lvQ.SelectedItems[0].Tag
@@ -422,11 +422,11 @@ function Show-RegQueue-GUI {
     # --- EVENTOS DE PERFIL ---
     $btnSaveProfile.Add_Click({
         if ($lvQ.Items.Count -eq 0) {
-            [System.Windows.Forms.MessageBox]::Show("La cola esta vacia. Agrega archivos primero.", "Aviso", 'OK', 'Warning')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.queue_empty_warn'), (Get-AIOString 'servicios.notice_title'), 'OK', 'Warning')
             return
         }
         $sfd = New-Object System.Windows.Forms.SaveFileDialog
-        $sfd.Filter = "Perfil de Tweaks (*.txt)|*.txt"
+        $sfd.Filter = Get-AIOString 'tweaks.profile_filter'
         $sfd.FileName = "MiPerfilTweaks.txt"
         
         if ($sfd.ShowDialog() -eq 'OK') {
@@ -435,16 +435,16 @@ function Show-RegQueue-GUI {
             
             try {
                 $rutas | Out-File -FilePath $sfd.FileName -Encoding utf8
-                $lblStatus.Text = "Perfil guardado correctamente."
+                $lblStatus.Text = Get-AIOString 'tweaks.profile_saved'
             } catch {
-                [System.Windows.Forms.MessageBox]::Show("Error al guardar el perfil: $_", "Error", 'OK', 'Error')
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.profile_save_err' $_), (Get-AIOString 'common.error_title'), 'OK', 'Error')
             }
         }
     })
 
     $btnLoadProfile.Add_Click({
         $ofd = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter = "Perfil de Tweaks (*.txt)|*.txt"
+        $ofd.Filter = Get-AIOString 'tweaks.profile_filter'
         
         if ($ofd.ShowDialog() -eq 'OK') {
             try {
@@ -479,12 +479,12 @@ function Show-RegQueue-GUI {
                 }
                 $lvQ.EndUpdate()
                 
-                $lblStatus.Text = "Perfil cargado. Archivos en cola: $($lvQ.Items.Count)"
+                $lblStatus.Text = Get-AIOString 'tweaks.profile_loaded' $lvQ.Items.Count
                 if ($omitidos -gt 0) {
-                    [System.Windows.Forms.MessageBox]::Show("Se omitieron $omitidos archivos porque ya no existen en la ruta guardada.", "Aviso de Perfil", 'OK', 'Information')
+                    [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.profile_skipped' $omitidos), (Get-AIOString 'tweaks.profile_notice_title'), 'OK', 'Information')
                 }
             } catch {
-                [System.Windows.Forms.MessageBox]::Show("Error al leer el perfil: $_", "Error", 'OK', 'Error')
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.profile_read_err' $_), (Get-AIOString 'common.error_title'), 'OK', 'Error')
             }
         }
     })
@@ -493,11 +493,11 @@ function Show-RegQueue-GUI {
     $btnProcess.Add_Click({
         $pendingItems = @($lvQ.Items | Where-Object { $_.Text -eq "EN ESPERA" -or $_.Text -eq "ERROR LECTURA" })
         if ($pendingItems.Count -eq 0) {
-            [System.Windows.Forms.MessageBox]::Show("No hay archivos REG pendientes de procesar.", "Sin pendientes", 'OK', 'Information') | Out-Null
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.reg_none_pending'), (Get-AIOString 'addons.none_pending_title'), 'OK', 'Information') | Out-Null
             return
         }
 
-        $res = [System.Windows.Forms.MessageBox]::Show("Se importaran $($pendingItems.Count) archivos utilizando el motor de streaming seguro.`nDesea continuar?", "Confirmar Lote", 'YesNo', 'Question')
+        $res = [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.reg_confirm_batch' $pendingItems.Count), (Get-AIOString 'tweaks.reg_confirm_title'), 'YesNo', 'Question')
         if ($res -ne 'Yes') { return }
 
         $Script:SDDL_Backups.Clear()
@@ -550,12 +550,12 @@ function Show-RegQueue-GUI {
             }
 
             Write-Log -LogLevel INFO -Message "RegBatch: Lote finalizado. Exitos: $success, Errores: $errors."
-            $lblStatus.Text = "Procesamiento finalizado."
-            [System.Windows.Forms.MessageBox]::Show("Lote procesado.`nExitos: $success`nErrores: $errors", "Informe", 'OK', 'Information')
+            $lblStatus.Text = Get-AIOString 'tweaks.reg_done'
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.reg_report' $success $errors), (Get-AIOString 'servicios.report_title'), 'OK', 'Information')
 
         } catch {
             Write-Log -LogLevel ERROR -Message "RegBatch: Caída fatal del bucle maestro - $($_.Exception.Message)"
-            [System.Windows.Forms.MessageBox]::Show("Error inesperado en el bucle: $_", "Error", 'OK', 'Error')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.reg_loop_err' $_), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         } finally {
             $progressBarQ.Visible = $false
             $frmQ.Cursor = [System.Windows.Forms.Cursors]::Default
@@ -565,7 +565,7 @@ function Show-RegQueue-GUI {
 
     $frmQ.Add_FormClosing({
         if (-not $btnProcess.Enabled) {
-            [System.Windows.Forms.MessageBox]::Show("Hay un lote en proceso. Espera a que finalice antes de cerrar.", "Advertencia", 'OK', 'Warning')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.reg_busy_warn'), (Get-AIOString 'drivers.warn_title'), 'OK', 'Warning')
             $_.Cancel = $true
         }
     })
@@ -583,7 +583,7 @@ function Show-Tweaks-Offline-GUI {
 
     # 1. Validaciones Previas
     if ($Script:IMAGE_MOUNTED -eq 0) { 
-        [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
+        [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'drivers.mount_first'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         return 
     }
 
@@ -601,7 +601,7 @@ function Show-Tweaks-Offline-GUI {
     Add-Type -AssemblyName System.Collections 
 
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Optimizacion de Registro Offline (WIM) - $Script:MOUNT_DIR"
+    $form.Text = Get-AIOString 'tweaks.main_form_title' $Script:MOUNT_DIR
     $form.Size = New-Object System.Drawing.Size(1200, 800) 
     $form.StartPosition = "CenterScreen"
     $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -616,14 +616,14 @@ function Show-Tweaks-Offline-GUI {
     $toolTip.ShowAlways = $true
 
     $lblTitle = New-Object System.Windows.Forms.Label
-    $lblTitle.Text = "Gestor de Ajustes y Registro"
+    $lblTitle.Text = Get-AIOString 'tweaks.main_title'
     $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
     $lblTitle.Location = New-Object System.Drawing.Point(20, 10)
     $lblTitle.AutoSize = $true
     $form.Controls.Add($lblTitle)
 
     $btnImport = New-Object System.Windows.Forms.Button
-    $btnImport.Text = "IMPORTAR ARCHIVO .REG..."
+    $btnImport.Text = Get-AIOString 'tweaks.btn_import_reg'
     $btnImport.Location = New-Object System.Drawing.Point(950, 10)
     $btnImport.Size = New-Object System.Drawing.Size(200, 35)
     $btnImport.BackColor = [System.Drawing.Color]::RoyalBlue
@@ -693,7 +693,7 @@ function Show-Tweaks-Offline-GUI {
     $form.Controls.Add($pnlActions)
 
     $lblStatus = New-Object System.Windows.Forms.Label
-    $lblStatus.Text = "Selecciona ajustes en varias pestanas y aplica todo al final."
+    $lblStatus.Text = Get-AIOString 'tweaks.main_status_hint'
     $lblStatus.Location = New-Object System.Drawing.Point(10, 10)
     $lblStatus.AutoSize = $true
     $lblStatus.Font = New-Object System.Drawing.Font("Segoe UI", 10)
@@ -701,7 +701,7 @@ function Show-Tweaks-Offline-GUI {
     $pnlActions.Controls.Add($lblStatus)
 
     $btnSelectAllGlobal = New-Object System.Windows.Forms.Button
-    $btnSelectAllGlobal.Text = "Marcar Todo"
+    $btnSelectAllGlobal.Text = Get-AIOString 'servicios.btn_select_all'
     $btnSelectAllGlobal.Location = New-Object System.Drawing.Point(10, 40)
     $btnSelectAllGlobal.Size = New-Object System.Drawing.Size(160, 40)
     $btnSelectAllGlobal.BackColor = [System.Drawing.Color]::Gray
@@ -710,7 +710,7 @@ function Show-Tweaks-Offline-GUI {
     $pnlActions.Controls.Add($btnSelectAllGlobal)
 
     $btnSelectInactive = New-Object System.Windows.Forms.Button
-    $btnSelectInactive.Text = "Marcar Inactivos"
+    $btnSelectInactive.Text = Get-AIOString 'tweaks.btn_select_inactive'
     $btnSelectInactive.Location = New-Object System.Drawing.Point(180, 40)
     $btnSelectInactive.Size = New-Object System.Drawing.Size(160, 40)
     $btnSelectInactive.BackColor = [System.Drawing.Color]::DimGray
@@ -720,7 +720,7 @@ function Show-Tweaks-Offline-GUI {
     $pnlActions.Controls.Add($btnSelectInactive)
 
     $btnRestoreGlobal = New-Object System.Windows.Forms.Button
-    $btnRestoreGlobal.Text = "RESTAURAR VALORES"
+    $btnRestoreGlobal.Text = Get-AIOString 'tweaks.btn_restore_values'
     $btnRestoreGlobal.Location = New-Object System.Drawing.Point(450, 40)
     $btnRestoreGlobal.Size = New-Object System.Drawing.Size(320, 40)
     $btnRestoreGlobal.BackColor = [System.Drawing.Color]::FromArgb(200, 100, 0)
@@ -730,7 +730,7 @@ function Show-Tweaks-Offline-GUI {
     $pnlActions.Controls.Add($btnRestoreGlobal)
 
     $btnApplyGlobal = New-Object System.Windows.Forms.Button
-    $btnApplyGlobal.Text = "APLICAR SELECCION"
+    $btnApplyGlobal.Text = Get-AIOString 'tweaks.btn_apply_selection'
     $btnApplyGlobal.Location = New-Object System.Drawing.Point(790, 40)
     $btnApplyGlobal.Size = New-Object System.Drawing.Size(320, 40)
     $btnApplyGlobal.BackColor = [System.Drawing.Color]::SeaGreen
@@ -754,7 +754,7 @@ function Show-Tweaks-Offline-GUI {
     $txtTweakDesc.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
     $txtTweakDesc.ForeColor = [System.Drawing.Color]::White
     $txtTweakDesc.BorderStyle = "FixedSingle"
-    $txtTweakDesc.Text = "Seleccione un ajuste para ver los detalles..."
+    $txtTweakDesc.Text = Get-AIOString 'tweaks.desc_placeholder'
     $form.Controls.Add($txtTweakDesc)
 
     $globalListViews = New-Object System.Collections.Generic.List[System.Windows.Forms.ListView]
@@ -787,9 +787,9 @@ function Show-Tweaks-Offline-GUI {
             $lv.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
             $lv.ForeColor = [System.Drawing.Color]::White
 
-            $lv.Columns.Add("Ajuste", 450) | Out-Null
-            $lv.Columns.Add("Estado Actual", 120) | Out-Null
-            $lv.Columns.Add("Tipo", 100) | Out-Null
+            $lv.Columns.Add((Get-AIOString 'tweaks.col_tweak'), 450) | Out-Null
+            $lv.Columns.Add((Get-AIOString 'servicios.col_current_state'), 120) | Out-Null
+            $lv.Columns.Add((Get-AIOString 'tweaks.col_type'), 100) | Out-Null
 
             $lv.Add_SelectedIndexChanged({
                 if ($this.SelectedItems.Count -gt 0) {
@@ -882,12 +882,12 @@ function Show-Tweaks-Offline-GUI {
 
         if ($allCheckedItems.Count -eq 0) {
             Write-Log -LogLevel WARN -Message "Tweak_Engine: El usuario intento iniciar el proceso sin seleccionar ningun ajuste."
-            [System.Windows.Forms.MessageBox]::Show("No hay ajustes seleccionados.", "Aviso", 'OK', 'Warning')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.none_selected'), (Get-AIOString 'servicios.notice_title'), 'OK', 'Warning')
             return
         }
 
-        $msgTitle = if ($Mode -eq 'Apply') { "Aplicar Cambios" } else { "Restaurar Cambios" }
-        $confirm = [System.Windows.Forms.MessageBox]::Show("Se Aplicaran $($allCheckedItems.Count) ajustes en TOTAL.`nDeseas continuar?", $msgTitle, 'YesNo', 'Question')
+        $msgTitle = if ($Mode -eq 'Apply') { Get-AIOString 'tweaks.title_apply' } else { Get-AIOString 'tweaks.title_restore' }
+        $confirm = [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.confirm_apply_total' $allCheckedItems.Count), $msgTitle, 'YesNo', 'Question')
         if ($confirm -eq 'No') { 
             Write-Log -LogLevel INFO -Message "Tweak_Engine: Operacion cancelada por el usuario en el cuadro de confirmacion."
             return 
@@ -903,7 +903,7 @@ function Show-Tweaks-Offline-GUI {
         $progressBar.Maximum = $allCheckedItems.Count
         $progressBar.Visible = $true
 
-        $lblStatus.Text = "Procesando registro... ($Mode)"
+        $lblStatus.Text = Get-AIOString 'tweaks.status_processing_reg' $Mode
         $form.Refresh()
 
         $Script:SDDL_Backups.Clear()
@@ -1131,8 +1131,8 @@ function Show-Tweaks-Offline-GUI {
                 Restore-AllOfflineSDDL
             }
 
-            $lblStatus.Text = "Proceso finalizado."
-            [System.Windows.Forms.MessageBox]::Show("Proceso completado.`nExitos: $success`nErrores: $errors", "Informe", 'OK', 'Information')
+            $lblStatus.Text = Get-AIOString 'servicios.status_done'
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.process_report' $success $errors), (Get-AIOString 'servicios.report_title'), 'OK', 'Information')
 
         } finally {
             $progressBar.Visible = $false
@@ -1149,14 +1149,14 @@ function Show-Tweaks-Offline-GUI {
 
     $form.Add_FormClosing({ 
         if (-not $btnApplyGlobal.Enabled) {
-            [System.Windows.Forms.MessageBox]::Show("Hay una operacion en curso. Espera a que finalice antes de cerrar.", "Advertencia", 'OK', 'Warning')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'servicios.warn_wait_finish'), (Get-AIOString 'drivers.warn_title'), 'OK', 'Warning')
             $_.Cancel = $true
             return
         }
 
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Estas seguro de que deseas salir?`nSe guardaran y desmontaran los Hives del registro.", 
-            "Confirmar Salida", 
+            (Get-AIOString 'tweaks.confirm_exit_hives'),
+            (Get-AIOString 'metadata.confirm_exit_title'), 
             [System.Windows.Forms.MessageBoxButtons]::YesNo, 
             [System.Windows.Forms.MessageBoxIcon]::Question
         )
@@ -1164,7 +1164,7 @@ function Show-Tweaks-Offline-GUI {
         if ($confirm -eq 'No') {
             $_.Cancel = $true
         } else {
-            $lblStatus.Text = "Sincronizando y desmontando Hives... Por favor espere."
+            $lblStatus.Text = Get-AIOString 'tweaks.status_unloading'
             $form.Refresh()
             Start-Sleep -Milliseconds 500 
             Unmount-Hives 

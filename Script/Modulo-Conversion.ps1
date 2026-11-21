@@ -48,7 +48,7 @@
 function Convert-VHD {
     Clear-Host
     Write-AIOConversionSection -Title 'CONVERSION | VHD / VHDX -> WIM' -Color Yellow
-    Write-Host '  Captura Windows e incluye WinRE cuando esta disponible en el VHD.' -ForegroundColor Gray
+    Write-Host (Get-AIOString 'conversion.vhd_intro') -ForegroundColor Gray
     
     Write-Log -LogLevel INFO -Message "ConvertVHD: Iniciando modulo de conversion inteligente de VHD/VHDX a WIM."
 
@@ -56,10 +56,10 @@ function Convert-VHD {
     if (-not (Get-Command "Mount-Vhd" -ErrorAction SilentlyContinue)) {
         Write-Log -LogLevel ERROR -Message "ConvertVHD: Faltan dependencias. El cmdlet 'Mount-Vhd' no esta disponible."
         Write-AIOConversionSection -Title 'DEPENDENCIA NO DISPONIBLE' -Color Red
-        Write-Host "  El cmdlet 'Mount-Vhd' no esta disponible en el sistema actual." -ForegroundColor Red
-        Write-Host "Necesitas habilitar las herramientas de gestion de discos virtuales de Hyper-V." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'conversion.vhd_no_cmdlet') -ForegroundColor Red
+        Write-Host (Get-AIOString 'conversion.vhd_need_hyperv') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "Para solucionarlo, abre una consola PowerShell como Administrador y ejecuta:" -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'conversion.vhd_fix_hint') -ForegroundColor Yellow
         Write-Host "Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-Management-PowerShell" -ForegroundColor Cyan
         Write-Host ""
         Pause; return
@@ -67,11 +67,11 @@ function Convert-VHD {
 
     # 2. Seleccion de Archivo
     Write-AIOConversionSection -Title 'ORIGEN Y DESTINO' -Step 1
-    Write-Host '  Selecciona el disco virtual y la ruta del nuevo archivo WIM.' -ForegroundColor Gray
-    $path = Select-PathDialog -DialogType File -Title "Seleccione el archivo VHD o VHDX a convertir" -Filter "Archivos VHD (*.vhd, *.vhdx)|*.vhd;*.vhdx|Todos (*.*)|*.*"
+    Write-Host (Get-AIOString 'conversion.vhd_select_hint') -ForegroundColor Gray
+    $path = Select-PathDialog -DialogType File -Title (Get-AIOString 'conversion.vhd_dialog_src') -Filter (Get-AIOString 'conversion.vhd_filter')
     if (-not $path) { 
         Write-Log -LogLevel INFO -Message "ConvertVHD: El usuario cancelo la seleccion del archivo de origen."
-        Write-Warning "Operacion cancelada."; Pause; return 
+        Write-Warning (Get-AIOString 'common.operation_cancelled'); Pause; return 
     }
     $VHD_FILE_PATH = $path
     Write-Log -LogLevel INFO -Message "ConvertVHD: Archivo origen seleccionado -> $VHD_FILE_PATH"
@@ -82,10 +82,10 @@ function Convert-VHD {
     Write-AIOConversionField -Label 'Tamano origen' -Value (Format-AIOConversionSize -Bytes $vhdFileObject.Length)
     $DEFAULT_DEST_PATH = Join-Path $vhdFileObject.DirectoryName "$($vhdFileObject.BaseName).wim"
 
-    $DEST_WIM_PATH = Select-SavePathDialog -Title "Capturar VHD como WIM..." -Filter "Archivos WIM (*.wim)|*.wim" -DefaultFileName $DEFAULT_DEST_PATH
+    $DEST_WIM_PATH = Select-SavePathDialog -Title (Get-AIOString 'conversion.vhd_dialog_dst') -Filter (Get-AIOString 'save.wim_filter') -DefaultFileName $DEFAULT_DEST_PATH
     if (-not $DEST_WIM_PATH) { 
         Write-Log -LogLevel INFO -Message "ConvertVHD: El usuario cancelo la seleccion del archivo de destino."
-        Write-Warning "Operacion cancelada."; Pause; return 
+        Write-Warning (Get-AIOString 'common.operation_cancelled'); Pause; return 
     }
     Write-Log -LogLevel INFO -Message "ConvertVHD: Archivo destino establecido -> $DEST_WIM_PATH"
     Write-AIOConversionField -Label 'Destino' -Value $DEST_WIM_PATH
@@ -93,7 +93,7 @@ function Convert-VHD {
 
     # 4. Proceso de Montaje y Captura
     Write-AIOConversionSection -Title 'WINDOWS Y RECUPERACION' -Step 2
-    Write-Host '  Montando el disco virtual y buscando la instalacion de Windows...' -ForegroundColor Gray
+    Write-Host (Get-AIOString 'conversion.vhd_mounting') -ForegroundColor Gray
     Write-Log -LogLevel ACTION -Message "ConvertVHD: Iniciando proceso de montaje y analisis de particiones."
 
     $DRIVE_LETTER = $null
@@ -141,7 +141,7 @@ function Convert-VHD {
             if (-not $currentLet) {
                 try {
                     $freeLet = Get-UnusedDriveLetter
-                    Write-Host "  Inspeccionando particion $($part.PartitionNumber) con letra temporal $freeLet`:..." -ForegroundColor Gray
+                    Write-Host (Get-AIOString 'conversion.vhd_inspecting_part' $part.PartitionNumber $freeLet) -ForegroundColor Gray
                     Set-Partition -InputObject $part -NewDriveLetter $freeLet -ErrorAction Stop
                     $currentLet = $freeLet
                     $assignedTemp = $true
@@ -163,7 +163,7 @@ function Convert-VHD {
                     Write-AIOConversionField -Label 'Particion' -Value ("{0} | {1}" -f $part.PartitionNumber, (Format-AIOConversionSize -Bytes $part.Size))
                     break 
                 } else {
-                    Write-Host "  Particion $currentLet`: sin instalacion de Windows; se omite." -ForegroundColor Gray
+                    Write-Host (Get-AIOString 'conversion.vhd_skip_part' $currentLet) -ForegroundColor Gray
                     if ($assignedTemp) {
                         Remove-PartitionAccessPath -InputObject $part -AccessPath "$($currentLet):\" -ErrorAction Stop
                         $temporaryAccessPaths.RemoveAt($temporaryAccessPaths.Count - 1)
@@ -178,7 +178,7 @@ function Convert-VHD {
 
         # C. Buscar WinRE dentro de Windows y en las particiones del mismo VHD.
         Write-Host ''
-        Write-Host '  Buscando WinRE en Windows y en las particiones de recuperacion...' -ForegroundColor Gray
+        Write-Host (Get-AIOString 'conversion.vhd_searching_winre') -ForegroundColor Gray
         $windowsRoot = "$($DRIVE_LETTER):\"
         $embeddedWinRE = Join-Path $windowsRoot 'Windows\System32\Recovery\winre.wim'
         if (Test-Path -LiteralPath $embeddedWinRE -PathType Leaf -ErrorAction Stop) {
@@ -219,15 +219,15 @@ function Convert-VHD {
                 $winreSource = $candidates[0].Path
             } elseif ($candidates.Count -gt 1) {
                 Write-Host ''
-                Write-Host '  Hay varias copias de WinRE. Selecciona la que se incluira en el WIM.' -ForegroundColor Yellow
-                Write-Host ('  {0,-8} {1,-11} {2}' -f 'COPIA', 'PARTICION', 'ARCHIVO') -ForegroundColor Gray
+                Write-Host (Get-AIOString 'conversion.vhd_multi_winre') -ForegroundColor Yellow
+                Write-Host ('  {0,-8} {1,-11} {2}' -f (Get-AIOString 'conversion.vhd_winre_col_copy'), (Get-AIOString 'conversion.vhd_winre_col_part'), (Get-AIOString 'conversion.vhd_winre_col_file')) -ForegroundColor Gray
                 for ($i = 0; $i -lt $candidates.Count; $i++) {
                     Write-Host ('  {0,-8} {1,-11} {2}' -f ('[' + ($i + 1) + ']'), $candidates[$i].PartitionNumber, $candidates[$i].Path) -ForegroundColor White
                 }
                 Write-Host ''
                 $choice = 0
                 do {
-                    $answer = Read-Host 'Numero de copia de WinRE (Enter cancela la conversion)'
+                    $answer = Read-Host (Get-AIOString 'conversion.vhd_winre_prompt')
                     if ([string]::IsNullOrWhiteSpace($answer)) { throw 'Conversion cancelada al seleccionar WinRE.' }
                 } until ([int]::TryParse($answer, [ref]$choice) -and $choice -ge 1 -and $choice -le $candidates.Count)
                 $winreSource = $candidates[$choice - 1].Path
@@ -248,7 +248,7 @@ function Convert-VHD {
                 Write-AIOConversionField -Label 'WinRE' -Value 'Se incorporara a Windows\System32\Recovery' -Color Cyan
             }
         } else {
-            Write-Warning 'No se encontro winre.wim en Windows ni en las particiones de recuperacion del VHD. El WIM se capturara sin WinRE.'
+            Write-Warning (Get-AIOString 'conversion.vhd_no_winre_warn')
             Write-Log -LogLevel WARN -Message 'ConvertVHD: Captura sin WinRE; archivo ausente en el VHD.'
         }
 
@@ -256,7 +256,7 @@ function Convert-VHD {
         #  Auto-Detección de Edición y Petición de Metadatos (ACTUALIZADO CON CATÁLOGO)
         # =========================================================
         Write-AIOConversionSection -Title 'DATOS DE LA IMAGEN' -Step 3
-        Write-Host '  Detectando la edicion de Windows...' -ForegroundColor Gray
+        Write-Host (Get-AIOString 'conversion.vhd_detecting_edition') -ForegroundColor Gray
         $defaultName = "Captured VHD"
         $defaultDesc = "Imagen capturada desde VHD el $(Get-Date -Format 'yyyy-MM-dd')"
         $softwareHive = "$DRIVE_LETTER`:\Windows\System32\config\SOFTWARE"
@@ -299,9 +299,9 @@ function Convert-VHD {
         Write-AIOConversionField -Label 'Nombre' -Value $defaultName
         Write-AIOConversionField -Label 'Descripcion' -Value $defaultDesc
         Write-Host ''
-        Write-Host '  Presiona Enter para conservar valor por defecto o escribe uno nuevo.' -ForegroundColor Gray
-        $inputName = Read-Host '  Nombre de la imagen'
-        $inputDesc = Read-Host '  Descripcion de la imagen'
+        Write-Host (Get-AIOString 'conversion.vhd_default_hint') -ForegroundColor Gray
+        $inputName = Read-Host (Get-AIOString 'conversion.vhd_name_prompt')
+        $inputDesc = Read-Host (Get-AIOString 'conversion.vhd_desc_prompt')
         
         if ([string]::IsNullOrWhiteSpace($inputName)) { $IMAGE_NAME = $defaultName } else { $IMAGE_NAME = $inputName }
         if ([string]::IsNullOrWhiteSpace($inputDesc)) { $IMAGE_DESC = $defaultDesc } else { $IMAGE_DESC = $inputDesc }
@@ -315,13 +315,13 @@ function Convert-VHD {
         Write-AIOConversionField -Label 'Descripcion' -Value $IMAGE_DESC
         Write-AIOConversionField -Label 'Compresion' -Value 'Maxima (LZX / Compress:Max)'
         Write-Host ''
-        Write-Host '  El tiempo mostrado al finalizar incluye captura, WinRE y desmontaje.' -ForegroundColor Gray
+        Write-Host (Get-AIOString 'conversion.vhd_time_note') -ForegroundColor Gray
         $timer = [Diagnostics.Stopwatch]::StartNew()
-        Write-Host '  Preparando el volumen para la captura (TRIM)...' -ForegroundColor Gray
+        Write-Host (Get-AIOString 'conversion.vhd_trimming') -ForegroundColor Gray
         try { Optimize-Volume -DriveLetter $DRIVE_LETTER -ReTrim -ErrorAction Stop | Out-Null } catch {}
         
         # 5. Captura (DISM)
-        Write-Host '  Capturando la imagen. DISM mostrara su progreso a continuacion.' -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'conversion.vhd_capturing') -ForegroundColor Cyan
         Write-Host ''
         
         dism /capture-image /imagefile:"$pendingWim" /capturedir:"$DRIVE_LETTER`:\" /name:"$IMAGE_NAME" /description:"$IMAGE_DESC" /compress:max /checkintegrity /ScratchDir:"$Script:Scratch_DIR"
@@ -331,12 +331,12 @@ function Convert-VHD {
         Write-AIOConversionSection -Title 'WINRE Y FINALIZACION' -Step 5
         if ($winreSource) {
             if ($injectWinRE) {
-                Write-Host '  Incorporando winre.wim a Windows\System32\Recovery (wimlib, sin montar el WIM)...' -ForegroundColor Cyan
+                Write-Host (Get-AIOString 'conversion.vhd_adding_winre') -ForegroundColor Cyan
                 Add-AIOConversionWinREToWim -WimPath $pendingWim -WinREPath $winreSource -Index 1
             }
 
             # Comprobacion final por lectura binaria directa desde el WIM guardado, sin montaje ni copia temporal.
-            Write-Host '  Verificando WinRE en el WIM guardado (lectura directa, sin montaje)...' -ForegroundColor Gray
+            Write-Host (Get-AIOString 'conversion.vhd_verifying_winre') -ForegroundColor Gray
             $embeddedHash = Get-AIOUpdateWimFileSha256 -WimPath $pendingWim -Index 1 -ImagePath 'Windows/System32/Recovery/winre.wim'
             if ($embeddedHash -ne $winreHash) {
                 throw 'WinRE no coincide con el origen tras guardar el WIM.'
@@ -347,7 +347,7 @@ function Convert-VHD {
             Write-AIOConversionField -Label 'WinRE' -Value 'No incluido: no se encontro en el VHD' -Color Yellow
         }
 
-        Write-Host '  Guardando el archivo WIM en el destino seleccionado...' -ForegroundColor Gray
+        Write-Host (Get-AIOString 'conversion.vhd_saving_wim') -ForegroundColor Gray
         # El temporal esta junto al destino para publicar en el mismo volumen.
         if (Test-Path -LiteralPath $DEST_WIM_PATH) {
             [IO.File]::Replace($pendingWim, $DEST_WIM_PATH, [NullString]::Value)
@@ -370,16 +370,16 @@ function Convert-VHD {
                 Remove-PartitionAccessPath -InputObject $access.Partition -AccessPath $access.AccessPath -ErrorAction Stop
             } catch {
                 $cleanupSafe = $false
-                Write-Warning "No se pudo retirar el acceso temporal '$($access.AccessPath)': $($_.Exception.Message)"
+                Write-Warning (Get-AIOString 'conversion.vhd_remove_access_warn' $access.AccessPath $_.Exception.Message)
             }
         }
         if ($mountedDisk) {
             try {
-                Write-Host '  Desmontando el disco virtual...' -ForegroundColor Gray
+                Write-Host (Get-AIOString 'conversion.vhd_unmounting') -ForegroundColor Gray
                 Dismount-Vhd -Path $VHD_FILE_PATH -ErrorAction Stop
             } catch {
                 $cleanupSafe = $false
-                Write-Warning "No se pudo desmontar el VHD: $($_.Exception.Message)"
+                Write-Warning (Get-AIOString 'conversion.vhd_unmount_warn' $_.Exception.Message)
             }
         }
         if ($pendingWim -and (Test-Path -LiteralPath $pendingWim)) {
@@ -545,7 +545,7 @@ function Assert-AIOConversionWinREIntegrity {
         throw 'Se requiere wimlib-imagex.exe en Tools\wimlib o en PATH para verificar WinRE.'
     }
 
-    Write-Host '  Verificando la integridad de winre.wim con wimlib (sin montaje)...' -ForegroundColor Gray
+    Write-Host (Get-AIOString 'conversion.winre_verifying_wimlib') -ForegroundColor Gray
     Write-Log -LogLevel INFO -Message "ConvertVHD: wimlib-imagex verify '$WinREPath'."
     $timer = [Diagnostics.Stopwatch]::StartNew()
     # Solo lectura; sin --nocheck para que se verifiquen todos los datos.
@@ -561,7 +561,7 @@ function Assert-AIOConversionWinREIntegrity {
         throw "wimlib verify fallo para '$WinREPath' (codigo $($result.ExitCode)). $detail"
     }
     Write-Log -LogLevel INFO -Message ("ConvertVHD: WinRE verificado con wimlib en {0:N2} s." -f $timer.Elapsed.TotalSeconds)
-    Write-Host '  [VERIFICADO] Integridad de winre.wim correcta.' -ForegroundColor Green
+    Write-Host (Get-AIOString 'conversion.winre_verified_ok') -ForegroundColor Green
 }
 
 # Incorpora winre.wim al WIM capturado sin montarlo (wimlib update, append en sitio).
@@ -632,19 +632,19 @@ function Format-AIOConversionSize {
 function Read-AIOConversionIndices {
     param([object[]]$Images)
     Write-Host ''
-    Write-Host ('  {0,-9} {1}' -f 'INDICE', 'EDICION') -ForegroundColor Gray
+    Write-Host ('  {0,-9} {1}' -f (Get-AIOString 'conversion.col_index'), (Get-AIOString 'conversion.col_edition')) -ForegroundColor Gray
     foreach ($image in $Images) {
         Write-Host ('  {0,-9} {1}' -f ('[' + $image.ImageIndex + ']'), $image.ImageName) -ForegroundColor White
     }
     Write-Host ''
-    Write-Host '  T = Todas    1,3 = Seleccion multiple    0 = Cancelar' -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'conversion.index_help') -ForegroundColor Yellow
     $available = @($Images | ForEach-Object { [int]$_.ImageIndex })
     while ($true) {
 		Write-Host ""
-        $answer = ([string](Read-Host '  Indices a convertir')).Trim()
+        $answer = ([string](Read-Host (Get-AIOString 'conversion.index_prompt'))).Trim()
         if ($answer -eq '0') { return }
         if ($answer -match '^(T|TODO|TODOS|ALL|\*)$') { return $available }
-        if ($answer -notmatch '^\d+(\s*,\s*\d+)*$') { Write-Warning 'Seleccion no valida.'; continue }
+        if ($answer -notmatch '^\d+(\s*,\s*\d+)*$') { Write-Warning (Get-AIOString 'conversion.index_invalid'); continue }
         $chosen = New-Object 'System.Collections.Generic.List[int]'
         $valid = $true
         foreach ($token in ($answer -split ',')) {
@@ -653,7 +653,7 @@ function Read-AIOConversionIndices {
             if (-not $chosen.Contains($index)) { $chosen.Add($index) }
         }
         if ($valid) { return $chosen.ToArray() }
-        Write-Warning 'Uno o varios indices no estan disponibles.'
+        Write-Warning (Get-AIOString 'conversion.index_unavailable')
     }
 }
 
@@ -664,7 +664,7 @@ function Export-AIOConversionIndices {
     foreach ($index in $Indices) {
         $position++
         Write-Host ''
-        Write-Host ('  Exportando imagen {0} de {1} | Indice de origen: {2}' -f $position, $Indices.Count, $index) -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'conversion.exporting_progress' $position $Indices.Count $index) -ForegroundColor Cyan
         $argsDism = @('/Export-Image', "/SourceImageFile:$Source", "/SourceIndex:$index",
             "/DestinationImageFile:$Destination", '/CheckIntegrity', "/ScratchDir:$Scratch")
         if (-not (Test-Path -LiteralPath $Destination)) { $argsDism += "/Compress:$Compression" }
@@ -716,7 +716,7 @@ function Publish-AIOConversionFiles {
                     throw 'El archivo cambio; se conserva para revision.'
                 }
                 [IO.File]::Move($entry.Destination, $entry.Source)
-            } catch { Write-Warning "Salida parcial pendiente: $($entry.Destination). $($_.Exception.Message)" }
+            } catch { Write-Warning (Get-AIOString 'conversion.partial_output_warn' $entry.Destination $_.Exception.Message) }
         }
         throw "Publicacion incompleta: $failure. Consulta $Journal."
     }
@@ -742,11 +742,11 @@ function Convert-ImageFormat {
     $success = $false
     try {
         Write-AIOConversionSection -Title 'IMAGEN DE ORIGEN' -Step 1
-        Write-Host '  Selecciona el archivo en la ventana de exploracion.' -ForegroundColor Gray
-        $filter = switch ($Mode) { 'ToSWM' { 'Imagenes WIM/ESD|*.wim;*.esd' }; 'WIMToESD' { 'Imagen WIM|*.wim' }; 'ESDToWIM' { 'Imagen ESD|*.esd' }; default { 'Primera parte SWM|*.swm' } }
-        $sourceTitle = switch ($Mode) { 'WIMToESD' { 'Selecciona el WIM que se convertira a ESD' }; 'ESDToWIM' { 'Selecciona el ESD que se convertira a WIM' }; default { 'Selecciona la imagen de origen (SWM: primera parte)' } }
+        Write-Host (Get-AIOString 'conversion.select_file_hint') -ForegroundColor Gray
+        $filter = switch ($Mode) { 'ToSWM' { Get-AIOString 'conversion.filter_wim_esd' }; 'WIMToESD' { Get-AIOString 'integrar.wim_filter_short' }; 'ESDToWIM' { Get-AIOString 'conversion.filter_esd' }; default { Get-AIOString 'conversion.filter_swm' } }
+        $sourceTitle = switch ($Mode) { 'WIMToESD' { Get-AIOString 'conversion.title_wim_to_esd' }; 'ESDToWIM' { Get-AIOString 'conversion.title_esd_to_wim' }; default { Get-AIOString 'conversion.title_src_default' } }
         $source = Select-PathDialog -DialogType File -Title $sourceTitle -Filter $filter
-        if (-not $source) { Write-Host '  Operacion cancelada.' -ForegroundColor Yellow; return }
+        if (-not $source) { Write-Host (Get-AIOString 'conversion.cancelled_indented') -ForegroundColor Yellow; return }
         $source = [IO.Path]::GetFullPath($source)
         $sourceFile = Get-Item -LiteralPath $source -Force -ErrorAction Stop
         $swmPattern = $null
@@ -769,7 +769,7 @@ function Convert-ImageFormat {
         Write-AIOConversionField -Label 'Ediciones' -Value ([string]$images.Count)
         Write-AIOConversionSection -Title 'EDICIONES A CONVERTIR' -Step 2
         $indices = @(Read-AIOConversionIndices -Images $images)
-        if ($indices.Count -eq 0) { Write-Host '  Operacion cancelada.' -ForegroundColor Yellow; return }
+        if ($indices.Count -eq 0) { Write-Host (Get-AIOString 'conversion.cancelled_indented') -ForegroundColor Yellow; return }
         $expected = @($indices | ForEach-Object { $n = $_; $images | Where-Object ImageIndex -eq $n })
         $expectedBoot = 0
         for ($i = 0; $i -lt $indices.Count; $i++) {
@@ -778,8 +778,8 @@ function Convert-ImageFormat {
         Write-AIOConversionSection -Title 'DESTINO Y OPCIONES' -Step 3
         $extension = switch ($Mode) { 'ToSWM' { '.swm' }; 'ToWIM' { '.wim' }; 'ToESD' { '.esd' }; 'WIMToESD' { '.esd' }; 'ESDToWIM' { '.wim' } }
         $defaultPath = Join-Path $sourceFile.DirectoryName ($sourceFile.BaseName + $extension)
-        $destination = Select-SavePathDialog -Title 'Guardar conversion (elige un nombre nuevo)' -Filter "Imagen $extension|*$extension" -DefaultFileName $defaultPath
-        if (-not $destination) { Write-Host '  Operacion cancelada.' -ForegroundColor Yellow; return }
+        $destination = Select-SavePathDialog -Title (Get-AIOString 'conversion.save_dialog_title') -Filter "Imagen $extension|*$extension" -DefaultFileName $defaultPath
+        if (-not $destination) { Write-Host (Get-AIOString 'conversion.cancelled_indented') -ForegroundColor Yellow; return }
         $destination = [IO.Path]::GetFullPath($destination)
         if ([IO.Path]::GetExtension($destination) -ine $extension) { throw "El destino debe terminar en $extension." }
         $destinationDirectory = Split-Path -Path $destination -Parent
@@ -794,12 +794,12 @@ function Convert-ImageFormat {
             })
             if ($conflicts.Count) { throw 'Ya hay partes SWM con ese nombre/prefijo. Elige otra carpeta o nombre.' }
             do {
-                $answer = ([string](Read-Host '  Tamano por parte en MB [Enter=3800; 0=cancelar]')).Trim()
-                if ($answer -eq '0') { Write-Host '  Operacion cancelada.' -ForegroundColor Yellow; return }
+                $answer = ([string](Read-Host (Get-AIOString 'conversion.swm_size_prompt'))).Trim()
+                if ($answer -eq '0') { Write-Host (Get-AIOString 'conversion.cancelled_indented') -ForegroundColor Yellow; return }
                 if ($answer -eq '') { $sizeMB = 3800; break }
             } until ([int]::TryParse($answer, [ref]$sizeMB) -and $sizeMB -ge 1 -and $sizeMB -le 32768)
-            Write-Host '  Un archivo indivisible puede superar el tamano elegido.' -ForegroundColor Gray
-            if ($sizeMB -le 4095) { Write-Host '  Se comprobara el limite de 4 GB por archivo para FAT32.' -ForegroundColor Gray }
+            Write-Host (Get-AIOString 'conversion.swm_indivisible_note') -ForegroundColor Gray
+            if ($sizeMB -le 4095) { Write-Host (Get-AIOString 'conversion.swm_fat32_note') -ForegroundColor Gray }
         }
         $allInOrder = ($indices.Count -eq $images.Count -and ($indices -join ',') -eq (($images | ForEach-Object ImageIndex) -join ','))
         $useIntermediateWim = ($Mode -eq 'ToSWM' -and ($sourceFile.Extension -ieq '.esd' -or -not $allInOrder -or $sourceInfo.CompressionType -eq 3))
@@ -818,7 +818,7 @@ function Convert-ImageFormat {
         Write-AIOConversionField -Label 'Compresion' -Value $compressionLabel
         if ($Mode -eq 'ToSWM') { Write-AIOConversionField -Label 'Tamano/parte' -Value ("{0} MB (objetivo)" -f $sizeMB) }
         Write-AIOConversionSection -Title 'CONVERSION EN CURSO' -Step 4
-        Write-Host '  El porcentaje inferior corresponde a la operacion de DISM.' -ForegroundColor Gray
+        Write-Host (Get-AIOString 'conversion.dism_percent_note') -ForegroundColor Gray
         $timer = [Diagnostics.Stopwatch]::StartNew()
         $workRoot = Join-Path $destinationDirectory ('AIOConversion_' + [guid]::NewGuid().ToString('N'))
         New-Item -Path $workRoot -ItemType Directory -ErrorAction Stop | Out-Null
@@ -832,17 +832,17 @@ function Convert-ImageFormat {
             # Split-Image acepta WIM no solido. ESD y selecciones parciales pasan por un WIM temporal.
             $splitSource = $source
             if ($useIntermediateWim) {
-                Write-Host '  Preparando el WIM intermedio para generar las partes SWM...' -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'conversion.swm_preparing_wim') -ForegroundColor Yellow
                 # El intermedio puede superar 4 GB: usar Scratch, no el USB FAT32 de salida.
                 $splitSource = Join-Path $scratch 'intermedio.wim'
                 Export-AIOConversionIndices -Source $source -Destination $splitSource -Indices $indices -Compression max -BootIndex $sourceInfo.BootIndex -Scratch $scratch
                 Assert-AIOConversionImages -Path $splitSource -Expected $expected -BootIndex $expectedBoot
             }
             Write-Host ''
-            Write-Host '  Dividiendo la imagen en archivos SWM...' -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'conversion.swm_splitting') -ForegroundColor Cyan
             Invoke-AIOSwmDism -Arguments @('/Split-Image', "/ImageFile:$splitSource", "/SWMFile:$stagedOutput", "/FileSize:$sizeMB", '/CheckIntegrity', "/ScratchDir:$scratch")
             Write-AIOConversionSection -Title 'VERIFICACION Y GUARDADO' -Step 5
-            Write-Host '  Comprobando las partes, ediciones y archivo de salida...' -ForegroundColor Gray
+            Write-Host (Get-AIOString 'conversion.swm_checking') -ForegroundColor Gray
             $resultSet = Get-AIOSwmSet -FirstPart $stagedOutput
             if ($sizeMB -le 4095 -and @($resultSet.Files | Where-Object Length -gt 4294967295).Count) {
                 throw 'DISM genero una parte que supera el limite de FAT32 por un recurso indivisible. No se publicara el conjunto como compatible con FAT32.'
@@ -853,13 +853,13 @@ function Convert-ImageFormat {
             $compression = if ($Mode -in @('ToESD', 'WIMToESD')) { 'recovery' } else { 'max' }
             Export-AIOConversionIndices -Source $source -Destination $stagedOutput -Indices $indices -Compression $compression -SwmPattern $swmPattern -BootIndex $sourceInfo.BootIndex -Scratch $scratch
             Write-AIOConversionSection -Title 'VERIFICACION Y GUARDADO' -Step 5
-            Write-Host '  Comprobando las ediciones y el archivo de salida...' -ForegroundColor Gray
+            Write-Host (Get-AIOString 'conversion.checking_output') -ForegroundColor Gray
             Assert-AIOConversionImages -Path $stagedOutput -Expected $expected -BootIndex $expectedBoot
             $filesToPublish = @(Get-Item -LiteralPath $stagedOutput -ErrorAction Stop)
         }
         $firstSwmName = if ($Mode -eq 'ToSWM') { [IO.Path]::GetFileName($destination) } else { $null }
         $outputDetails = @($filesToPublish | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Length = $_.Length } })
-        Write-Host '  Guardando el resultado y verificando su integridad...' -ForegroundColor Gray
+        Write-Host (Get-AIOString 'conversion.saving_and_verifying') -ForegroundColor Gray
         Publish-AIOConversionFiles -Files $filesToPublish -DestinationDirectory $destinationDirectory -Journal (Join-Path $workRoot 'publicacion.json') -FirstSwmName $firstSwmName
         $success = $true
         $timer.Stop()
@@ -874,13 +874,13 @@ function Convert-ImageFormat {
             foreach ($file in @($outputDetails | Select-Object -First 5)) {
                 Write-Host ('    {0}  ({1})' -f $file.Name, (Format-AIOConversionSize -Bytes $file.Length)) -ForegroundColor White
             }
-            if ($outputDetails.Count -gt 5) { Write-Host ('    ... y {0} archivos mas.' -f ($outputDetails.Count - 5)) -ForegroundColor Gray }
-            Write-Host '  Conserva todas las partes juntas en la misma carpeta.' -ForegroundColor Yellow
+            if ($outputDetails.Count -gt 5) { Write-Host (Get-AIOString 'conversion.more_files' ($outputDetails.Count - 5)) -ForegroundColor Gray }
+            Write-Host (Get-AIOString 'conversion.keep_parts_together') -ForegroundColor Yellow
         } elseif ($Script:IMAGE_MOUNTED -eq 0) { $Script:WIM_FILE_PATH = $destination }
         Write-Log -LogLevel INFO -Message "ConvertSWM: $Mode completado; $($filesToPublish.Count) archivo(s) verificados."
     } catch {
         Write-AIOConversionSection -Title 'NO SE COMPLETO LA CONVERSION' -Color Red
-        Write-Host ('  Motivo: ' + $_.Exception.Message) -ForegroundColor Red
+        Write-Host (Get-AIOString 'conversion.reason_prefix' $_.Exception.Message) -ForegroundColor Red
         Write-Log -LogLevel ERROR -Message "ConvertSWM: $($_.Exception.Message)"
     } finally {
         if ($timer -and $timer.IsRunning) { $timer.Stop() }
@@ -889,12 +889,12 @@ function Convert-ImageFormat {
                 foreach ($folder in @($workRoot, $scratch)) {
                     if ($folder -and (Test-Path -LiteralPath $folder)) {
                         try { Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction Stop }
-                        catch { Write-Warning "Temporal pendiente: $folder" }
+                        catch { Write-Warning (Get-AIOString 'conversion.temp_pending' $folder) }
                     }
                 }
             } else {
-                Write-Warning "Conversion incompleta; se conserva el trabajo en $workRoot"
-                if ($scratch) { Write-Warning "Temporal de conversion: $scratch" }
+                Write-Warning (Get-AIOString 'conversion.incomplete_warn' $workRoot)
+                if ($scratch) { Write-Warning (Get-AIOString 'conversion.scratch_warn' $scratch) }
             }
         }
     }

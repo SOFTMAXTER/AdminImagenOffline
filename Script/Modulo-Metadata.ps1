@@ -204,15 +204,15 @@ public class WimMasterEngine
         }
     } catch {
         [System.Windows.Forms.MessageBox]::Show(
-            "Error compilacion C#:`n$($_.Exception.Message)",
-            "Error Critico", 'OK', 'Error'
+            (Get-AIOString 'metadata.compile_error' $_.Exception.Message),
+            (Get-AIOString 'metadata.critical_error_title'), 'OK', 'Error'
         )
         return
     }
 
     # 5. Construccion del formulario
     $form = New-Object System.Windows.Forms.Form
-    $form.Text            = "Editor Metadatos WIM"
+    $form.Text            = Get-AIOString 'metadata.form_title'
     $form.Size            = New-Object System.Drawing.Size(850, 660)
     $form.StartPosition   = "CenterScreen"
     $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -222,7 +222,7 @@ public class WimMasterEngine
 
     # -- Selector de archivo --
     $lblFile          = New-Object System.Windows.Forms.Label
-    $lblFile.Text     = "WIM:"
+    $lblFile.Text     = Get-AIOString 'metadata.lbl_file'
     $lblFile.Location = "20, 20"
     $lblFile.AutoSize = $true
     $form.Controls.Add($lblFile)
@@ -245,7 +245,7 @@ public class WimMasterEngine
 
     # -- Selector de indice --
     $lblIdx          = New-Object System.Windows.Forms.Label
-    $lblIdx.Text     = "Index:"
+    $lblIdx.Text     = Get-AIOString 'metadata.lbl_index'
     $lblIdx.Location = "20, 60"
     $lblIdx.AutoSize = $true
     $form.Controls.Add($lblIdx)
@@ -260,7 +260,7 @@ public class WimMasterEngine
 
     # -- Auto-completador de Edición --
     $lblAutoEd          = New-Object System.Windows.Forms.Label
-    $lblAutoEd.Text     = "Plantillas:"
+    $lblAutoEd.Text     = Get-AIOString 'metadata.lbl_templates'
     $lblAutoEd.Location = "20, 100"
     $lblAutoEd.AutoSize = $true
     $form.Controls.Add($lblAutoEd)
@@ -287,8 +287,8 @@ public class WimMasterEngine
     $dgv.DefaultCellStyle.BackColor  = [System.Drawing.Color]::FromArgb(40, 40, 40)
     $dgv.DefaultCellStyle.ForeColor  = [System.Drawing.Color]::White
     $dgv.DefaultCellStyle.SelectionBackColor = [System.Drawing.Color]::SteelBlue
-    $dgv.Columns.Add("Prop", "Propiedad") | Out-Null
-    $dgv.Columns.Add("Val",  "Valor")     | Out-Null
+    $dgv.Columns.Add("Prop", (Get-AIOString 'metadata.col_prop')) | Out-Null
+    $dgv.Columns.Add("Val",  (Get-AIOString 'metadata.col_val'))  | Out-Null
     $dgv.Columns[0].ReadOnly   = $true
     $dgv.Columns[0].FillWeight = 30
     foreach ($column in $dgv.Columns) { $column.SortMode = 'NotSortable' }
@@ -296,7 +296,7 @@ public class WimMasterEngine
 
     # -- Boton guardar y etiqueta de estado --
     $btnSave           = New-Object System.Windows.Forms.Button
-    $btnSave.Text      = "GUARDAR (Commit)"
+    $btnSave.Text      = Get-AIOString 'metadata.btn_save'
     $btnSave.Location  = "550, 550"
     $btnSave.Size      = "260, 40"
     $btnSave.BackColor = [System.Drawing.Color]::SeaGreen
@@ -309,7 +309,7 @@ public class WimMasterEngine
     $lblStatus.Location = "20, 560"
     $lblStatus.Size     = "500, 25"
     $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
-    $lblStatus.Text     = "Listo."
+    $lblStatus.Text     = Get-AIOString 'metadata.status_ready'
     $form.Controls.Add($lblStatus)
 
     # ---------------------------------------------------------------
@@ -326,14 +326,14 @@ public class WimMasterEngine
             $cmbEditionAuto.Enabled = $false
             $dgv.Rows.Clear()
             $btnSave.Enabled  = $false
-            $lblStatus.Text   = "Escaneando nombres..."
+            $lblStatus.Text   = Get-AIOString 'metadata.status_scanning'
             $form.Refresh()
 
             try {
                 $count = [WimMasterEngine]::GetImageCount($ofd.FileName)
                 if ($count -gt 0) {
                     for ($i = 1; $i -le $count; $i++) {
-                        $name = "Desconocido"
+                        $name = Get-AIOString 'common.unknown'
                         try {
                             $xmlRaw = [WimMasterEngine]::GetImageXml($ofd.FileName, $i)
                             $xml    = [System.Xml.Linq.XDocument]::Parse($xmlRaw)
@@ -343,10 +343,10 @@ public class WimMasterEngine
                         $cmbIndex.Items.Add("[$i] $name")
                     }
                     $cmbIndex.SelectedIndex = 0
-                    $lblStatus.Text = "WIM Cargado."
+                    $lblStatus.Text = Get-AIOString 'metadata.status_loaded'
                 }
             } catch {
-                [System.Windows.Forms.MessageBox]::Show("Error: $_")
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'metadata.msg_error' $_))
             }
         }
     })
@@ -373,21 +373,21 @@ public class WimMasterEngine
                 }
 
                 # Filas editables (0 a 4)
-                $dgv.Rows.Add("Nombre",               (Get-NodeVal $img "NAME"))              | Out-Null
-                $dgv.Rows.Add("Descripcion",          (Get-NodeVal $img "DESCRIPTION"))        | Out-Null
-                $dgv.Rows.Add("Nombre Mostrado",      (Get-NodeVal $img "DISPLAYNAME"))        | Out-Null
-                $dgv.Rows.Add("Descripcion Mostrada", (Get-NodeVal $img "DISPLAYDESCRIPTION")) | Out-Null
+                $r0 = $dgv.Rows.Add((Get-AIOString 'metadata.prop_name'),         (Get-NodeVal $img "NAME"));               $dgv.Rows[$r0].Tag = "Nombre"
+                $r1 = $dgv.Rows.Add((Get-AIOString 'metadata.prop_desc'),         (Get-NodeVal $img "DESCRIPTION"));        $dgv.Rows[$r1].Tag = "Descripcion"
+                $r2 = $dgv.Rows.Add((Get-AIOString 'metadata.prop_display_name'), (Get-NodeVal $img "DISPLAYNAME"));        $dgv.Rows[$r2].Tag = "Nombre Mostrado"
+                $r3 = $dgv.Rows.Add((Get-AIOString 'metadata.prop_display_desc'), (Get-NodeVal $img "DISPLAYDESCRIPTION")); $dgv.Rows[$r3].Tag = "Descripcion Mostrada"
 
                 $winNode   = $img.Element("WINDOWS")
                 $editionId = ""
                 if ($null -ne $winNode) { $editionId = Get-NodeVal $winNode "EDITIONID" }
-                $dgv.Rows.Add("ID de Edicion", $editionId) | Out-Null
+                $r4 = $dgv.Rows.Add((Get-AIOString 'metadata.prop_edition_id'), $editionId); $dgv.Rows[$r4].Tag = "ID de Edicion"
 
                 # Filas de solo lectura
                 # A) Arquitectura
                 $archVal = if ($null -ne $winNode) { Get-NodeVal $winNode "ARCH" } else { "" }
                 $archStr = switch ($archVal) { "0" {"x86"} "9" {"x64"} "12" {"ARM64"} default {$archVal} }
-                $rowArch = $dgv.Rows.Add("Arquitectura", $archStr)
+                $rowArch = $dgv.Rows.Add((Get-AIOString 'metadata.prop_arch'), $archStr)
 
                 # B) Version (Logica crucial para detectar Win10 vs Win11)
                 $verStr   = ""
@@ -399,7 +399,7 @@ public class WimMasterEngine
                         $verStr = "$(Get-NodeVal $vNode 'MAJOR').$(Get-NodeVal $vNode 'MINOR').$buildNum.$(Get-NodeVal $vNode 'SPBUILD')"
                     }
                 }
-                $rowVer = $dgv.Rows.Add("Version", $verStr)
+                $rowVer = $dgv.Rows.Add((Get-AIOString 'metadata.prop_version'), $verStr)
 
                 # Las mismas reglas se usan al preparar indices en el integrador.
                 $metadataImage = [pscustomobject]@{
@@ -410,7 +410,7 @@ public class WimMasterEngine
                     InstallationType = if ($null -ne $winNode) { Get-NodeVal $winNode 'INSTALLATIONTYPE' } else { '' }
                 }
                 $cmbEditionAuto.Items.Clear()
-                [void]$cmbEditionAuto.Items.Add('-- Selecciona una edicion para autocompletar --')
+                [void]$cmbEditionAuto.Items.Add((Get-AIOString 'metadata.tpl_placeholder'))
                 $choices = @(Get-AIOWimEditionChoices $metadataImage)
                 foreach ($ed in $choices) { [void]$cmbEditionAuto.Items.Add($ed) }
                 $cmbEditionAuto.Tag = $metadataImage
@@ -423,7 +423,7 @@ public class WimMasterEngine
                 if ($bytesStr -match "^\d+$") {
                     $sizeDisplay = "$([math]::Round([long]$bytesStr / 1GB, 2)) GB"
                 }
-                $rowSize = $dgv.Rows.Add("Size", $sizeDisplay)
+                $rowSize = $dgv.Rows.Add((Get-AIOString 'metadata.prop_size'), $sizeDisplay)
 
                 # D) Fecha de creacion
                 $dateStr = ""
@@ -434,12 +434,12 @@ public class WimMasterEngine
                         $low      = [long](Get-NodeVal $cTime "LOWPART")
                         $combined = ($high -shl 32) -bor ($low -band 0xFFFFFFFFL)
                         $dateStr  = [DateTime]::FromFileTime($combined).ToString("yyyy-MM-dd HH:mm")
-                    } catch { $dateStr = "Desconocida" }
+                    } catch { $dateStr = Get-AIOString 'metadata.unknown_date' }
                 }
-                $rowDate = $dgv.Rows.Add("Fecha de Creacion", $dateStr)
+                $rowDate = $dgv.Rows.Add((Get-AIOString 'metadata.prop_created'), $dateStr)
 
                 # E) Idiomas
-                $langStr = "Desconocido"
+                $langStr = Get-AIOString 'common.unknown'
                 if ($null -ne $winNode) {
                     $langsNode = $winNode.Element("LANGUAGES")
                     if ($null -ne $langsNode) {
@@ -449,12 +449,12 @@ public class WimMasterEngine
                         if ($langList.Count -gt 0) {
                             $langStr = $langList -join ", "
                             if (-not [string]::IsNullOrWhiteSpace($defaultLang)) {
-                                $langStr += " (Predeterminado: $defaultLang)"
+                                $langStr += (Get-AIOString 'metadata.default_lang_suffix' $defaultLang)
                             }
                         }
                     }
                 }
-                $rowLang = $dgv.Rows.Add("Idioma(s)", $langStr)
+                $rowLang = $dgv.Rows.Add((Get-AIOString 'metadata.prop_langs'), $langStr)
 
                 # Aplicar estilo de solo lectura
                 foreach ($rIndex in @($rowArch, $rowVer, $rowSize, $rowDate, $rowLang)) {
@@ -466,8 +466,8 @@ public class WimMasterEngine
                 $btnSave.Enabled = $true
 
             } catch {
-                $lblStatus.Text = "Error Lectura."
-                [System.Windows.Forms.MessageBox]::Show("Error: $_")
+                $lblStatus.Text = Get-AIOString 'metadata.status_read_error'
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'metadata.msg_error' $_))
             }
         }
     })
@@ -486,10 +486,10 @@ public class WimMasterEngine
                 $dgv.Rows[2].Cells[1].Value = $meta.DisplayName
                 $dgv.Rows[3].Cells[1].Value = $meta.DisplayDescription
                 $dgv.Rows[4].Cells[1].Value = $meta.Edition
-                $lblStatus.Text = "Autocompletado con: $($meta.Name)"
+                $lblStatus.Text = Get-AIOString 'metadata.status_autofilled' $meta.Name
             } catch {
                 Write-Log -LogLevel ERROR -Message "WimMetadataManager: Fallo al autocompletar: $($_.Exception.Message)"
-                [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Metadatos', 'OK', 'Warning')
+                [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message, (Get-AIOString 'metadata.msg_title'), 'OK', 'Warning')
             }
         }
     })
@@ -503,13 +503,13 @@ public class WimMasterEngine
         $idx  = $cmbIndex.SelectedIndex + 1
 
         $d = @{}
-        foreach ($r in $dgv.Rows) { $d[$r.Cells[0].Value] = $r.Cells[1].Value }
+        foreach ($r in $dgv.Rows) { $k = if ($r.Tag) { $r.Tag } else { $r.Cells[0].Value }; $d[$k] = $r.Cells[1].Value }
 
         Write-Log -LogLevel ACTION -Message "WimMetadataManager: Iniciando reescritura de metadatos XML para el WIM [$path] (Indice: $idx)."
         Write-Log -LogLevel INFO   -Message "WimMetadataManager: Valores a inyectar -> Nombre: [$($d['Nombre'])] | Edicion: [$($d['ID de Edicion'])]"
 
         $form.Cursor     = [System.Windows.Forms.Cursors]::WaitCursor
-        $lblStatus.Text  = "Guardando..."
+        $lblStatus.Text  = Get-AIOString 'metadata.status_saving'
         $form.Refresh()
         $btnSave.Enabled = $false
         $success         = $false
@@ -531,16 +531,16 @@ public class WimMasterEngine
             )
 
             $success        = $true
-            $lblStatus.Text = "OK"
+            $lblStatus.Text = Get-AIOString 'metadata.status_ok'
             Write-Log -LogLevel INFO -Message "WimMetadataManager: Metadatos guardados exitosamente. El archivo WIM ha sido actualizado."
-            [System.Windows.Forms.MessageBox]::Show("Guardado Exitoso", "OK", 'OK', 'Information')
+            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'metadata.msg_saved_ok'), (Get-AIOString 'common.ok_title'), 'OK', 'Information')
 
         } catch {
             if (-not $success) {
-                $lblStatus.Text = "Error"
+                $lblStatus.Text = Get-AIOString 'metadata.status_error'
                 $errMsg = $_.Exception.Message
                 Write-Log -LogLevel ERROR -Message "WimMetadataManager: Falla critica al escribir metadatos usando la API .NET - $errMsg"
-                [System.Windows.Forms.MessageBox]::Show("Error al guardar: $errMsg", "Error", 'OK', 'Error')
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'metadata.msg_save_error' $errMsg), (Get-AIOString 'common.error_title'), 'OK', 'Error')
             }
         } finally {
             $form.Cursor     = [System.Windows.Forms.Cursors]::Default
@@ -554,8 +554,8 @@ public class WimMasterEngine
 
     $form.Add_FormClosing({ 
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Estas seguro de que deseas salir?", 
-            "Confirmar Salida", 
+            (Get-AIOString 'metadata.confirm_exit_body'),
+            (Get-AIOString 'metadata.confirm_exit_title'), 
             [System.Windows.Forms.MessageBoxButtons]::YesNo, 
             [System.Windows.Forms.MessageBoxIcon]::Question
         )

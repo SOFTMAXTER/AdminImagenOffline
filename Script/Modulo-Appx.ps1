@@ -46,7 +46,7 @@ function Show-AppxInjector-GUI {
     # 1. Validacion de imagen montada
     # ------------------------------------------------------------------
     if ($Script:IMAGE_MOUNTED -eq 0) {
-        [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
+        [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'drivers.mount_first'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         return
     }
 
@@ -71,7 +71,7 @@ function Show-AppxInjector-GUI {
     # 2. Construccion del formulario
     # ------------------------------------------------------------------
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = "Inyector y Actualizador de Apps Modernas - $Script:MOUNT_DIR"
+    $form.Text            = Get-AIOString 'appx.form_title' $Script:MOUNT_DIR
     $form.Size            = New-Object System.Drawing.Size(1050, 730)
     $form.StartPosition   = "CenterScreen"
     $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -80,14 +80,14 @@ function Show-AppxInjector-GUI {
     $form.MaximizeBox     = $false
 
     $lblTitle          = New-Object System.Windows.Forms.Label
-    $lblTitle.Text     = "Motor Heuristico de Aprovisionamiento UWP"
+    $lblTitle.Text     = Get-AIOString 'appx.title'
     $lblTitle.Font     = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
     $lblTitle.Location = "20, 15"
     $lblTitle.AutoSize = $true
     $form.Controls.Add($lblTitle)
 
     $lblOsInfo           = New-Object System.Windows.Forms.Label
-    $lblOsInfo.Text      = "Analizando imagen..."
+    $lblOsInfo.Text      = Get-AIOString 'appx.analyzing_img'
     $lblOsInfo.Font      = New-Object System.Drawing.Font("Segoe UI", 8)
     $lblOsInfo.ForeColor = [System.Drawing.Color]::LightGreen
     $lblOsInfo.Location  = "20, 42"
@@ -104,20 +104,20 @@ function Show-AppxInjector-GUI {
     $lvAppQueue.GridLines     = $true
     $lvAppQueue.BackColor     = [System.Drawing.Color]::FromArgb(45, 45, 48)
     $lvAppQueue.ForeColor     = [System.Drawing.Color]::White
-    $lvAppQueue.Columns.Add("Accion",             120) | Out-Null
-    $lvAppQueue.Columns.Add("Tipo",               100) | Out-Null
-    $lvAppQueue.Columns.Add("Familia / Paquete",  280) | Out-Null
-    $lvAppQueue.Columns.Add("Version",            120) | Out-Null
-    $lvAppQueue.Columns.Add("Arch",                70) | Out-Null
-    $lvAppQueue.Columns.Add("Deps",                50) | Out-Null
-    $lvAppQueue.Columns.Add("Ruta",               300) | Out-Null
+    $lvAppQueue.Columns.Add((Get-AIOString 'appx.col_action'), 120) | Out-Null
+    $lvAppQueue.Columns.Add((Get-AIOString 'appx.col_type'), 100) | Out-Null
+    $lvAppQueue.Columns.Add((Get-AIOString 'appx.col_family'), 280) | Out-Null
+    $lvAppQueue.Columns.Add((Get-AIOString 'appx.col_version'), 120) | Out-Null
+    $lvAppQueue.Columns.Add((Get-AIOString 'appx.col_arch'), 70) | Out-Null
+    $lvAppQueue.Columns.Add((Get-AIOString 'appx.col_deps'), 50) | Out-Null
+    $lvAppQueue.Columns.Add((Get-AIOString 'appx.col_path'), 300) | Out-Null
     $form.Controls.Add($lvAppQueue)
 
     # --- BARRA DE ACCIONES (Fila Y: 545) ---
     $Y_Acciones = 545
 
     $btnAddApp            = New-Object System.Windows.Forms.Button
-    $btnAddApp.Text       = "+ Archivos Sueltos"
+    $btnAddApp.Text       = Get-AIOString 'appx.btn_add_files'
     $btnAddApp.Location   = "20, $Y_Acciones"
     $btnAddApp.Size       = "150, 35"
     $btnAddApp.BackColor  = [System.Drawing.Color]::RoyalBlue
@@ -125,7 +125,7 @@ function Show-AppxInjector-GUI {
     $form.Controls.Add($btnAddApp)
 
     $btnAddFolder            = New-Object System.Windows.Forms.Button
-    $btnAddFolder.Text       = "+ Escanear Carpeta (Auto)"
+    $btnAddFolder.Text       = Get-AIOString 'appx.btn_add_folder'
     $btnAddFolder.Location   = "180, $Y_Acciones"
     $btnAddFolder.Size       = "190, 35"
     $btnAddFolder.BackColor  = [System.Drawing.Color]::DodgerBlue
@@ -133,7 +133,7 @@ function Show-AppxInjector-GUI {
     $form.Controls.Add($btnAddFolder)
 
     $btnRemoveApp            = New-Object System.Windows.Forms.Button
-    $btnRemoveApp.Text       = "- Quitar Seleccion"
+    $btnRemoveApp.Text       = Get-AIOString 'appx.btn_remove'
     $btnRemoveApp.Location   = "380, $Y_Acciones"
     $btnRemoveApp.Size       = "150, 35"
     $btnRemoveApp.BackColor  = [System.Drawing.Color]::Crimson
@@ -141,7 +141,7 @@ function Show-AppxInjector-GUI {
     $form.Controls.Add($btnRemoveApp)
 
     $btnClear            = New-Object System.Windows.Forms.Button
-    $btnClear.Text       = "Limpiar Cola"
+    $btnClear.Text       = Get-AIOString 'appx.btn_clear'
     $btnClear.Location   = "540, $Y_Acciones"
     $btnClear.Size       = "110, 35"
     $btnClear.BackColor  = [System.Drawing.Color]::Gray
@@ -149,7 +149,7 @@ function Show-AppxInjector-GUI {
     $form.Controls.Add($btnClear)
 
     $btnCancelAfterCurrent            = New-Object System.Windows.Forms.Button
-    $btnCancelAfterCurrent.Text       = "Cancelar despues del actual"
+    $btnCancelAfterCurrent.Text       = Get-AIOString 'drivers.btn_cancel_after'
     $btnCancelAfterCurrent.Location   = "660, $Y_Acciones"
     $btnCancelAfterCurrent.Size       = "360, 35"
     $btnCancelAfterCurrent.BackColor  = [System.Drawing.Color]::DarkOrange
@@ -159,7 +159,7 @@ function Show-AppxInjector-GUI {
     
     # Texto de estado anclado a la izquierda
     $lblStatus           = New-Object System.Windows.Forms.Label
-    $lblStatus.Text      = "Inicializando motor heuristico..."
+    $lblStatus.Text      = Get-AIOString 'appx.status_init'
     $lblStatus.Location  = "20, 608"
     $lblStatus.Size      = "620, 22"
     $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
@@ -167,7 +167,7 @@ function Show-AppxInjector-GUI {
 
     # Botón de ejecución anclado a la derecha
     $btnApply            = New-Object System.Windows.Forms.Button
-    $btnApply.Text       = "EJECUTAR DESPLIEGUE INTELIGENTE"
+    $btnApply.Text       = Get-AIOString 'appx.btn_apply'
     $btnApply.Location   = "660, 595"
     $btnApply.Size       = "360, 45"
     $btnApply.BackColor  = [System.Drawing.Color]::SeaGreen
@@ -177,7 +177,7 @@ function Show-AppxInjector-GUI {
     $form.Controls.Add($btnApply)
 
     $chkUpdateAppx = New-Object System.Windows.Forms.CheckBox
-    $chkUpdateAppx.Text = 'Actualizar apps ya aprovisionadas con paquetes locales mas recientes'
+    $chkUpdateAppx.Text = Get-AIOString 'appx.chk_update'
     $chkUpdateAppx.Location = '20, 584'
     $chkUpdateAppx.Size = '625, 22'
     $chkUpdateAppx.Checked = $false
@@ -423,7 +423,7 @@ public static class AIOAppxIdentityNative {
         }
         $btnApply.Enabled = $false
         $chkUpdateAppx.Enabled = $false
-        $lblStatus.Text = 'Lote detenido. Pendientes bloqueados; consulte el detalle del error.'
+        $lblStatus.Text = Get-AIOString 'appx.status_batch_stopped'
         $lblStatus.ForeColor = [Drawing.Color]::Salmon
         Write-Log -LogLevel ERROR -Message "AppxInjector: $Message"
     }
@@ -1149,7 +1149,7 @@ public static class AIOAppxIdentityNative {
         } finally {
             # OBSERVACION B: Garantizado que la UI se descongele pase lo que pase
             $lvAppQueue.EndUpdate()
-            $lblStatus.Text      = "Analisis completado. En cola: $($lvAppQueue.Items.Count) elemento(s)."
+            $lblStatus.Text      = Get-AIOString 'appx.status_analysis_done' $lvAppQueue.Items.Count
             $lblStatus.ForeColor = [System.Drawing.Color]::White
             Update-AppxQueueActions
         }
@@ -1165,29 +1165,29 @@ public static class AIOAppxIdentityNative {
         foreach ($control in @($btnApply,$btnAddApp,$btnAddFolder,$btnRemoveApp,$btnClear,$chkUpdateAppx)) { $control.Enabled = $false }
         try {
             $form.Cursor    = [System.Windows.Forms.Cursors]::WaitCursor
-            $lblStatus.Text = "Leyendo cache Appx via DISM (Puede tardar 15-30 seg. La ventana no respondera)..."
+            $lblStatus.Text = Get-AIOString 'appx.status_reading_cache'
             $form.Refresh()
             [System.Windows.Forms.Application]::DoEvents()
 
             # 1. Leer Appx PRIMERO (sin colmenas montadas para evitar colision de archivos)
             try {
                 Update-AppxInstalledCache
-                $cacheMsg   = "$($script:appCache.Count) apps en cache"
+                $cacheMsg   = Get-AIOString 'appx.cache_count' $script:appCache.Count
                 $cacheColor = [System.Drawing.Color]::LightGreen
             } catch {
                 if ($script:appxBatchBlocked) { throw }
-                $cacheMsg   = "Cache no disponible"
+                $cacheMsg   = Get-AIOString 'appx.cache_unavailable'
                 $cacheColor = [System.Drawing.Color]::Salmon
                 Write-Log -LogLevel WARN -Message "AppxInjector: Fallo al leer cache - $($_.Exception.Message)"
             }
 
             # 2. Montar colmenas para el resto de operaciones
-            $lblStatus.Text = "Montando colmenas del registro..."
+            $lblStatus.Text = Get-AIOString 'appx.status_mounting_hives'
             $form.Refresh()
             [System.Windows.Forms.Application]::DoEvents()
 
             if (-not (Mount-Hives)) {
-                $lblStatus.Text      = "Error fatal: No se pudieron montar las colmenas."
+                $lblStatus.Text      = Get-AIOString 'appx.status_hives_fatal'
                 $lblStatus.ForeColor = [System.Drawing.Color]::Red
                 $form.Cursor         = [System.Windows.Forms.Cursors]::Default
                 return
@@ -1270,13 +1270,13 @@ public static class AIOAppxIdentityNative {
             }
 
             # 5. Actualizar UI
-            $lblOsInfo.Text      = "Imagen: $osLabel | Arquitectura: $($script:imgArch) | Build: $($script:imgBuild)"
-            $lblStatus.Text      = "Motor Listo | OS: $osLabel | Arch: $($script:imgArch) | $cacheMsg"
+            $lblOsInfo.Text      = Get-AIOString 'appx.os_info_fmt' $osLabel $script:imgArch $script:imgBuild
+            $lblStatus.Text      = Get-AIOString 'appx.status_engine_ready' $osLabel $script:imgArch $cacheMsg
             $lblStatus.ForeColor = $cacheColor
             $form.Cursor         = [System.Windows.Forms.Cursors]::Default
         } catch {
             Block-AppxBatch $_.Exception.Message
-            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,'Inicializacion detenida','OK','Error') | Out-Null
+            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,(Get-AIOString 'appx.init_stopped_title'),'OK','Error') | Out-Null
         } finally {
             try { Invoke-AppxSafeUnmount 'fin de inicializacion' }
             catch { Block-AppxBatch $_.Exception.Message }
@@ -1290,7 +1290,7 @@ public static class AIOAppxIdentityNative {
     # Agregar archivos sueltos
     $btnAddApp.Add_Click({
         $ofd             = New-Object System.Windows.Forms.OpenFileDialog
-        $ofd.Filter      = "Paquetes UWP (*.appx;*.msix;*.appxbundle;*.msixbundle;*.eappx;*.emsix;*.eappxbundle;*.emsixbundle)|*.appx;*.msix;*.appxbundle;*.msixbundle;*.eappx;*.emsix;*.eappxbundle;*.emsixbundle"
+        $ofd.Filter      = Get-AIOString 'appx.uwp_filter'
         $ofd.Multiselect = $true
         if ($ofd.ShowDialog() -eq 'OK') {
             $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
@@ -1303,7 +1303,7 @@ public static class AIOAppxIdentityNative {
     # Escanear carpeta recursivamente
     $btnAddFolder.Add_Click({
         $fbd             = New-Object System.Windows.Forms.FolderBrowserDialog
-        $fbd.Description = "Selecciona la carpeta que contiene los paquetes UWP"
+        $fbd.Description = Get-AIOString 'appx.folder_desc'
         if ($fbd.ShowDialog() -eq 'OK') {
             $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
             $allFiles    = @(Get-ChildItem -Path $fbd.SelectedPath `
@@ -1326,14 +1326,14 @@ public static class AIOAppxIdentityNative {
         $toRemove = @($lvAppQueue.SelectedItems)
         foreach ($item in $toRemove) { $lvAppQueue.Items.Remove($item) }
         $lvAppQueue.EndUpdate()
-        $lblStatus.Text = "En cola: $($lvAppQueue.Items.Count) elemento(s)."
+        $lblStatus.Text = Get-AIOString 'appx.status_in_queue' $lvAppQueue.Items.Count
         if ($lvAppQueue.Items.Count -eq 0) { $btnApply.Enabled = $false }
     })
 
     # Limpiar cola completa
     $btnClear.Add_Click({
         $lvAppQueue.Items.Clear()
-        $lblStatus.Text      = "Cola vaciada."
+        $lblStatus.Text      = Get-AIOString 'appx.status_queue_cleared'
         $lblStatus.ForeColor = [System.Drawing.Color]::Gray
         $btnApply.Enabled    = $false
     })
@@ -1342,7 +1342,7 @@ public static class AIOAppxIdentityNative {
         if (-not $script:isAppxDeploying) { return }
         $script:cancelAppxAfterCurrent = $true
         $btnCancelAfterCurrent.Enabled = $false
-        $lblStatus.Text = "Cancelacion solicitada. Se detendra despues del paquete actual."
+        $lblStatus.Text = Get-AIOString 'appx.status_cancel_req'
         $lblStatus.ForeColor = [System.Drawing.Color]::DarkOrange
         Write-Log -LogLevel WARN -Message "AppxInjector: Cancelacion segura solicitada por el usuario."
     })
@@ -1360,7 +1360,7 @@ public static class AIOAppxIdentityNative {
             Update-AppxQueueActions
         } catch {
             Block-AppxBatch $_.Exception.Message
-            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,'Lote detenido','OK','Error') | Out-Null
+            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,(Get-AIOString 'appx.batch_stopped_title'),'OK','Error') | Out-Null
             return
         } finally {
             $script:isAppxPreparing = $false
@@ -1371,14 +1371,14 @@ public static class AIOAppxIdentityNative {
 
         if ($pendingItems.Count -eq 0) {
             [System.Windows.Forms.MessageBox]::Show(
-                $form, "No hay paquetes pendientes de instalar.", "Sin pendientes", 'OK', 'Information')
+                $form, (Get-AIOString 'appx.none_pending'), (Get-AIOString 'addons.none_pending_title'), 'OK', 'Information')
             return
         }
 
         if ([System.Windows.Forms.MessageBox]::Show(
                 $form,
-                "Se desplegaran $($pendingItems.Count) paquetes en la imagen.`nContinuar?",
-                "Confirmar Despliegue", 'YesNo', 'Question') -ne 'Yes') { return }
+                (Get-AIOString 'appx.confirm_deploy' $pendingItems.Count),
+                (Get-AIOString 'appx.confirm_deploy_title'), 'YesNo', 'Question') -ne 'Yes') { return }
 
         $script:isAppxDeploying       = $true
         $script:cancelAppxAfterCurrent = $false
@@ -1405,8 +1405,8 @@ public static class AIOAppxIdentityNative {
             if (-not (Mount-Hives)) {
                 [System.Windows.Forms.MessageBox]::Show(
                     $form,
-                    "No se pudieron montar las colmenas offline para habilitar sideloading.",
-                    "Error de registro offline", 'OK', 'Error')
+                    (Get-AIOString 'appx.hives_sideload_err'),
+                    (Get-AIOString 'appx.hives_sideload_title'), 'OK', 'Error')
                 return
             }
 
@@ -1461,7 +1461,7 @@ public static class AIOAppxIdentityNative {
                     $item.Text      = "REPARANDO..."
                     $item.ForeColor = [System.Drawing.Color]::Orange
                     $item.EnsureVisible()
-                    $lblStatus.Text = "[$($count + 1)/$total] Reparando marca Deprovisioned: $familyName..."
+                    $lblStatus.Text = Get-AIOString 'appx.status_repairing' ($count + 1) $total $familyName
                     $form.Refresh()
                     try {
                         # Completar la reparacion de este objeto antes de avanzar al siguiente.
@@ -1590,7 +1590,7 @@ public static class AIOAppxIdentityNative {
 
             # 6. Limpiar marcas Deprovisioned para paquetes reinstalados
             if ($successFamilies.Count -gt 0) {
-                $lblStatus.Text = "Finalizando limpieza de marcas Deprovisioned..."
+                $lblStatus.Text = Get-AIOString 'appx.status_finishing_deprov'
                 $form.Refresh()
                 $cleanedDeprov = Remove-AppxDeprovisionedMarks -FamilyNames $successFamilies
                 if ($cleanedDeprov -gt 0) {
@@ -1605,23 +1605,23 @@ public static class AIOAppxIdentityNative {
                 Write-Log -LogLevel WARN -Message "AppxInjector: No se pudo refrescar la cache: $($_.Exception.Message)"
             }
 
-            $cancelText = if ($cancelled) { " | Cancelado por usuario" } else { "" }
-            $lblStatus.Text      = "Completado. Exitos: $success | Errores: $errors | Omitidos: $skipped$cancelText"
+            $cancelText = if ($cancelled) { Get-AIOString 'appx.cancelled_by_user' } else { "" }
+            $lblStatus.Text      = Get-AIOString 'appx.status_completed' $success $errors $skipped $cancelText
             $lblStatus.ForeColor = if ($errors -gt 0) { [System.Drawing.Color]::Salmon } elseif ($cancelled) { [System.Drawing.Color]::DarkOrange } else { [System.Drawing.Color]::LightGreen }
 
-            $msg = "Despliegue finalizado.`n`nExitos:    $success`nErrores:   $errors`nOmitidos:  $skipped"
-            if ($cancelled) { $msg += "`nCancelado: si" }
+            $msg = Get-AIOString 'appx.report_body' $success $errors $skipped
+            if ($cancelled) { $msg += Get-AIOString 'appx.report_cancelled' }
             if ($errors -gt 0) {
-                $msg += "`n`nLos logs DISM con error se conservaron en Scratch para diagnostico."
+                $msg += Get-AIOString 'appx.report_dism_logs'
                 if ($failedDismLogs.Count -gt 0) {
                     $msg += "`n`n" + (($failedDismLogs | Select-Object -Unique) -join "`n")
                 }
             }
-            [System.Windows.Forms.MessageBox]::Show($form, $msg, "Reporte de Despliegue", 'OK', 'Information')
+            [System.Windows.Forms.MessageBox]::Show($form, $msg, (Get-AIOString 'appx.report_title'), 'OK', 'Information')
 
         } catch {
             Block-AppxBatch $_.Exception.Message
-            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,'Lote detenido','OK','Error') | Out-Null
+            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,(Get-AIOString 'appx.batch_stopped_title'),'OK','Error') | Out-Null
         } finally {
             $script:isAppxDeploying        = $false
             $script:currentDismProcess     = $null
@@ -1645,8 +1645,8 @@ public static class AIOAppxIdentityNative {
         if ($script:isAppxDeploying -or $script:isAppxPreparing) {
             [System.Windows.Forms.MessageBox]::Show(
                 $form,
-                "La inyeccion de aplicaciones esta en curso.`nEspera a que termine o usa 'Cancelar despues del actual'.",
-                "Operacion Critica en Curso",
+                (Get-AIOString 'appx.busy_close_warn'),
+                (Get-AIOString 'appx.busy_close_title'),
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Warning)
             $eventArgs.Cancel = $true
@@ -1655,8 +1655,8 @@ public static class AIOAppxIdentityNative {
 
         $confirm = [System.Windows.Forms.MessageBox]::Show(
             $form,
-            "Estas seguro de que deseas salir?",
-            "Confirmar Salida",
+            (Get-AIOString 'metadata.confirm_exit_body'),
+            (Get-AIOString 'metadata.confirm_exit_title'),
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question
         )
@@ -1670,7 +1670,7 @@ public static class AIOAppxIdentityNative {
         catch {
             $eventArgs.Cancel = $true
             Block-AppxBatch $_.Exception.Message
-            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,'Colmenas bloqueadas','OK','Error') | Out-Null
+            [Windows.Forms.MessageBox]::Show($form,$_.Exception.Message,(Get-AIOString 'appx.hives_locked_title'),'OK','Error') | Out-Null
         } finally { $script:isAppxPreparing = $false }
     })
 

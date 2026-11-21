@@ -108,7 +108,7 @@ function Install-OfflineAddon {
     
     if ($ext -eq '.reg') {
         $regResult = Import-OfflineReg -FilePath $FilePath -PassThru
-        $message = "Registro procesado: $($regResult.KeysWritten) claves, $($regResult.ValuesWritten) valores."
+        $message = Get-AIOString 'addons.reg_processed_fmt' $regResult.KeysWritten $regResult.ValuesWritten
         return (New-AIOAddonResult -Message $message -BlockedSections $regResult.BlockedSections -PassThru:$PassThru)
     }
 
@@ -158,9 +158,9 @@ function Install-OfflineAddon {
                 $blockedSections += $regResult.BlockedSections
             }
 
-            $msg = "Inyectado: "
-            if ($hasFiles) { $msg += "[Archivos] " }
-            if ($regFiles) { $msg += "[Registro] " }
+            $msg = Get-AIOString 'addons.injected_prefix'
+            if ($hasFiles) { $msg += Get-AIOString 'addons.tag_files' }
+            if ($regFiles) { $msg += Get-AIOString 'addons.tag_registry' }
             return (New-AIOAddonResult -Message $msg.Trim() -BlockedSections $blockedSections -PassThru:$PassThru)
 
         } finally {
@@ -467,7 +467,7 @@ function Show-Addons-GUI {
     Add-Type -AssemblyName System.Drawing
 
     if ($Script:IMAGE_MOUNTED -eq 0) { 
-        [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
+        [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'drivers.mount_first'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         return 
     }
 
@@ -480,7 +480,7 @@ function Show-Addons-GUI {
 
     try {
         $form = New-Object System.Windows.Forms.Form
-        $form.Text = "Instalador de Addons y Paquetes Avanzados (.TPK, .BPK, .REG, DeltaPack)"
+        $form.Text = Get-AIOString 'addons.form_title'
         $form.Size = New-Object System.Drawing.Size(950, 660)
         $form.StartPosition = "CenterScreen"
         $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -490,7 +490,7 @@ function Show-Addons-GUI {
 
         # --- TÍTULO Y BOTÓN DE CARGA ---
         $lblTitle = New-Object System.Windows.Forms.Label
-        $lblTitle.Text = "Integracion de Paquetes de Terceros"
+        $lblTitle.Text = Get-AIOString 'addons.title'
         $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
         $lblTitle.Location = "20, 15"; $lblTitle.AutoSize = $true
         $form.Controls.Add($lblTitle)
@@ -506,7 +506,7 @@ function Show-Addons-GUI {
         $form.Controls.Add($btnHelp)
 
         $btnAddFiles = New-Object System.Windows.Forms.Button
-        $btnAddFiles.Text = "+ Agregar Addons / Paquete DeltaPack..."
+        $btnAddFiles.Text = Get-AIOString 'addons.btn_add'
         $btnAddFiles.Location = "670, 12"
         $btnAddFiles.Size = "240, 30"
         $btnAddFiles.BackColor = [System.Drawing.Color]::RoyalBlue
@@ -515,7 +515,7 @@ function Show-Addons-GUI {
 
         # Label de advertencia de nomenclatura (Texto Rápido)
         $lblNomenclatura = New-Object System.Windows.Forms.Label
-        $lblNomenclatura.Text = "Aviso: Usa los sufijos _x64, _x86, _arm64 en el nombre del archivo para activar el Escudo de Arquitectura.`nY para los Paquetes principales debe incluir _main al final del nombre es MUY IMPORTANTE"
+        $lblNomenclatura.Text = Get-AIOString 'addons.nomenclature_hint'
         $lblNomenclatura.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
         $lblNomenclatura.ForeColor = [System.Drawing.Color]::White
         $lblNomenclatura.Location = "20, 42"
@@ -530,7 +530,7 @@ function Show-Addons-GUI {
 
         # --- SELECTOR DE ARQUITECTURA (GRUPO) ---
         $grpArch = New-Object System.Windows.Forms.GroupBox
-        $grpArch.Text = " Arquitectura del Addon (Solo aplica para desempaquetar .tpk/.bpk) "
+        $grpArch.Text = Get-AIOString 'addons.grp_arch'
         $grpArch.Location = "20, 65" 
         $grpArch.Size = "890, 55"
         $grpArch.ForeColor = [System.Drawing.Color]::Orange
@@ -570,10 +570,10 @@ function Show-Addons-GUI {
         $lv.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
         $lv.ForeColor = [System.Drawing.Color]::White
         
-        $lv.Columns.Add("Estado", 150) | Out-Null
-        $lv.Columns.Add("Archivo", 250) | Out-Null
-        $lv.Columns.Add("Tipo Detectado", 120) | Out-Null
-        $lv.Columns.Add("Ruta Completa", 360) | Out-Null
+        $lv.Columns.Add((Get-AIOString 'addons.col_status'), 150) | Out-Null
+        $lv.Columns.Add((Get-AIOString 'addons.col_file'), 250) | Out-Null
+        $lv.Columns.Add((Get-AIOString 'addons.col_type'), 120) | Out-Null
+        $lv.Columns.Add((Get-AIOString 'addons.col_path'), 360) | Out-Null
         $form.Controls.Add($lv)
 
         # --- PALETA DE COLORES DE ESTADO (centralizada para mantenimiento) ---
@@ -585,14 +585,14 @@ function Show-Addons-GUI {
 
         # --- ESTADO Y BOTONES INFERIORES ---
         $lblStatus = New-Object System.Windows.Forms.Label
-        $lblStatus.Text = "Agrega los archivos a la cola de inyeccion."
+        $lblStatus.Text = Get-AIOString 'addons.status_initial'
         $lblStatus.Location = "20, 505"
         $lblStatus.AutoSize = $true
         $lblStatus.ForeColor = [System.Drawing.Color]::Cyan
         $form.Controls.Add($lblStatus)
 
         $btnRemoveItem = New-Object System.Windows.Forms.Button
-        $btnRemoveItem.Text = "Quitar de la lista"
+        $btnRemoveItem.Text = Get-AIOString 'addons.btn_remove'
         $btnRemoveItem.Location = "20, 530"
         $btnRemoveItem.Size = "150, 30"
         $btnRemoveItem.BackColor = [System.Drawing.Color]::Crimson
@@ -600,7 +600,7 @@ function Show-Addons-GUI {
         $form.Controls.Add($btnRemoveItem)
 
         $btnInstall = New-Object System.Windows.Forms.Button
-        $btnInstall.Text = "INYECTAR TODOS LOS ADDONS"
+        $btnInstall.Text = Get-AIOString 'addons.btn_install'
         $btnInstall.Location = "640, 520"
         $btnInstall.Size = "270, 40"
         $btnInstall.BackColor = [System.Drawing.Color]::SeaGreen
@@ -617,28 +617,15 @@ function Show-Addons-GUI {
 
         # --- EVENTO DEL BOTÓN DE AYUDA ---
         $btnHelp.Add_Click({
-            $helpMsg = "INSTRUCCIONES DE NOMENCLATURA PARA ADDONS`n`n"
-            $helpMsg += "Para que el motor inteligente proteja tu imagen WIM de colapsos, "
-            $helpMsg += "los archivos deben indicar su arquitectura en el nombre ANTES de la extension.`n`n"
-            $helpMsg += "Ejemplos Correctos:`n"
-            $helpMsg += "  >  MiPaqueteIdioma_x64_es-mx.tpk`n"
-            $helpMsg += "  >  Herramienta_arm64_main.tpk`n"
-            $helpMsg += "  >  Herramienta_main.bpk`n`n"
-            $helpMsg += "Por que es importante?`n"
-            $helpMsg += "Si agregas una carpeta entera de Addons, el script leera estos sufijos y "
-            $helpMsg += "OMITIRA automaticamente los paquetes/Registro de una arquitectura distinta a la "
-            $helpMsg += "seleccionada (x86, x64 o ARM64), evitando pantallas azules y corrupcion en la instalacion.`n`n"
-            $helpMsg += "Paquetes DeltaPack Dual-Engine:`n"
-            $helpMsg += "Selecciona el archivo 'manifest_*.json' dentro de la carpeta del paquete para agregarlo "
-            $helpMsg += "como una unidad completa (WIM + REG + Eliminaciones + Acciones, en el orden que declare el manifest)."
+            $helpMsg = Get-AIOString 'addons.help_body'
 
-            [System.Windows.Forms.MessageBox]::Show($helpMsg, "Reglas de Empaquetado", 'OK', 'Information')
+            [System.Windows.Forms.MessageBox]::Show($helpMsg, (Get-AIOString 'addons.help_title'), 'OK', 'Information')
         })
 
         # --- EVENTOS ---
         $btnAddFiles.Add_Click({
             $ofd = New-Object System.Windows.Forms.OpenFileDialog
-            $ofd.Filter = "Addons Windows (*.tpk;*.bpk;*.reg)|*.tpk;*.bpk;*.reg|Paquetes DeltaPack Dual-Engine (manifest_*.json)|manifest_*.json|Todos los archivos (*.*)|*.*"
+            $ofd.Filter = Get-AIOString 'addons.filter_addons'
             $ofd.Multiselect = $true
             if ($ofd.ShowDialog() -eq 'OK') {
                 $lv.BeginUpdate()
@@ -650,7 +637,7 @@ function Show-Addons-GUI {
                         try {
                             $dpManifest = Get-DeltaPackManifest -PackagePath $packageFolder
                         } catch {
-                            [System.Windows.Forms.MessageBox]::Show("No se pudo leer el paquete DeltaPack en `"$packageFolder`":`n`n$($_.Exception.Message)", "Paquete DeltaPack invalido", 'OK', 'Error')
+                            [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'addons.deltapack_invalid' $packageFolder $_.Exception.Message), (Get-AIOString 'addons.deltapack_invalid_title'), 'OK', 'Error')
                             continue
                         }
 
@@ -691,7 +678,7 @@ function Show-Addons-GUI {
                 Write-Log -LogLevel WARN -Message "AddonInjector: Intento de ejecucion sin addons en la lista."
                 return 
             }
-            $confirm = [System.Windows.Forms.MessageBox]::Show("Iniciar la inyeccion en lote? Esto fusionara archivos y claves de registro en el orden correcto.", "Confirmar", 'YesNo', 'Warning')
+            $confirm = [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'addons.confirm_batch'), (Get-AIOString 'drivers.confirm_title'), 'YesNo', 'Warning')
             if ($confirm -ne 'Yes') { 
                 Write-Log -LogLevel INFO -Message "AddonInjector: Operacion cancelada por el usuario en el cuadro de confirmacion."
                 return 
@@ -724,12 +711,12 @@ function Show-Addons-GUI {
                 }
 
                 if ($pendingItems.Count -eq 0) {
-                    [System.Windows.Forms.MessageBox]::Show("No hay addons pendientes de procesar.", "Sin pendientes", 'OK', 'Information') | Out-Null
+                    [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'addons.none_pending'), (Get-AIOString 'addons.none_pending_title'), 'OK', 'Information') | Out-Null
                     return
                 }
 
                 # --- 2. ORDENAMIENTO INTELIGENTE (Prioridad + Alfabeto) ---
-                $lblStatus.Text = "Calculando orden de inyeccion..."
+                $lblStatus.Text = Get-AIOString 'addons.status_calc_order'
                 $form.Refresh()
 
                 $sortedItems = @($pendingItems | Sort-Object {
@@ -786,7 +773,7 @@ function Show-Addons-GUI {
                         }
 
                         # --- CONDICION 2: INYECCION EN ORDEN ---
-                        $lblStatus.Text = "Inyectando: $($item.SubItems[1].Text)..."
+                        $lblStatus.Text = Get-AIOString 'addons.status_injecting' $item.SubItems[1].Text
                         $item.Text = "PROCESANDO..."
                         $item.ForeColor = $ColorProcesando
 
@@ -842,17 +829,17 @@ function Show-Addons-GUI {
                 }
 
                 $reportIcon = if ($errors -gt 0) { 'Error' } elseif ($withOmissions -gt 0) { 'Warning' } else { 'Information' }
-                [System.Windows.Forms.MessageBox]::Show("Inyeccion de Addons finalizada.`n`nExitos sin omisiones: $success`nCompletados con omisiones: $withOmissions`nSecciones protegidas no importadas: $totalBlockedSections`nErrores: $errors`nOmitidos (Arch): $skipped", "Reporte de Operacion", 'OK', $reportIcon)
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'addons.report_body' $success $withOmissions $totalBlockedSections $errors $skipped), (Get-AIOString 'addons.report_title'), 'OK', $reportIcon)
             } catch {
                 Write-Log -LogLevel ERROR -Message "AddonInjector: Error inesperado durante el ciclo de inyeccion - $($_.Exception.Message)"
-                [System.Windows.Forms.MessageBox]::Show("Ocurrio un error inesperado durante la inyeccion:`n`n$($_.Exception.Message)", "Error", 'OK', 'Error') | Out-Null
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'addons.err_unexpected' $_.Exception.Message), (Get-AIOString 'common.error_title'), 'OK', 'Error') | Out-Null
             } finally {
                 $progressBar.Visible   = $false
                 $form.Cursor           = [System.Windows.Forms.Cursors]::Default
                 $btnInstall.Enabled    = $true
                 $btnRemoveItem.Enabled = $true
                 $btnAddFiles.Enabled   = $true
-                $lblStatus.Text        = "Proceso terminado."
+                $lblStatus.Text        = Get-AIOString 'addons.status_done'
                 $script:AddonBusy      = $false
             }
         })
@@ -861,15 +848,15 @@ function Show-Addons-GUI {
         $form.Add_FormClosing({ 
             if ($script:AddonBusy) {
                 [System.Windows.Forms.MessageBox]::Show(
-                    "Hay una inyeccion de addons en curso. Espera a que termine antes de cerrar esta ventana.",
-                    "Operacion en curso", 'OK', 'Warning') | Out-Null
+                    (Get-AIOString 'addons.busy_warn'),
+                    (Get-AIOString 'addons.busy_title'), 'OK', 'Warning') | Out-Null
                 $_.Cancel = $true
                 return
             }
 
             $confirm = [System.Windows.Forms.MessageBox]::Show(
-                "Estas seguro de que deseas salir?", 
-                "Confirmar Salida", 
+                (Get-AIOString 'metadata.confirm_exit_body'),
+                (Get-AIOString 'metadata.confirm_exit_title'), 
                 [System.Windows.Forms.MessageBoxButtons]::YesNo, 
                 [System.Windows.Forms.MessageBoxIcon]::Question
             )
@@ -877,7 +864,7 @@ function Show-Addons-GUI {
             if ($confirm -eq 'No') {
                 $_.Cancel = $true
             } else {
-                $lblStatus.Text = "Desmontando Hives..."
+                $lblStatus.Text = Get-AIOString 'servicios.status_unloading_hives'
                 $form.Refresh()
                 Start-Sleep -Milliseconds 500
                 if (-not $script:AddonHivesUnmounted) {
@@ -891,7 +878,7 @@ function Show-Addons-GUI {
         $form.Dispose()
     } catch {
         Write-Log -LogLevel ERROR -Message "AddonInjector: Error inesperado construyendo la GUI - $($_.Exception.Message)"
-        [System.Windows.Forms.MessageBox]::Show("Ocurrio un error inesperado al abrir el instalador de addons:`n`n$($_.Exception.Message)", "Error", 'OK', 'Error') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'addons.err_open' $_.Exception.Message), (Get-AIOString 'common.error_title'), 'OK', 'Error') | Out-Null
     } finally {
         if (-not $script:AddonHivesUnmounted) {
             Unmount-Hives

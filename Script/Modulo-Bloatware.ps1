@@ -45,7 +45,7 @@ function Show-Bloatware-GUI {
 
     if ($Script:IMAGE_MOUNTED -eq 0) {
         [System.Windows.Forms.MessageBox]::Show(
-            "Primero debes montar una imagen.", "Error", 'OK', 'Error')
+            (Get-AIOString 'drivers.mount_first'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         return
     }
 
@@ -56,21 +56,21 @@ function Show-Bloatware-GUI {
     # 2. Construccion del formulario
     # ------------------------------------------------------------------
     $form               = New-Object System.Windows.Forms.Form
-    $form.Text          = "Gestor de Aplicaciones (Bloatware) - $Script:MOUNT_DIR"
+    $form.Text          = Get-AIOString 'bloatware.form_title' $Script:MOUNT_DIR
     $form.Size          = New-Object System.Drawing.Size(800, 730)
     $form.StartPosition = "CenterScreen"
     $form.BackColor     = [System.Drawing.Color]::FromArgb(30, 30, 30)
     $form.ForeColor     = [System.Drawing.Color]::White
 
     $lblTitle          = New-Object System.Windows.Forms.Label
-    $lblTitle.Text     = "Eliminacion de Apps Preinstaladas (Nivel Profundo)"
+    $lblTitle.Text     = Get-AIOString 'bloatware.title'
     $lblTitle.Font     = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
     $lblTitle.Location = "20, 15"
     $lblTitle.AutoSize = $true
     $form.Controls.Add($lblTitle)
 
     $lblSearch          = New-Object System.Windows.Forms.Label
-    $lblSearch.Text     = "Buscar:"
+    $lblSearch.Text     = Get-AIOString 'bloatware.lbl_search'
     $lblSearch.Location = "20, 50"
     $lblSearch.AutoSize = $true
     $form.Controls.Add($lblSearch)
@@ -81,7 +81,7 @@ function Show-Bloatware-GUI {
     $form.Controls.Add($txtSearch)
 
     $chkShowSystem           = New-Object System.Windows.Forms.CheckBox
-    $chkShowSystem.Text      = "Mostrar Apps del Sistema (Peligroso)"
+    $chkShowSystem.Text      = Get-AIOString 'bloatware.chk_show_system'
     $chkShowSystem.Location  = "500, 48"
     $chkShowSystem.AutoSize  = $true
     $chkShowSystem.ForeColor = [System.Drawing.Color]::Salmon
@@ -96,13 +96,13 @@ function Show-Bloatware-GUI {
     $lv.GridLines     = $true
     $lv.BackColor     = [System.Drawing.Color]::FromArgb(45, 45, 48)
     $lv.ForeColor     = [System.Drawing.Color]::White
-    $lv.Columns.Add("Aplicacion (Nombre)", 400) | Out-Null
-    $lv.Columns.Add("Categoria",           150) | Out-Null
-    $lv.Columns.Add("Package ID",          150) | Out-Null
+    $lv.Columns.Add((Get-AIOString 'bloatware.col_app'), 400) | Out-Null
+    $lv.Columns.Add((Get-AIOString 'bloatware.col_category'), 150) | Out-Null
+    $lv.Columns.Add((Get-AIOString 'bloatware.col_pkg_id'), 150) | Out-Null
     $form.Controls.Add($lv)
 
     $lblStatus           = New-Object System.Windows.Forms.Label
-    $lblStatus.Text      = "Cargando catalogo..."
+    $lblStatus.Text      = Get-AIOString 'bloatware.status_loading'
     $lblStatus.Location  = "20, 560"
     $lblStatus.AutoSize  = $true
     $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
@@ -117,14 +117,14 @@ function Show-Bloatware-GUI {
 
     # Opt-in: la limpieza de apps no reemplaza el Menu Inicio sin esta seleccion.
     $chkStartMenu          = New-Object System.Windows.Forms.CheckBox
-    $chkStartMenu.Text     = "Plantilla de Inicio minimalista"
+    $chkStartMenu.Text     = Get-AIOString 'bloatware.chk_start_menu'
     $chkStartMenu.Location = "20, 610"
     $chkStartMenu.AutoSize = $true
     $chkStartMenu.Checked  = $false
     $form.Controls.Add($chkStartMenu)
 
     $btnSelectRec           = New-Object System.Windows.Forms.Button
-    $btnSelectRec.Text      = "Marcar Recomendados (Bloat)"
+    $btnSelectRec.Text      = Get-AIOString 'bloatware.btn_select_rec'
     $btnSelectRec.Location  = "20, 650"
     $btnSelectRec.Size      = "200, 30"
     $btnSelectRec.BackColor = [System.Drawing.Color]::Orange
@@ -133,7 +133,7 @@ function Show-Bloatware-GUI {
     $form.Controls.Add($btnSelectRec)
 
     $btnRemove           = New-Object System.Windows.Forms.Button
-    $btnRemove.Text      = "ELIMINAR SELECCIONADOS"
+    $btnRemove.Text      = Get-AIOString 'bloatware.btn_remove'
     $btnRemove.Location  = "500, 645"
     $btnRemove.Size      = "260, 40"
     $btnRemove.BackColor = [System.Drawing.Color]::Crimson
@@ -220,7 +220,7 @@ function Show-Bloatware-GUI {
             $lv.Items.Add($item) | Out-Null
         }
         $lv.EndUpdate()
-        $lblStatus.Text = "Mostrando: $($lv.Items.Count) aplicaciones."
+        $lblStatus.Text = Get-AIOString 'bloatware.status_showing' $lv.Items.Count
     }
 
     # 5. Eventos
@@ -254,7 +254,7 @@ function Show-Bloatware-GUI {
             $script:cachedApps = Get-AppxProvisionedPackage -Path $Script:MOUNT_DIR | Sort-Object DisplayName
             & $PopulateList
         } catch {
-            $lblStatus.Text = "Error: $_"
+            $lblStatus.Text = Get-AIOString 'bloatware.status_error' $_
         } finally {
             $form.Cursor = [System.Windows.Forms.Cursors]::Default
         }
@@ -306,13 +306,13 @@ function Show-Bloatware-GUI {
         }
 
         if ($applyStartMenu) {
-            $confirmMsg += "`n`nMenu Inicio: se reemplazara la plantilla del perfil Default por la minimalista incluida (W10/W11)."
+            $confirmMsg += Get-AIOString 'bloatware.confirm_replace_start'
         } else {
-            $confirmMsg += "`n`nMenu Inicio: se conservaran los archivos de plantilla actuales."
+            $confirmMsg += Get-AIOString 'bloatware.confirm_keep_start'
         }
 
         if ([System.Windows.Forms.MessageBox]::Show(
-                $confirmMsg, "Confirmar", 'YesNo', 'Warning') -ne 'Yes') {
+                $confirmMsg, (Get-AIOString 'drivers.confirm_title'), 'YesNo', 'Warning') -ne 'Yes') {
             Write-Log -LogLevel INFO -Message "AppxManager: El usuario cancelo la eliminacion en el cuadro de confirmacion."
             return
         }
@@ -331,7 +331,7 @@ function Show-Bloatware-GUI {
         # FASE 1: Bypass IsInbox (solo apps marcadas como Sistema Vital)
         # ==============================================================
         if ($hasSystemApps) {
-            $lblStatus.Text = "Desbloqueando apps del sistema..."; $form.Refresh()
+            $lblStatus.Text = Get-AIOString 'bloatware.status_unlocking'; $form.Refresh()
 
             if (Mount-Hives) {
                 try {
@@ -375,7 +375,7 @@ function Show-Bloatware-GUI {
             $item = $appInfo.Item
             $pkg  = $appInfo.PackageName
             $item.EnsureVisible()
-            $lblStatus.Text = "Purgando y limpiando disco: $($appInfo.DisplayName)..."; $form.Refresh()
+            $lblStatus.Text = Get-AIOString 'bloatware.status_purging' $appInfo.DisplayName; $form.Refresh()
             Write-Log -LogLevel INFO -Message "AppxManager: Intentando purgar paquete -> $pkg"
 
             try {
@@ -450,7 +450,7 @@ function Show-Bloatware-GUI {
         # FASE 2.5: Plantilla del Menu Inicio (opcional, solo con seleccion explicita)
         # ==============================================================
         if ($applyStartMenu) {
-            $lblStatus.Text = "Inyectando Menu de Inicio Minimalista..."; $form.Refresh()
+            $lblStatus.Text = Get-AIOString 'bloatware.status_start_menu'; $form.Refresh()
             Write-Log -LogLevel ACTION -Message "StartMenu: Inyectando plantillas minimalistas W10/W11."
 
             try {
@@ -505,7 +505,7 @@ function Show-Bloatware-GUI {
         # FASE 3: Vacunas anti-reinstalacion + GPOs de interfaz
         # Cubre W10 22H2, W11 22H2/23H2/24H2+ y edicion Home
         # ==============================================================
-        $lblStatus.Text = "Aplicando vacunas y puliendo interfaz..."; $form.Refresh()
+        $lblStatus.Text = Get-AIOString 'bloatware.status_polishing'; $form.Refresh()
 
         if (Mount-Hives) {
           try {
@@ -587,7 +587,7 @@ function Show-Bloatware-GUI {
 
           } finally {
             # Garantiza el desmontaje aunque algo inesperado falle fuera de los try/catch internos.
-            $lblStatus.Text = "Guardando registro..."; $form.Refresh()
+            $lblStatus.Text = Get-AIOString 'bloatware.status_saving_reg'; $form.Refresh()
             Unmount-Hives
           }
         }
@@ -596,8 +596,8 @@ function Show-Bloatware-GUI {
             $errs++
             Write-Log -LogLevel ERROR -Message "AppxManager: Error inesperado durante el proceso de limpieza - $($_.Exception.Message)"
             [System.Windows.Forms.MessageBox]::Show(
-                "Ocurrio un error inesperado durante el proceso:`n`n$($_.Exception.Message)`n`nRevisa el log para mas detalle.",
-                "Error", 'OK', 'Error') | Out-Null
+                (Get-AIOString 'bloatware.msg_unexpected_err' $_.Exception.Message),
+                (Get-AIOString 'common.error_title'), 'OK', 'Error') | Out-Null
         } finally {
             # ==============================================================
             # Finalizacion y refresco del catalogo visual (siempre se ejecuta)
@@ -606,7 +606,7 @@ function Show-Bloatware-GUI {
             $btnRemove.Enabled   = $true
             $chkStartMenu.Enabled = $true
             $form.Cursor         = [System.Windows.Forms.Cursors]::Default
-            $lblStatus.Text      = "Listo. Exitos: $success | Errores: $errs"
+            $lblStatus.Text      = Get-AIOString 'bloatware.status_done' $success $errs
 
             Write-Log -LogLevel ACTION -Message "AppxManager: Proceso de limpieza finalizado. Exitos: $success | Errores: $errs"
 
@@ -615,8 +615,8 @@ function Show-Bloatware-GUI {
                     ForEach-Object { " - $($_.DisplayName): $($_.Error)" }) -join "`n"
                 if ($failedDetail) {
                     [System.Windows.Forms.MessageBox]::Show(
-                        "Se completaron $success eliminaciones, pero $errs fallaron:`n`n$failedDetail",
-                        "Errores durante la limpieza", 'OK', 'Warning') | Out-Null
+                        (Get-AIOString 'bloatware.msg_partial_err' $success $errs $failedDetail),
+                        (Get-AIOString 'bloatware.msg_partial_err_title'), 'OK', 'Warning') | Out-Null
                 }
             }
 
@@ -631,8 +631,8 @@ function Show-Bloatware-GUI {
 
     $form.Add_FormClosing({ 
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Estas seguro de que deseas salir del Gestor de Bloatware?", 
-            "Confirmar Salida", 
+            (Get-AIOString 'bloatware.confirm_exit'),
+            (Get-AIOString 'metadata.confirm_exit_title'), 
             [System.Windows.Forms.MessageBoxButtons]::YesNo, 
             [System.Windows.Forms.MessageBoxIcon]::Question
         )

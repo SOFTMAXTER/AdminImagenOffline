@@ -403,13 +403,13 @@ function Get-AIOIndexCompatibilityWarnings {
     param([object[]]$Plan)
     $architectures = @($Plan | Select-Object -ExpandProperty Architecture -Unique | Where-Object { $_ })
     if ($architectures.Count -gt 1) {
-        [pscustomobject]@{ Code = 'MixedArchitecture'; Message = 'Arquitecturas distintas: los indices se mantienen en grupos separados y solo se pueden ordenar dentro de su arquitectura. El WIM integrado no prepara el arranque ni Windows Setup para cada arquitectura.' }
+        [pscustomobject]@{ Code = 'MixedArchitecture'; Message = (Get-AIOString 'integrar.warn_mixed_arch') }
     }
     if ($architectures -icontains 'x86' -and @($Plan | Where-Object { Test-AIOIndexWindows11 $_ }).Count -gt 0) {
-        [pscustomobject]@{ Code = 'X86Windows11'; Message = 'x86 + Windows 11: Windows 11 no tiene edicion x86 y WinPE x86 no sirve para desplegarlo. Prepara una ruta de arranque, boot.wim (WinPE) y Setup x86 para las imagenes x86, y otra compatible con Windows 11 x64 o ARM64. Si una imagen se identifica como Windows 11 x86, revisa su origen.' }
+        [pscustomobject]@{ Code = 'X86Windows11'; Message = (Get-AIOString 'integrar.warn_x86_win11') }
     }
     if ($architectures -icontains 'ARM64') {
-        [pscustomobject]@{ Code = 'ARM64'; Message = 'ARM64: prepara el cargador UEFI ARM64 (EFI\BOOT\BOOTAA64.EFI), boot.wim con WinPE ARM64, Windows Setup compatible y los controladores ARM64 del equipo. Incluir un indice ARM64 en install.wim no adapta un medio de instalacion x64/x86.' }
+        [pscustomobject]@{ Code = 'ARM64'; Message = (Get-AIOString 'integrar.warn_arm64') }
     }
 }
 
@@ -550,7 +550,7 @@ function Invoke-AIOIndexWork {
 function Show-AIOIndexIntegrator {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
-    try { $engine = Find-AIOIndexWimlib } catch { [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Integrar indices'); return }
+    try { $engine = Find-AIOIndexWimlib } catch { [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, (Get-AIOString 'integrar.title_short')); return }
     $modulePath = Join-Path $PSScriptRoot 'Modulo-IntegrarIndices.ps1'
     $ui = @{
         Catalog = New-Object Collections.ArrayList
@@ -559,7 +559,7 @@ function Show-AIOIndexIntegrator {
         ProgressValue = 0; ProgressBusy = $false; Animation = 0
     }
     $form = New-Object Windows.Forms.Form
-    $form.Text = 'Integrar y ordenar indices | AdminImagenOffline'
+    $form.Text = Get-AIOString 'integrar.form_title'
     $form.Size = New-Object Drawing.Size(1220, 820)
     $form.MinimumSize = New-Object Drawing.Size(960, 700)
     $form.StartPosition = 'CenterScreen'
@@ -578,7 +578,7 @@ function Show-AIOIndexIntegrator {
     }
     $form.Controls.Add($root)
     $intro = New-Object Windows.Forms.Label
-    $intro.Text = "Agrupacion automatica: x86, x64 y ARM64. Subir / Bajar ordena solo dentro de cada arquitectura.`r`nDoble clic en un indice del orden final para editar sus metadatos. Las fuentes se conservan."
+    $intro.Text = Get-AIOString 'integrar.intro'
     $intro.Dock = 'Fill'; $intro.AutoSize = $true
     $intro.ForeColor = [Drawing.Color]::Silver
     $root.Controls.Add($intro, 0, 0)
@@ -596,9 +596,9 @@ function Show-AIOIndexIntegrator {
     }
     $sourceBar = New-Object Windows.Forms.FlowLayoutPanel
     $sourceBar.Dock = 'Fill'; $sourceBar.WrapContents = $false
-    $addSource = New-AIOIndexButton 'Agregar fuentes...' 155
+    $addSource = New-AIOIndexButton (Get-AIOString 'integrar.btn_add_sources') 155
     $addSource.BackColor = [Drawing.Color]::RoyalBlue
-    $clearSources = New-AIOIndexButton 'Limpiar fuentes' 135
+    $clearSources = New-AIOIndexButton (Get-AIOString 'integrar.btn_clear_sources') 135
     $sourceBar.Controls.AddRange(@($addSource, $clearSources))
     $root.Controls.Add($sourceBar, 0, 1)
 
@@ -609,10 +609,10 @@ function Show-AIOIndexIntegrator {
     $root.Controls.Add($columns, 0, 2)
     $sourceGroup = New-Object Windows.Forms.GroupBox
     $sourceGroup.ForeColor = [Drawing.Color]::Cyan
-    $sourceGroup.Text = '1. Indices disponibles (Ctrl / Shift para seleccionar varios)'; $sourceGroup.Dock = 'Fill'
+    $sourceGroup.Text = Get-AIOString 'integrar.grp_sources'; $sourceGroup.Dock = 'Fill'
     $planGroup = New-Object Windows.Forms.GroupBox
     $planGroup.ForeColor = [Drawing.Color]::Orange
-    $planGroup.Text = '2. Orden final (doble clic: metadatos)'; $planGroup.Dock = 'Fill'
+    $planGroup.Text = Get-AIOString 'integrar.grp_plan'; $planGroup.Dock = 'Fill'
     $columns.Controls.Add($sourceGroup, 0, 0); $columns.Controls.Add($planGroup, 1, 0)
 
     function New-AIOIndexGrid {
@@ -645,18 +645,18 @@ function Show-AIOIndexIntegrator {
     }
     $sourceGrid = New-AIOIndexGrid
     $sourceGrid.ReadOnly = $true; $sourceGrid.MultiSelect = $true
-    Add-AIOIndexColumn $sourceGrid 'Source' 'Fuente' 90
-    Add-AIOIndexColumn $sourceGrid 'Index' 'Indice' 40
-    Add-AIOIndexColumn $sourceGrid 'Name' 'Nombre' 170
-    Add-AIOIndexColumn $sourceGrid 'Arch' 'Arq.' 45
+    Add-AIOIndexColumn $sourceGrid 'Source' (Get-AIOString 'integrar.col_source') 90
+    Add-AIOIndexColumn $sourceGrid 'Index' (Get-AIOString 'integrar.col_index') 40
+    Add-AIOIndexColumn $sourceGrid 'Name' (Get-AIOString 'integrar.col_name') 170
+    Add-AIOIndexColumn $sourceGrid 'Arch' (Get-AIOString 'integrar.col_arch') 45
     Add-AIOIndexColumn $sourceGrid 'Build' 'Build' 55
     $sourceGroup.Controls.Add($sourceGrid)
     $planGrid = New-AIOIndexGrid
     $planGrid.MultiSelect = $false
-    Add-AIOIndexColumn $planGrid 'Order' 'Orden' 40
-    Add-AIOIndexColumn $planGrid 'Name' 'Nombre de salida' 165
-    Add-AIOIndexColumn $planGrid 'Source' 'Fuente / indice' 120
-    Add-AIOIndexColumn $planGrid 'Arch' 'Arq.' 45
+    Add-AIOIndexColumn $planGrid 'Order' (Get-AIOString 'integrar.col_order') 40
+    Add-AIOIndexColumn $planGrid 'Name' (Get-AIOString 'integrar.col_out_name') 165
+    Add-AIOIndexColumn $planGrid 'Source' (Get-AIOString 'integrar.col_src_idx') 120
+    Add-AIOIndexColumn $planGrid 'Arch' (Get-AIOString 'integrar.col_arch') 45
     $bootColumn = New-Object Windows.Forms.DataGridViewCheckBoxColumn
     $bootColumn.Name = 'Boot'; $bootColumn.HeaderText = 'WinPE'; $bootColumn.FillWeight = 45
     $bootColumn.FlatStyle = 'Flat'
@@ -664,10 +664,10 @@ function Show-AIOIndexIntegrator {
     $planGroup.Controls.Add($planGrid)
     $actions = New-Object Windows.Forms.FlowLayoutPanel
     $actions.Dock = 'Fill'; $actions.Padding = New-Object Windows.Forms.Padding(0, 10, 0, 0)
-    $addSelected = New-AIOIndexButton 'Agregar seleccion >' 160
-    $addAll = New-AIOIndexButton 'Agregar todos >' 140
-    $up = New-AIOIndexButton 'Subir' 80; $down = New-AIOIndexButton 'Bajar' 80
-    $remove = New-AIOIndexButton 'Quitar' 85; $clearPlan = New-AIOIndexButton 'Vaciar orden' 115
+    $addSelected = New-AIOIndexButton (Get-AIOString 'integrar.btn_add_selected') 160
+    $addAll = New-AIOIndexButton (Get-AIOString 'integrar.btn_add_all') 140
+    $up = New-AIOIndexButton (Get-AIOString 'integrar.btn_up') 80; $down = New-AIOIndexButton (Get-AIOString 'integrar.btn_down') 80
+    $remove = New-AIOIndexButton (Get-AIOString 'integrar.btn_remove') 85; $clearPlan = New-AIOIndexButton (Get-AIOString 'integrar.btn_clear_plan') 115
     $actions.AutoScroll = $true
     $actions.Controls.AddRange(@($addSelected, $addAll, $up, $down, $remove, $clearPlan))
     $root.Controls.Add($actions, 0, 3)
@@ -678,14 +678,14 @@ function Show-AIOIndexIntegrator {
     [void]$outputRow.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle('Percent', 100)))
     [void]$outputRow.ColumnStyles.Add((New-Object Windows.Forms.ColumnStyle('Absolute', 130)))
     $outputLabel = New-Object Windows.Forms.Label
-    $outputLabel.Text = 'Salida:'; $outputLabel.Dock = 'Fill'
+    $outputLabel.Text = Get-AIOString 'integrar.lbl_output'; $outputLabel.Dock = 'Fill'
     $outputLabel.ForeColor = [Drawing.Color]::Silver
     $destination = New-Object Windows.Forms.TextBox
     $destination.Dock = 'Fill'
     $destination.BackColor = [Drawing.Color]::FromArgb(50, 50, 50)
     $destination.ForeColor = [Drawing.Color]::White
     $destination.BorderStyle = 'FixedSingle'
-    $browse = New-AIOIndexButton 'Examinar...' 120
+    $browse = New-AIOIndexButton (Get-AIOString 'integrar.btn_browse') 120
     $outputRow.Controls.Add($outputLabel, 0, 0); $outputRow.Controls.Add($destination, 1, 0); $outputRow.Controls.Add($browse, 2, 0)
     $root.Controls.Add($outputRow, 0, 4)
 
@@ -696,14 +696,14 @@ function Show-AIOIndexIntegrator {
     $compression.FlatStyle = 'Flat'
     $compression.BackColor = [Drawing.Color]::FromArgb(50, 50, 50)
     $compression.ForeColor = [Drawing.Color]::White
-    [void]$compression.Items.AddRange(@('LZX - maxima compresion', 'XPRESS - mas rapido', 'Sin compresion'))
+    [void]$compression.Items.AddRange(@((Get-AIOString 'integrar.comp_lzx'), (Get-AIOString 'integrar.comp_xpress'), (Get-AIOString 'integrar.comp_none')))
     $compression.SelectedIndex = 0
-    $build = New-AIOIndexButton 'Crear WIM' 125
+    $build = New-AIOIndexButton (Get-AIOString 'integrar.btn_build') 125
     $build.BackColor = [Drawing.Color]::SeaGreen
-    $cancel = New-AIOIndexButton 'Cancelar proceso' 145; $cancel.Enabled = $false
+    $cancel = New-AIOIndexButton (Get-AIOString 'integrar.btn_cancel_proc') 145; $cancel.Enabled = $false
     $cancel.BackColor = [Drawing.Color]::DarkOrange
     $cancel.ForeColor = [Drawing.Color]::Black
-    $close = New-AIOIndexButton 'Cerrar' 85
+    $close = New-AIOIndexButton (Get-AIOString 'integrar.btn_close') 85
     $footer.Controls.AddRange(@($compression, $build, $cancel, $close))
     $root.Controls.Add($footer, 0, 5)
     $statusBox = New-Object Windows.Forms.TableLayoutPanel
@@ -712,7 +712,7 @@ function Show-AIOIndexIntegrator {
         [void]$statusBox.RowStyles.Add((New-Object Windows.Forms.RowStyle('Percent', $height)))
     }
     $status = New-Object Windows.Forms.Label
-    $status.Text = 'Agrega las fuentes para comenzar.'; $status.Dock = 'Fill'; $status.AutoEllipsis = $true
+    $status.Text = Get-AIOString 'integrar.status_initial'; $status.Dock = 'Fill'; $status.AutoEllipsis = $true
     $status.ForeColor = [Drawing.Color]::Cyan
     # Igual que DeployVHD: paneles propios para que el progreso respete el tema oscuro.
     $progress = New-Object Windows.Forms.Panel
@@ -738,7 +738,7 @@ function Show-AIOIndexIntegrator {
     }
     $progress.Add_Resize({ & $renderProgress })
     $nativeStatus = New-Object Windows.Forms.Label
-    $nativeStatus.Text = 'Progreso del motor: en espera.'
+    $nativeStatus.Text = Get-AIOString 'integrar.native_idle'
     $nativeStatus.Dock = 'Fill'; $nativeStatus.AutoEllipsis = $true
     $nativeStatus.ForeColor = [Drawing.Color]::Silver
     $nativeProgress = New-Object Windows.Forms.Panel
@@ -799,7 +799,7 @@ function Show-AIOIndexIntegrator {
             $entry = $ui.Plan[$i]
             $row = $planGrid.Rows.Add([object[]]@(($i + 1), $entry.Name, ('{0} / {1}' -f [IO.Path]::GetFileName($entry.Source), $entry.Index), $entry.Architecture, $entry.Boot))
             $planGrid.Rows[$row].Cells['Source'].ToolTipText = $entry.Source
-            $planGrid.Rows[$row].Cells['Name'].ToolTipText = "Doble clic para editar metadatos.`r`nEdicion: $($entry.Edition)`r`nNombre mostrado: $($entry.DisplayName)`r`nDescripcion: $($entry.Description)"
+            $planGrid.Rows[$row].Cells['Name'].ToolTipText = Get-AIOString 'integrar.tooltip_edit' $entry.Edition $entry.DisplayName $entry.Description
         }
         $dividerHeight = [Math]::Max(4, [int]($planGrid.Font.Height / 3))
         foreach ($rowIndex in @(Get-AIOIndexArchitectureBreaks @($ui.Plan.ToArray()))) {
@@ -811,7 +811,7 @@ function Show-AIOIndexIntegrator {
             $planGrid.CurrentCell = $planGrid.Rows[$Selected].Cells['Name']
             $planGrid.Rows[$Selected].Selected = $true
         }
-        $planGroup.Text = '2. Orden final: ' + $ui.Plan.Count + ' indices (doble clic: metadatos)'
+        $planGroup.Text = Get-AIOString 'integrar.grp_plan_count' $ui.Plan.Count
         & $updateMoveButtons
     }
     $refreshSources = {
@@ -841,16 +841,16 @@ function Show-AIOIndexIntegrator {
         $cancel.Enabled = $true
         $status.ForeColor = [Drawing.Color]::Yellow
         $nativeStatus.ForeColor = [Drawing.Color]::Silver
-        $nativeStatus.Text = 'Progreso del motor: esperando porcentaje...'
+        $nativeStatus.Text = Get-AIOString 'integrar.native_waiting_pct'
         $ui.ProgressValue = 0; $ui.ProgressBusy = $true; $ui.Animation = 0
         & $renderProgress; & $renderNativeProgress
     }
-    $showError = { param([string]$Message) [void][Windows.Forms.MessageBox]::Show($form, $Message, 'Integrar indices', 'OK', 'Warning') }
+    $showError = { param([string]$Message) [void][Windows.Forms.MessageBox]::Show($form, $Message, (Get-AIOString 'integrar.title_short'), 'OK', 'Warning') }
     $timer = New-Object Windows.Forms.Timer
     $timer.Interval = 200
     $timer.Add_Tick({
         if (-not $ui.Worker) { return }
-        $status.Text = $ui.State.Status + ' | General: ' + [string]$ui.State.Progress + '% | ' + $ui.Started.Elapsed.ToString('hh\:mm\:ss')
+        $status.Text = Get-AIOString 'integrar.status_general_fmt' $ui.State.Status ([string]$ui.State.Progress) ($ui.Started.Elapsed.ToString('hh\:mm\:ss'))
         $ui.ProgressBusy = ($ui.Action -eq 'Load')
         $ui.ProgressValue = [int]$ui.State.Progress; $ui.Animation++
         & $renderProgress; & $renderNativeProgress
@@ -860,7 +860,7 @@ function Show-AIOIndexIntegrator {
             $nativeStatus.Text = $ui.State.NativePhase + ': ' + $percent.ToString('0.0') + '%'
             if ($ui.State.NativePercent -eq 100 -and $ui.State.NativeActive) { $nativeStatus.Text += ' (finalizando fase)' }
         } else {
-            $nativeStatus.Text = $ui.State.NativePhase + ': esperando porcentaje...'
+            $nativeStatus.Text = Get-AIOString 'integrar.native_phase_wait' $ui.State.NativePhase
         }
         if (-not $ui.Handle.IsCompleted) { return }
         $worker = $ui.Worker
@@ -870,10 +870,10 @@ function Show-AIOIndexIntegrator {
             if ($worker.HadErrors -or $answers.Count -ne 1) { throw ('No se pudo completar el proceso. ' + ($worker.Streams.Error -join "`r`n")) }
             $answer = $answers[0]
             if (-not $answer.Success) {
-                $status.Text = if ($answer.Cancelled) { 'Operacion cancelada. Fuentes conservadas.' } else { 'No se creo el WIM. Revisa el mensaje de error.' }
+                $status.Text = if ($answer.Cancelled) { Get-AIOString 'integrar.status_cancelled' } else { Get-AIOString 'integrar.status_not_created' }
                 $status.ForeColor = if ($answer.Cancelled) { [Drawing.Color]::Gold } else { [Drawing.Color]::Salmon }
                 $nativeStatus.ForeColor = $status.ForeColor
-                $nativeStatus.Text = if ($answer.Cancelled) { 'Proceso cancelado.' } else { 'Proceso detenido por error.' }
+                $nativeStatus.Text = if ($answer.Cancelled) { Get-AIOString 'integrar.native_cancelled' } else { Get-AIOString 'integrar.native_stopped_err' }
                 $detail = $answer.Message
                 if ($answer.LogPath) { $detail += "`r`n`r`nRegistro: " + $answer.LogPath }
                 & $showError $detail
@@ -886,20 +886,20 @@ function Show-AIOIndexIntegrator {
                 }
                 foreach ($entry in $answer.Images) { [void]$ui.Catalog.Add($entry) }
                 & $refreshSources
-                $nativeStatus.Text = 'Lectura de fuentes finalizada.'
+                $nativeStatus.Text = Get-AIOString 'integrar.native_read_done'
                 $status.ForeColor = if ($answer.Failures.Count) { [Drawing.Color]::Gold } else { [Drawing.Color]::LightGreen }
-                $status.Text = $ui.Catalog.Count.ToString() + ' indices disponibles. Selecciona los que quieras integrar.'
+                $status.Text = Get-AIOString 'integrar.status_catalog_count' $ui.Catalog.Count
                 if ($answer.Failures.Count) { & $showError ('No se pudieron leer estas fuentes:' + "`r`n`r`n" + ($answer.Failures -join "`r`n`r`n")) }
             } else {
                 $ui.ProgressValue = 100
                 $ui.State.NativePercent = 100; $ui.State.NativeSucceeded = $true
-                $nativeStatus.Text = 'WIM verificado y publicado: 100%.'
+                $nativeStatus.Text = Get-AIOString 'integrar.native_verified'
                 $nativeStatus.ForeColor = [Drawing.Color]::LightGreen
                 $status.ForeColor = [Drawing.Color]::LightGreen
-                $status.Text = 'WIM creado: ' + $answer.Result.Destination
-                [void][Windows.Forms.MessageBox]::Show($form, ("WIM creado y verificado con {0} indices, en el orden indicado.`r`n`r`n{1}`r`n`r`nRegistro: {2}" -f $answer.Result.Count, $answer.Result.Destination, $answer.Result.LogPath), 'Integracion completada', 'OK', 'Information')
+                $status.Text = Get-AIOString 'integrar.status_wim_created' $answer.Result.Destination
+                [void][Windows.Forms.MessageBox]::Show($form, (Get-AIOString 'integrar.msg_wim_created' $answer.Result.Count $answer.Result.Destination $answer.Result.LogPath), (Get-AIOString 'integrar.msg_wim_created_title'), 'OK', 'Information')
             }
-        } catch { $status.Text = 'Error en el proceso.'; $status.ForeColor = [Drawing.Color]::Salmon; & $showError $_.Exception.Message }
+        } catch { $status.Text = Get-AIOString 'integrar.status_process_err'; $status.ForeColor = [Drawing.Color]::Salmon; & $showError $_.Exception.Message }
         finally {
             $ui.Worker = $null; $ui.Handle = $null; $worker.Dispose(); $ui.Started.Stop()
             foreach ($control in $editableControls) { $control.Enabled = $true }
@@ -911,8 +911,8 @@ function Show-AIOIndexIntegrator {
     })
     $addSource.Add_Click({
         $dialog = New-Object Windows.Forms.OpenFileDialog
-        $dialog.Title = 'Selecciona una o varias fuentes'; $dialog.Multiselect = $true
-        $dialog.Filter = 'Imagenes WIM y ESD|*.wim;*.esd'; $dialog.CheckFileExists = $true
+        $dialog.Title = Get-AIOString 'integrar.dialog_sources_title'; $dialog.Multiselect = $true
+        $dialog.Filter = Get-AIOString 'integrar.filter_wim_esd'; $dialog.CheckFileExists = $true
         try {
             if ($dialog.ShowDialog($form) -eq 'OK') { & $startWork 'Load' @{ Paths = @($dialog.FileNames) } }
         } catch { & $showError $_.Exception.Message } finally { $dialog.Dispose() }
@@ -927,7 +927,7 @@ function Show-AIOIndexIntegrator {
         $result = Add-AIOIndexPlanImages -Plan $ui.Plan -Images $images -SelectedIndex $selected
         & $refreshPlan $result.SelectedIndex
         if ($result.Added -gt 0) {
-            $status.Text = 'Indices agregados a su grupo de arquitectura. Subir/Bajar ordena solo dentro de cada grupo.'
+            $status.Text = Get-AIOString 'integrar.status_added_group'
         }
     }
     $addSelected.Add_Click({ & $addEntries $false })
@@ -954,7 +954,7 @@ function Show-AIOIndexIntegrator {
                 $others = @(for ($i = 0; $i -lt $ui.Plan.Count; $i++) { if ($i -ne $Selected) { $ui.Plan[$i] } })
                 Set-AIOIndexPlanMetadata -Entry $entry -Metadata $draft -OtherEntries $others
                 & $refreshPlan $Selected
-                $status.Text = 'Metadatos guardados en el plan. Se aplicaran al crear el WIM de salida.'
+                $status.Text = Get-AIOString 'integrar.status_meta_saved'
             }
         } catch { & $showError $_.Exception.Message }
     }
@@ -992,8 +992,8 @@ function Show-AIOIndexIntegrator {
     $clearPlan.Add_Click({ $ui.Plan.Clear(); & $refreshPlan })
     $browse.Add_Click({
         $dialog = New-Object Windows.Forms.SaveFileDialog
-        $dialog.Filter = 'Imagen WIM|*.wim'; $dialog.DefaultExt = 'wim'; $dialog.AddExtension = $true
-        $dialog.FileName = 'install_integrado.wim'; $dialog.Title = 'Crear un nuevo WIM'
+        $dialog.Filter = Get-AIOString 'integrar.wim_filter_short'; $dialog.DefaultExt = 'wim'; $dialog.AddExtension = $true
+        $dialog.FileName = 'install_integrado.wim'; $dialog.Title = Get-AIOString 'integrar.dialog_save_title'
         try { if ($dialog.ShowDialog($form) -eq 'OK') { $destination.Text = $dialog.FileName } }
         finally { $dialog.Dispose() }
     })
@@ -1005,12 +1005,12 @@ function Show-AIOIndexIntegrator {
             if ($Script:IMAGE_MOUNTED -eq 1 -and @($plan | Where-Object { $_.Source -ieq $Script:WIM_FILE_PATH }).Count) {
                 throw 'Una fuente esta montada en la aplicacion. Guarda y desmonta antes de integrar.'
             }
-            $summary = "Se creara un WIM con $($plan.Count) indices, en el orden de la tabla derecha.`r`n`r`n$dest`r`n`r`nLas fuentes se conservaran. Se necesita espacio libre para el WIM completo."
+            $summary = Get-AIOString 'integrar.confirm_summary' $plan.Count $dest
             $warnings = @(Get-AIOIndexCompatibilityWarnings $plan)
             foreach ($warning in $warnings) { $summary += "`r`n`r`n" + $warning.Message }
-            $summary += "`r`n`r`nContinuar?"
+            $summary += Get-AIOString 'integrar.confirm_continue'
             $icon = if ($warnings.Count) { 'Warning' } else { 'Question' }
-            if ([Windows.Forms.MessageBox]::Show($form, $summary, 'Crear WIM integrado', 'YesNo', $icon, 'Button2') -ne 'Yes') { return }
+            if ([Windows.Forms.MessageBox]::Show($form, $summary, (Get-AIOString 'integrar.confirm_create_title'), 'YesNo', $icon, 'Button2') -ne 'Yes') { return }
             & $startWork 'Build' @{ Plan = $plan; Destination = $dest; Compression = @('LZX','XPRESS','none')[$compression.SelectedIndex] }
         } catch { & $showError $_.Exception.Message }
     })

@@ -238,8 +238,9 @@ function Add-AIOLangOperation {
 function Wait-AIOLangUser {
     [CmdletBinding()]
     param(
-        [string]$Message = 'Presiona ENTER para volver al menu del modulo'
+        [string]$Message = ''
     )
+    if ([string]::IsNullOrWhiteSpace($Message)) { $Message = Get-AIOString 'lenguajes.press_enter_module' }
 
     try {
         [void](Read-Host "`n$Message")
@@ -301,30 +302,30 @@ function Show-AIOLangTerminalSummary {
     Write-Host "`n=======================================================" -ForegroundColor $color
     Write-Host (" {0}" -f $title) -ForegroundColor $color
     Write-Host '=======================================================' -ForegroundColor $color
-    if ($state.Message) { Write-Host " Mensaje          : $($state.Message)" -ForegroundColor White }
-    if ($state.Phase) { Write-Host " Fase             : $($state.Phase)" -ForegroundColor White }
-    if ($state.MediaRoot) { Write-Host " Medio            : $($state.MediaRoot)" -ForegroundColor White }
-    Write-Host " Cambios iniciados: $([bool]$state.MediaMutationStarted)" -ForegroundColor White
+    if ($state.Message) { Write-Host (Get-AIOString 'actualizaciones.state_msg' $state.Message) -ForegroundColor White }
+    if ($state.Phase) { Write-Host (Get-AIOString 'actualizaciones.state_phase' $state.Phase) -ForegroundColor White }
+    if ($state.MediaRoot) { Write-Host (Get-AIOString 'actualizaciones.state_media' $state.MediaRoot) -ForegroundColor White }
+    Write-Host (Get-AIOString 'actualizaciones.state_mutated' ([bool]$state.MediaMutationStarted)) -ForegroundColor White
     if ($Status -eq 'Failed' -or $state.RestorationStatus -ne 'No requerida') {
         $restoreColor = if ($state.RestorationStatus -like 'Restaurado*') { 'Green' } elseif ($state.RestorationStatus -like 'Fallo*') { 'Red' } else { 'Yellow' }
-        Write-Host " Restauracion     : $($state.RestorationStatus)" -ForegroundColor $restoreColor
+        Write-Host (Get-AIOString 'actualizaciones.state_restore' $state.RestorationStatus) -ForegroundColor $restoreColor
     }
-    if ($state.BackupRoot) { Write-Host " Respaldo         : $($state.BackupRoot)" -ForegroundColor Gray }
-    if ($state.ReportJson) { Write-Host " Reporte JSON     : $($state.ReportJson)" -ForegroundColor Gray }
-    if ($state.ReportHtml) { Write-Host " Reporte HTML     : $($state.ReportHtml)" -ForegroundColor Gray }
-    if ($state.DiagnosticPath) { Write-Host " Diagnostico      : $($state.DiagnosticPath)" -ForegroundColor Yellow }
-    if ($state.LogPath) { Write-Host " Registro DISM    : $($state.LogPath)" -ForegroundColor DarkGray }
-    if ($state.ErrorLine) { Write-Host " Linea            : $($state.ErrorLine)" -ForegroundColor DarkRed }
-    if ($state.ErrorCode) { Write-Host " Codigo           : $($state.ErrorCode)" -ForegroundColor DarkRed }
+    if ($state.BackupRoot) { Write-Host (Get-AIOString 'actualizaciones.state_backup' $state.BackupRoot) -ForegroundColor Gray }
+    if ($state.ReportJson) { Write-Host (Get-AIOString 'actualizaciones.state_json' $state.ReportJson) -ForegroundColor Gray }
+    if ($state.ReportHtml) { Write-Host (Get-AIOString 'actualizaciones.state_html' $state.ReportHtml) -ForegroundColor Gray }
+    if ($state.DiagnosticPath) { Write-Host (Get-AIOString 'actualizaciones.state_diag' $state.DiagnosticPath) -ForegroundColor Yellow }
+    if ($state.LogPath) { Write-Host (Get-AIOString 'actualizaciones.state_dism_log' $state.LogPath) -ForegroundColor DarkGray }
+    if ($state.ErrorLine) { Write-Host (Get-AIOString 'actualizaciones.state_line' $state.ErrorLine) -ForegroundColor DarkRed }
+    if ($state.ErrorCode) { Write-Host (Get-AIOString 'actualizaciones.state_code' $state.ErrorCode) -ForegroundColor DarkRed }
 
     $completed = @($state.CompletedTargets | Where-Object { $null -ne $_ })
     if ($completed.Count -gt 0) {
-        Write-Host "`n Operaciones completadas:" -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'actualizaciones.ops_completed') -ForegroundColor Cyan
         foreach ($item in @($completed | Select-Object -First 10)) {
             Write-Host "   [OK] $item" -ForegroundColor Green
         }
         if ($completed.Count -gt 10) {
-            Write-Host "   ... y $($completed.Count - 10) operacion(es) adicional(es)." -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.ops_more' ($completed.Count - 10)) -ForegroundColor DarkGray
         }
     }
 }
@@ -349,7 +350,7 @@ function Select-AIOLangFolder {
         }
     }
     catch {
-        Write-Host "No se pudo abrir el selector grafico: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'lenguajes.gui_selector_err' $_.Exception.Message) -ForegroundColor Yellow
     }
 
     $manual = (Read-Host $Title).Trim().Trim('"')
@@ -382,10 +383,10 @@ function Read-AIOLangYesNo {
         if ($answer -in @('N', 'NO')) { return $false }
 
         if ([string]::IsNullOrWhiteSpace($answer)) {
-            Write-Host 'Se requiere confirmacion explicita. Escribe S o N; ENTER no selecciona una opcion.' -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'lenguajes.yn_explicit_no_enter') -ForegroundColor Yellow
         }
         else {
-            Write-Host 'Respuesta invalida. Escribe S o N.' -ForegroundColor Red
+            Write-Host (Get-AIOString 'actualizaciones.yn_invalid') -ForegroundColor Red
         }
     }
 }
@@ -611,7 +612,7 @@ function Invoke-AIOLangDism {
         }
     }
     catch {
-        $message = "No se pudo iniciar DISM para '$Context': $($_.Exception.Message)"
+        $message = Get-AIOString 'lenguajes.dism_start_err' $Context $_.Exception.Message
         Write-AIOLangLog -Level ERROR -Message $message
         Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context $Context -State 'FailedToStart' -Details $message
         if (-not $NoThrow) { throw $message }
@@ -1305,30 +1306,30 @@ function Show-AIOLangAdkStatus {
 
     $mediaArchitectureNames = @($MediaArchitectures | Where-Object { $_ -and $_ -ne 'Unknown' } | Select-Object -Unique)
     $mediaArchitectureText = if ($mediaArchitectureNames.Count -gt 0) { $mediaArchitectureNames -join ', ' } else { 'N/D' }
-    Write-Host " Arquitecturas del medio : $mediaArchitectureText" -ForegroundColor White
+    Write-Host (Get-AIOString 'lenguajes.media_archs' $mediaArchitectureText) -ForegroundColor White
 
     $adkInstalled = if ($AdkInfo.PSObject.Properties['AdkInstalled']) { [bool]$AdkInfo.AdkInstalled } else { [bool]$AdkInfo.Detected }
     if ($adkInstalled) {
-        Write-Host ' ADK                    : Instalado/detectado' -ForegroundColor Green
-        if ($AdkInfo.Root -and [string]$AdkInfo.Root -match '(?i)Windows Kits') { Write-Host " Ruta ADK               : $($AdkInfo.Root)" -ForegroundColor White }
+        Write-Host (Get-AIOString 'lenguajes.adk_installed') -ForegroundColor Green
+        if ($AdkInfo.Root -and [string]$AdkInfo.Root -match '(?i)Windows Kits') { Write-Host (Get-AIOString 'lenguajes.adk_root' $AdkInfo.Root) -ForegroundColor White }
     }
     else {
-        Write-Host ' ADK                    : No instalado/detectado' -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'lenguajes.adk_missing') -ForegroundColor Yellow
     }
 
     if ($AdkInfo.WinPERoot) {
         $architectures = if (@($AdkInfo.WinPEArchitectures).Count -gt 0) { @($AdkInfo.WinPEArchitectures) -join ', ' } else { 'N/D' }
-        Write-Host ' Fuente WinPE           : Detectada' -ForegroundColor Green
-        Write-Host " Arquitecturas en fuente : $architectures (disponibles)" -ForegroundColor White
-        Write-Host " Ruta WinPE             : $($AdkInfo.WinPERoot)" -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'lenguajes.winpe_found') -ForegroundColor Green
+        Write-Host (Get-AIOString 'lenguajes.winpe_archs' $architectures) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.winpe_path' $AdkInfo.WinPERoot) -ForegroundColor DarkGray
     }
     else {
-        Write-Host ' Fuente WinPE           : No detectada; boot.wim puede usar SetupResourcesOnly y WinRE solo usa CAB compatibles del repositorio.' -ForegroundColor DarkYellow
+        Write-Host (Get-AIOString 'lenguajes.winpe_missing') -ForegroundColor DarkYellow
     }
 
     $versionText = if ($AdkInfo.ActiveDismVersion) { [string]$AdkInfo.ActiveDismVersion } else { 'N/D' }
-    Write-Host " DISM activo            : $($AdkInfo.ActiveDismSource) | $versionText" -ForegroundColor White
-    Write-Host " Ruta DISM              : $($AdkInfo.ActiveDismPath)" -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'lenguajes.dism_active' $AdkInfo.ActiveDismSource $versionText) -ForegroundColor White
+    Write-Host (Get-AIOString 'lenguajes.dism_path' $AdkInfo.ActiveDismPath) -ForegroundColor DarkGray
 }
 
 function Get-AIOLangServicingBuildEvidence {
@@ -1414,8 +1415,8 @@ function Set-AIOLangImageServicingMetadata {
     try {
         foreach ($image in $Images) {
             $position++
-            $status = "$([System.IO.Path]::GetFileName($ImagePath)): indice $($image.ImageIndex) ($position de $($Images.Count))"
-            Write-Host "   Leyendo base CBS: $status..." -ForegroundColor DarkCyan
+            $status = Get-AIOString 'lenguajes.cbs_status_fmt' ([System.IO.Path]::GetFileName($ImagePath)) $image.ImageIndex $position $Images.Count
+            Write-Host (Get-AIOString 'lenguajes.cbs_reading' $status) -ForegroundColor DarkCyan
             Write-Progress -Id 71 -Activity 'Metadatos iniciales de las imagenes' -Status $status -PercentComplete ([int](100 * ($position - 1) / [math]::Max(1, $Images.Count)))
             $timer = [System.Diagnostics.Stopwatch]::StartNew()
             $evidence = @(Get-AIOLangImageServicingEvidence -ImagePath $ImagePath -Index $image.ImageIndex -Architecture $image.Architecture)
@@ -2312,7 +2313,7 @@ function Show-AIOLangInventorySummary {
 
     $languages = @($Inventory | Where-Object { $_.Category -eq 'LanguagePack' -and $_.Locale } | Group-Object Locale | Sort-Object Name)
     if ($languages.Count -eq 0) {
-        Write-Host ' No se detectaron paquetes de idioma principales.' -ForegroundColor Red
+        Write-Host (Get-AIOString 'lenguajes.no_lp_detected') -ForegroundColor Red
         return
     }
 
@@ -2369,7 +2370,7 @@ function Show-AIOLangInventorySummary {
     }
 
     if ($showCompatibilityLegend) {
-        Write-Host '       Formato compatible/total respecto a las arquitecturas y builds del medio.' -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'lenguajes.fmt_compat_media') -ForegroundColor DarkGray
     }
 
     $targetArchitectures = @($TargetImages | ForEach-Object { Convert-AIOLangArchitectureName -Architecture $_.Architecture } | Where-Object { $_ } | Select-Object -Unique)
@@ -2378,12 +2379,12 @@ function Show-AIOLangInventorySummary {
         $targetArchitectures.Count -gt 0 -and $_.Architecture -notin $targetArchitectures
     } | Select-Object -ExpandProperty Architecture -Unique | Sort-Object)
     if ($hiddenArchitectures.Count -gt 0) {
-        Write-Host "       Arquitecturas detectadas pero no aplicables al medio: $($hiddenArchitectures -join ', ')." -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'lenguajes.hidden_archs' ($hiddenArchitectures -join ', ')) -ForegroundColor DarkGray
     }
 
     $unsupported = @($Inventory | Where-Object { -not $_.Supported })
     if ($unsupported.Count -gt 0) {
-        Write-Host "`n [ADVERTENCIA] $($unsupported.Count) paquete(s) no pudieron inspeccionarse completamente:" -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'lenguajes.unsupported_warn' $unsupported.Count) -ForegroundColor Yellow
         foreach ($item in $unsupported | Select-Object -First 12) {
             Write-Host "   - $($item.Name): $($item.Reason)" -ForegroundColor DarkGray
         }
@@ -2446,7 +2447,7 @@ function Select-AIOLangInstallIndexes {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)] [object[]]$Images)
 
-    Write-Host "`n Indices disponibles en install.wim:" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'lenguajes.avail_indexes') -ForegroundColor Yellow
     foreach ($image in $Images) {
         $knownLanguages = @($image.Languages | Where-Object { $_ } | Select-Object -Unique)
         $languageText = if ($image.DefaultLanguage) {
@@ -2461,17 +2462,17 @@ function Select-AIOLangInstallIndexes {
         else {
             'N/D'
         }
-        Write-Host ("   [{0}] {1} | {2} | {3} | Idioma: {4}" -f $image.ImageIndex, $image.ImageName, $image.Version, $image.Architecture, $languageText) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.img_list_fmt' $image.ImageIndex $image.ImageName $image.Version $image.Architecture $languageText) -ForegroundColor White
     }
 
     while ($true) {
-        $answer = (Read-Host "`nIndices a procesar separados por coma/espacio, o T para todos").Trim().ToUpperInvariant()
+        $answer = (Read-Host (Get-AIOString 'lenguajes.indexes_prompt')).Trim().ToUpperInvariant()
         if ($answer -eq 'T') { return @($Images | ForEach-Object { [int]$_.ImageIndex }) }
         $requested = @($answer -split '[,; ]+' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ } | Sort-Object -Unique)
         $valid = @($Images | ForEach-Object { [int]$_.ImageIndex })
         $invalid = @($requested | Where-Object { $_ -notin $valid })
         if ($requested.Count -gt 0 -and $invalid.Count -eq 0) { return $requested }
-        Write-Host 'Seleccion invalida. Usa indices existentes o T.' -ForegroundColor Red
+        Write-Host (Get-AIOString 'actualizaciones.indexes_invalid') -ForegroundColor Red
     }
 }
 
@@ -2522,7 +2523,7 @@ function Select-AIOLangLocales {
     else { $locales = $candidateLocales }
     if ($locales.Count -eq 0) { throw 'No hay idiomas principales compatibles con todas las imagenes seleccionables del medio.' }
 
-    Write-Host "`n Idiomas disponibles:" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'lenguajes.avail_langs') -ForegroundColor Yellow
     for ($i = 0; $i -lt $locales.Count; $i++) {
         $locale = $locales[$i]
         $architectures = @($Inventory | Where-Object {
@@ -2552,17 +2553,17 @@ function Select-AIOLangLocales {
         Write-Host ("   [{0}] {1,-12} | Arquitecturas: {2,-12} | FOD: {3,7} | WinPE: {4,7}" -f ($i + 1), $locale, ($architectures -join ', '), $fodText, $winPeText) -ForegroundColor White
     }
 
-    Write-Host '       Formato compatible/total cuando existen paquetes de otra build o arquitectura.' -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'lenguajes.fmt_compat_other') -ForegroundColor DarkGray
 
     while ($true) {
-        $answer = (Read-Host "`nIdiomas separados por coma/espacio, o T para todos").Trim().ToUpperInvariant()
+        $answer = (Read-Host (Get-AIOString 'lenguajes.langs_prompt')).Trim().ToUpperInvariant()
         if ($answer -eq 'T') { return [string[]]$locales }
         $numbers = @($answer -split '[,; ]+' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ } | Sort-Object -Unique)
         $invalid = @($numbers | Where-Object { $_ -lt 1 -or $_ -gt $locales.Count })
         if ($numbers.Count -gt 0 -and $invalid.Count -eq 0) {
             return [string[]]@($numbers | ForEach-Object { $locales[$_ - 1] })
         }
-        Write-Host 'Seleccion invalida.' -ForegroundColor Red
+        Write-Host (Get-AIOString 'conversion.index_invalid') -ForegroundColor Red
     }
 }
 
@@ -2664,18 +2665,18 @@ function Select-AIOLangDefaultLocale {
     }
     if ($options.Count -eq 0) { return $SelectedLocales[0] }
 
-    Write-Host "`n Idioma predeterminado del medio:" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'lenguajes.default_lang_header') -ForegroundColor Yellow
     for ($i = 0; $i -lt $options.Count; $i++) {
-        $tag = if ($options[$i] -in $commonExisting) { 'actual en todos los indices' } else { 'nuevo' }
+        $tag = if ($options[$i] -in $commonExisting) { Get-AIOString 'lenguajes.tag_existing_all' } else { Get-AIOString 'lenguajes.tag_new' }
         Write-Host ("   [{0}] {1} ({2})" -f ($i + 1), $options[$i], $tag) -ForegroundColor White
     }
     while ($true) {
-        $answer = (Read-Host 'Selecciona el idioma predeterminado').Trim()
+        $answer = (Read-Host (Get-AIOString 'lenguajes.default_lang_prompt')).Trim()
         if ($answer -match '^\d+$') {
             $number = [int]$answer
             if ($number -ge 1 -and $number -le $options.Count) { return $options[$number - 1] }
         }
-        Write-Host 'Seleccion invalida.' -ForegroundColor Red
+        Write-Host (Get-AIOString 'conversion.index_invalid') -ForegroundColor Red
     }
 }
 
@@ -2802,7 +2803,7 @@ function Show-AIOLangWinPECompatibilityDiagnostics {
     $mismatches = @($Reports | Where-Object { $_.CompatibleCount -eq 0 })
     if ($mismatches.Count -eq 0) { return }
 
-    Write-Host "`n Diagnostico de compatibilidad WinPE:" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'lenguajes.winpe_diag_hdr') -ForegroundColor Yellow
     foreach ($report in $mismatches) {
         $requiredText = if ($report.ImageBuild -eq $report.RequiredFamily) {
             "build $($report.ImageBuild)"
@@ -2812,27 +2813,27 @@ function Show-AIOLangWinPECompatibilityDiagnostics {
         }
 
         if ($report.PSObject.Properties['AdkOnlyMatch'] -and $report.AdkOnlyMatch) {
-            Write-Host " [NO PERMITIDO] $($report.Context) $($report.Architecture): el unico CAB WinPE compatible ($requiredText) proviene del ADK." -ForegroundColor Yellow
-            Write-Host "                Microsoft indica no usar el ADK para localizar WinRE; usa el mismo arbol WinPE_OCs pero tomado del ISO de Languages and Optional Features." -ForegroundColor DarkYellow
+            Write-Host (Get-AIOString 'lenguajes.winpe_not_allowed' $report.Context $report.Architecture $requiredText) -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'lenguajes.winpe_not_allowed_hint') -ForegroundColor DarkYellow
         }
         elseif ($report.AvailableCount -gt 0) {
             $buildText = if (@($report.AvailableBuilds).Count -gt 0) { @($report.AvailableBuilds) -join ', ' } else { 'N/D' }
             $familyText = if (@($report.AvailableFamilies).Count -gt 0) { @($report.AvailableFamilies) -join ', ' } else { 'N/D' }
             $sourceText = if (@($report.AvailableSources).Count -gt 0) { @($report.AvailableSources) -join ', ' } else { 'N/D' }
-            Write-Host " [INCOMPATIBLE] $($report.Context) $($report.Architecture): requiere $requiredText; disponibles build $buildText (familia $familyText)." -ForegroundColor Yellow
-            Write-Host "                Origen: $sourceText | Idiomas: $(@($report.Locales) -join ', ')" -ForegroundColor DarkYellow
+            Write-Host (Get-AIOString 'lenguajes.incompat_fmt' $report.Context $report.Architecture $requiredText $buildText $familyText) -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'lenguajes.winpe_source_locales' $sourceText (@($report.Locales) -join ', ')) -ForegroundColor DarkYellow
         }
         else {
-            Write-Host " [FALTANTE] $($report.Context) $($report.Architecture): requiere $requiredText y no hay CAB WinPE para los idiomas seleccionados." -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'lenguajes.winpe_missing_cab' $report.Context $report.Architecture $requiredText) -ForegroundColor Yellow
         }
     }
 
     $requiredFamilies = @($mismatches | Select-Object -ExpandProperty RequiredFamily -Unique | Sort-Object)
     $requiredArchitectures = @($mismatches | Select-Object -ExpandProperty Architecture -Unique | Sort-Object)
-    Write-Host " [ACCION] Usa componentes WinPE de la familia $($requiredFamilies -join ', ') para $($requiredArchitectures -join ', ')." -ForegroundColor Cyan
-    Write-Host "          El repositorio puede contenerlos bajo: $RepositoryRoot\WinPE\<arquitectura>\WinPE_OCs" -ForegroundColor DarkCyan
+    Write-Host (Get-AIOString 'lenguajes.winpe_action' ($requiredFamilies -join ', ') ($requiredArchitectures -join ', ')) -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'lenguajes.winpe_repo_hint' $RepositoryRoot) -ForegroundColor DarkCyan
     if ($AdkInfo -and $AdkInfo.ActiveDismSource -eq 'ADK') {
-        Write-Host " [NOTA] DISM $($AdkInfo.ActiveDismVersion) puede seguir utilizandose como herramienta; la incompatibilidad corresponde a los paquetes CAB WinPE." -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'lenguajes.winpe_dism_note' $AdkInfo.ActiveDismVersion) -ForegroundColor DarkGray
     }
 }
 
@@ -3082,7 +3083,7 @@ function Initialize-AIOLangLanguagePayloads {
         $safe = (($package.Architecture + '_' + $package.Locale + '_' + [System.IO.Path]::GetFileNameWithoutExtension($package.Name)) -replace '[^A-Za-z0-9_.-]', '_')
         if ($safe.Length -gt 100) { $safe = $safe.Substring(0, 100) }
         $destination = Join-Path $PayloadRoot $safe
-        Write-Host " -> Extrayendo recursos de $($package.Locale) / $($package.Architecture)..." -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'lenguajes.extracting_res' $package.Locale $package.Architecture) -ForegroundColor DarkGray
         Expand-AIOLangArchiveFull -ArchivePath $package.FilePath -Destination $destination | Out-Null
 
         $packagePath = $package.FilePath
@@ -3696,7 +3697,7 @@ function Copy-AIOLangBackupPlanEntry {
         $file = @($PlanEntry.Files)[0]
         $showDetail = ([string]$file.MediaRelativePath -match '(?i)^sources\\(boot|install)\.(wim|esd)$')
         if ($showDetail) {
-            Write-Host ("   [{0}/{1}] Copiando y verificando {2}..." -f ([int]$ProgressState.Current + 1), $ProgressState.Total, $file.MediaRelativePath) -ForegroundColor Gray
+            Write-Host (Get-AIOString 'actualizaciones.preflight_copying' ([int]$ProgressState.Current + 1) $ProgressState.Total $file.MediaRelativePath) -ForegroundColor Gray
         }
         $copy = Copy-AIOLangFileVerified -Source $file.SourcePath -Destination $destination
         # Solo una copia cuya verificacion SHA-256 termino cuenta como respaldada.
@@ -3707,7 +3708,7 @@ function Copy-AIOLangBackupPlanEntry {
         else { 100 }
         Write-Progress -Activity 'Respaldo previo obligatorio' -Status ("{0}/{1} archivos verificados ({2}%)" -f $ProgressState.Current, $ProgressState.Total, $percent) -PercentComplete $percent
         if ($showDetail) {
-            Write-Host '      [VERIFICADO] SHA-256 coincide.' -ForegroundColor Green
+            Write-Host (Get-AIOString 'actualizaciones.preflight_sha_ok') -ForegroundColor Green
         }
         return [pscustomobject]@{ SHA256 = [string]$copy.SHA256; FileCount = 1; TotalBytes = [int64]$copy.Length }
     }
@@ -3719,7 +3720,7 @@ function Copy-AIOLangBackupPlanEntry {
         $target = Join-Path $destination ([string]$file.RelativeInTarget)
         $showDetail = ([string]$file.MediaRelativePath -match '(?i)^sources\\(boot|install)\.(wim|esd)$')
         if ($showDetail) {
-            Write-Host ("   [{0}/{1}] Copiando y verificando {2}..." -f ([int]$ProgressState.Current + 1), $ProgressState.Total, $file.MediaRelativePath) -ForegroundColor Gray
+            Write-Host (Get-AIOString 'actualizaciones.preflight_copying' ([int]$ProgressState.Current + 1) $ProgressState.Total $file.MediaRelativePath) -ForegroundColor Gray
         }
         $copy = Copy-AIOLangFileVerified -Source $file.SourcePath -Destination $target
         # Solo una copia cuya verificacion SHA-256 termino cuenta como respaldada.
@@ -3730,7 +3731,7 @@ function Copy-AIOLangBackupPlanEntry {
         else { 100 }
         Write-Progress -Activity 'Respaldo previo obligatorio' -Status ("{0}/{1} archivos verificados ({2}%)" -f $ProgressState.Current, $ProgressState.Total, $percent) -PercentComplete $percent
         if ($showDetail) {
-            Write-Host '      [VERIFICADO] SHA-256 coincide.' -ForegroundColor Green
+            Write-Host (Get-AIOString 'actualizaciones.preflight_sha_ok') -ForegroundColor Green
         }
         [void]$records.Add([pscustomobject]@{
             RelativePath = ([string]$file.RelativeInTarget).ToLowerInvariant()
@@ -3771,12 +3772,12 @@ function New-AIOLangPreflightBackup {
 
     Write-Host ''
     Write-Host '=======================================================' -ForegroundColor Cyan
-    Write-Host ' RESPALDO PREVIO OBLIGATORIO' -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'actualizaciones.preflight_title') -ForegroundColor Cyan
     Write-Host '=======================================================' -ForegroundColor Cyan
-    Write-Host (" Archivos a respaldar : {0}" -f $plan.TotalFiles) -ForegroundColor White
-    Write-Host (" Tamano aproximado    : {0}" -f (Format-AIOLangByteSize -Bytes $plan.TotalBytes)) -ForegroundColor White
-    Write-Host (" Destino              : {0}" -f $backupRoot) -ForegroundColor White
-    Write-Host ' Hash                 : SHA-256 para todos los archivos' -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.preflight_files' $plan.TotalFiles) -ForegroundColor White
+    Write-Host (Get-AIOString 'lenguajes.preflight_size_fmt' (Format-AIOLangByteSize -Bytes $plan.TotalBytes)) -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.preflight_dest' $backupRoot) -ForegroundColor White
+    Write-Host (Get-AIOString 'actualizaciones.preflight_hash') -ForegroundColor White
 
     $entries = New-Object System.Collections.Generic.List[object]
     [int64]$totalBytes = 0
@@ -3842,7 +3843,7 @@ function New-AIOLangPreflightBackup {
 
     Remove-Item -LiteralPath $incompletePath -Force -ErrorAction Stop
 
-    Write-Host (" [OK] Respaldo previo completado y verificado ({0} hashes SHA-256)." -f $hashedFileCount) -ForegroundColor Green
+    Write-Host (Get-AIOString 'actualizaciones.preflight_done' $hashedFileCount) -ForegroundColor Green
     Write-AIOLangLog -Level INFO -Message "Respaldo Preflight creado en '$backupRoot' con $hashedFileCount archivo(s) cubiertos por SHA-256; indice=$entriesIndexSha256."
     Add-AIOLangOperation -Phase 'Preflight' -Context 'Crear respaldo del medio' -State 'Success' -Details @{ BackupRoot = $backupRoot; Entries = $entries.Count; TotalBytes = $totalBytes; HashedFileCount = $hashedFileCount; EntriesIndexSha256 = $entriesIndexSha256 }
 
@@ -4070,7 +4071,7 @@ function Show-AIOLangRestoreMenu {
 
     Clear-Host
     Write-Host '=======================================================' -ForegroundColor Cyan
-    Write-Host '             RESTAURAR MEDIO MULTILINGUE              ' -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'lenguajes.restore_menu_title') -ForegroundColor Cyan
     Write-Host '=======================================================' -ForegroundColor Cyan
     Write-Host ''
 
@@ -4088,23 +4089,23 @@ function Show-AIOLangRestoreMenu {
 
         $created = [string]$manifest.CreatedAt
         $entryCount = [int]$manifest.EntryCount
-        Write-Host " Respaldo : $($validated.Root)" -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.backup_lbl' $validated.Root) -ForegroundColor White
         Write-Host " Creado   : $created" -ForegroundColor White
         Write-Host " Elementos: $entryCount" -ForegroundColor White
-        Write-Host " Destino  : $target" -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.dest_lbl' $target) -ForegroundColor White
         Write-Host ''
-        Write-Host 'La restauracion reemplazara los WIM y recursos localizados respaldados.' -ForegroundColor Yellow
-        $confirmation = (Read-Host 'Escribe RESTAURAR para confirmar').Trim().ToUpperInvariant()
+        Write-Host (Get-AIOString 'lenguajes.restore_replace_warn') -ForegroundColor Yellow
+        $confirmation = (Read-Host (Get-AIOString 'actualizaciones.restore_confirm_prompt')).Trim().ToUpperInvariant()
         if ($confirmation -ne 'RESTAURAR') {
-            Write-Host 'Restauracion cancelada.' -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.restore_cancelled') -ForegroundColor Yellow
             Wait-AIOLangUser
             return
         }
 
         [void](Restore-AIOLangPreflightBackup -BackupRoot $validated.Root -MediaRoot $target -Force)
-        Write-Host 'Restauracion completada.' -ForegroundColor Green
+        Write-Host (Get-AIOString 'lenguajes.restore_done_short') -ForegroundColor Green
     }
-    catch { Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red }
+    catch { Write-Host (Get-AIOString 'lenguajes.err_inline' $_.Exception.Message) -ForegroundColor Red }
     Wait-AIOLangUser
 }
 
@@ -4470,7 +4471,7 @@ function Add-AIOLangPackageToImage {
     }
     $parentPresent = if ($PSBoundParameters.ContainsKey('InstalledInventory')) { Test-AIOLangNeutralParentPresent -MountPath $MountPath -Package $Package -InstalledInventory $InstalledInventory } else { Test-AIOLangNeutralParentPresent -MountPath $MountPath -Package $Package }
     if (-not $parentPresent) {
-        Write-Host " [OMITIDO] $($Package.Name) - componente neutral no presente." -ForegroundColor DarkYellow
+        Write-Host (Get-AIOString 'lenguajes.skip_neutral_missing' $Package.Name) -ForegroundColor DarkYellow
         Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context $Context -State 'SkippedMissingParent' -Details $Package.Name
         return [pscustomobject]@{ Success = $true; State = 'SkippedMissingParent'; ExitCode = 0 }
     }
@@ -4485,7 +4486,7 @@ function Add-AIOLangPackageToImage {
         if ([string]$applicability[0] -match ':\s*No\s*$') {
             Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context $Context -State 'NotApplicable' -Details @{ Package = $Package.Name; MountPath = $MountPath; Evidence = [string]$applicability[0] }
             if (-not $AllowNotApplicable) { throw "CBS indica que '$($Package.Name)' no es aplicable a '$MountPath'." }
-            Write-Host " [OMITIDO] $($Package.Name) - CBS indica que no es aplicable." -ForegroundColor DarkYellow
+            Write-Host (Get-AIOString 'lenguajes.skip_cbs_not_applicable' $Package.Name) -ForegroundColor DarkYellow
             return [pscustomobject]@{ Success = $true; State = 'NotApplicable'; ExitCode = 0 }
         }
     }
@@ -5165,7 +5166,7 @@ function Update-AIOLangInstallWim {
                     $appliedFod = @(Add-AIOLangFeaturePackages -MountPath $MountPath -Packages $fodPackages -ContextPrefix "FOD indice $index")
                 }
                 else {
-                    Write-Host ' [OMITIDO] No hay Features on Demand compatibles para este indice.' -ForegroundColor DarkYellow
+                    Write-Host (Get-AIOString 'lenguajes.no_compat_fod') -ForegroundColor DarkYellow
                 }
             }
 
@@ -5199,7 +5200,7 @@ function Update-AIOLangInstallWim {
                 Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context 'Reinyectar winre.wim actualizado' -State 'Success' -Details @{ Index = $index; CacheKey = $cacheKey }
             }
             elseif ($UpdateWinRE) {
-                Write-Host ' [OMITIDO] Este indice no contiene winre.wim.' -ForegroundColor DarkYellow
+                Write-Host (Get-AIOString 'lenguajes.no_winre_in_idx') -ForegroundColor DarkYellow
             }
 
             if ($Cleanup) { Invoke-AIOLangComponentCleanup -MountPath $MountPath -Context "Limpiar install.wim indice $index" -ResetBase:$ResetBase }
@@ -5694,7 +5695,7 @@ function Update-AIOLangBootWim {
         # metadatos (normalmente el 2). Omitir los demas antes de montar,
         # incluso para fuentes EA; NotModified tambien evita el montaje final.
         if (-not $useFullWinPE -and $index -ne $fallbackSetupIndex) {
-            Write-Host " [OMITIDO] boot.wim indice ${index}: SetupResourcesOnly solo requiere el indice Setup $fallbackSetupIndex; no se montara." -ForegroundColor DarkYellow
+            Write-Host (Get-AIOString 'lenguajes.boot_skip_nonsetup' $index $fallbackSetupIndex) -ForegroundColor DarkYellow
             Write-AIOLangLog -Level INFO -Message "boot.wim indice ${index}: montaje omitido por SetupResourcesOnly; indice Setup=$fallbackSetupIndex."
             [void]$results.Add([pscustomobject]@{
                 Index = $index; Mode = 'NotModified'; SetupImage = $false; PackageCount = 0
@@ -5743,14 +5744,14 @@ function Update-AIOLangBootWim {
             }
 
             if (-not $fullWinPE -and -not $isSetup -and -not $eaFonts.Applied) {
-                Write-Host " [OMITIDO] boot.wim indice $index no es Setup; sin WinPE completo ni fuentes EA que aplicar." -ForegroundColor DarkYellow
+                Write-Host (Get-AIOString 'lenguajes.boot_skip_no_ea' $index) -ForegroundColor DarkYellow
                 [void](Dismount-AIOLangImage -MountPath $MountPath -Mode Discard -Context "Cerrar boot.wim indice $index sin cambios")
                 $committed = $true
                 [void]$results.Add([pscustomobject]@{ Index = $index; Mode = 'NotModified'; SetupImage = $false; PackageCount = 0; EastAsianFontFiles = [string[]]@(); EastAsianLocales = [string[]]@(); Detection = [string[]]$role.Reasons })
                 continue
             }
             elseif (-not $fullWinPE -and -not $isSetup -and $eaFonts.Applied) {
-                Write-Host " [FUENTES EA] boot.wim indice $index recibira soporte tipografico para $(@($eaFonts.Locales) -join ', ')." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'lenguajes.ea_fonts_idx' $index (@($eaFonts.Locales) -join ', ')) -ForegroundColor Yellow
                 $fontVerification = Assert-AIOLangEastAsianFontSupport -MountPath $MountPath -ExpectedFontFiles @($eaFonts.SystemFontNames) -Locales @($eaFonts.Locales) -Context "Verificar fuentes EA boot.wim indice $index" -Mode 'FontSupportOnly'
                 Sync-AIOLangBootFiles -MountPath $MountPath -MediaRoot $MediaRoot -Index $index -Locales $Locales -SetupImage:$false
                 [void](Dismount-AIOLangImage -MountPath $MountPath -Mode Commit -Context "Guardar boot.wim indice $index")
@@ -5763,8 +5764,8 @@ function Update-AIOLangBootWim {
                 continue
             }
             elseif (-not $fullWinPE) {
-                Write-Host ' [MODO SetupResourcesOnly] Sin LP WinPE completo; se integraran lang.ini y recursos MUI de Setup.' -ForegroundColor Yellow
-                if ($eaFonts.Applied) { Write-Host " [FUENTES EA] Se agregara soporte tipografico para $(@($eaFonts.Locales) -join ', ')." -ForegroundColor Yellow }
+                Write-Host (Get-AIOString 'lenguajes.setup_res_only_mode') -ForegroundColor Yellow
+                if ($eaFonts.Applied) { Write-Host (Get-AIOString 'lenguajes.ea_fonts_add' (@($eaFonts.Locales) -join ', ')) -ForegroundColor Yellow }
                 Write-AIOLangLog -Level INFO -Message "boot.wim indice ${index}: SetupResourcesOnly sin localizacion WinPE completa."
             }
 
@@ -6211,7 +6212,7 @@ function Invoke-AIOLangMediaIntegration {
         # temporal, este orden garantiza un punto de restauracion inequivoco.
         $script:AIOLangCurrentPhase = 'Preflight'
         [void](Assert-AIOLangPreflightDiskSpace -MediaRoot $MediaRoot -SessionRoot $script:AIOLangSessionRoot -Inventory $Inventory -SelectedImages $selectedImages -Locales $Locales)
-        Write-Host "`n>> Creando respaldo obligatorio del medio" -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'lenguajes.creating_backup') -ForegroundColor Cyan
         $backup = New-AIOLangPreflightBackup -MediaRoot $MediaRoot -Locales $Locales
         $script:AIOLangLastTerminalState.BackupRoot = $backup.Root
         [void](Test-AIOLangPreflightBackup -BackupRoot $backup.Root)
@@ -6311,28 +6312,28 @@ function Invoke-AIOLangMediaIntegration {
         }
 
 		Write-Host "`n=======================================================" -ForegroundColor DarkCyan
-        Write-Host '             RESUMEN FINAL DE VERIFICACION' -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'actualizaciones.summary_title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor DarkCyan
-        Write-Host " [OK] Estructura de install.wim e idiomas verificados" -ForegroundColor Green
-        Write-Host " [OK] Recursos localizados de Setup generados correctamente" -ForegroundColor Green
-        Write-Host " [OK] Archivo sources\lang.ini actualizado y validado" -ForegroundColor Green
-        if ($UpdateWinRE) { Write-Host " [OK] winre.wim actualizado con nuevos componentes WinPE" -ForegroundColor Green }
+        Write-Host (Get-AIOString 'lenguajes.summary_install_ok') -ForegroundColor Green
+        Write-Host (Get-AIOString 'lenguajes.summary_setup_ok') -ForegroundColor Green
+        Write-Host (Get-AIOString 'lenguajes.summary_langini_ok') -ForegroundColor Green
+        if ($UpdateWinRE) { Write-Host (Get-AIOString 'lenguajes.summary_winre_ok') -ForegroundColor Green }
         if ($UpdateBootWim) {
             $resourcesOnlyCount = @($bootLocalizationVerification | Where-Object { $_.Mode -eq 'SetupResourcesOnly' }).Count
             $fontOnlyCount = @($bootLocalizationVerification | Where-Object { $_.Mode -eq 'FontSupportOnly' }).Count
             if ($resourcesOnlyCount -gt 0) {
-                Write-Host " [OK] Selector de idiomas de Windows Setup habilitado mediante lang.ini y recursos MUI" -ForegroundColor Green
+                Write-Host (Get-AIOString 'lenguajes.summary_selector_ok') -ForegroundColor Green
                 if ($fontOnlyCount -gt 0 -or @($Locales | Where-Object { Test-AIOLangEastAsianLocale -Locale $_ }).Count -gt 0) {
-                    Write-Host " [OK] Soporte de fuentes de Asia oriental aplicado a boot.wim sin requerir WinPE Add-on" -ForegroundColor Green
+                    Write-Host (Get-AIOString 'lenguajes.summary_eafonts_ok') -ForegroundColor Green
                 }
-                Write-Host " [ADVERTENCIA] WinPE completo no contiene todos los paquetes de idioma; usa un Add-on compatible para traduccion total." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'lenguajes.winpe_partial_warn') -ForegroundColor Yellow
             }
             else {
-                Write-Host " [OK] boot.wim multilingue verificado: paquetes WinPE, Get-Intl, lang.ini y recursos MUI de Setup" -ForegroundColor Green
+                Write-Host (Get-AIOString 'lenguajes.summary_boot_ok') -ForegroundColor Green
             }
         }
-        if ($ExportSingleIndex -and $Indexes.Count -eq 1) { Write-Host " [OK] install.wim exportado como edicion unica" -ForegroundColor Green }
-        elseif ($OptimizeWims) { Write-Host " [OK] Imagenes WIM reconstruidas y optimizadas" -ForegroundColor Green }
+        if ($ExportSingleIndex -and $Indexes.Count -eq 1) { Write-Host (Get-AIOString 'lenguajes.summary_single_ok') -ForegroundColor Green }
+        elseif ($OptimizeWims) { Write-Host (Get-AIOString 'lenguajes.summary_opt_ok') -ForegroundColor Green }
         Write-Host ""
         Add-AIOLangOperation -Phase 'Finalizacion' -Context 'Sugerencia posterior' -State 'Info' -Details @{ Recommendation = 'Aplicar actualizaciones despues de integrar idiomas.' }
 
@@ -6350,8 +6351,8 @@ function Invoke-AIOLangMediaIntegration {
         $reportPaths = Export-AIOLangReport -Report $report
         Write-AIOLangLog -Level INFO -Message 'Integracion de idiomas completada y verificada.'
         Write-AIOLangLog -Level INFO -Message ("Optimizacion: HashCacheHits={0}; HashCacheMisses={1}; MetadataCacheHits={2}; RepositoryCacheHits={3}." -f $script:AIOLangOptimizationStats.HashCacheHits, $script:AIOLangOptimizationStats.HashCacheMisses, $script:AIOLangOptimizationStats.MetadataCacheHits, $script:AIOLangOptimizationStats.RepositoryCacheHits)
-        Write-Host ' [SUGERENCIA] La integracion de idiomas termino correctamente.' -ForegroundColor Cyan
-        Write-Host '              Ahora ejecuta el modulo de Actualizaciones para integrar las LCU, SafeOS, SetupDU y demas paquetes.' -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'lenguajes.suggestion_l1') -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'lenguajes.suggestion_l2') -ForegroundColor Cyan
         $script:AIOLangLastTerminalState.Status = 'Success'
         $script:AIOLangLastTerminalState.Phase = 'Finalizacion'
         $script:AIOLangLastTerminalState.Message = 'La integracion de idiomas termino correctamente.'
@@ -6384,7 +6385,7 @@ function Invoke-AIOLangMediaIntegration {
             $diagnostic = New-AIOLangDiagnosticBundle -ErrorRecord $integrationError -Configuration $configuration -BackupRoot $(if ($backup) { $backup.Root } else { $null }) -StartedAt $started -Phase $failedPhase -MediaMutationStarted ([bool]$mediaMutationStarted)
             $script:AIOLangLastDiagnosticPath = if ($diagnostic.ZipPath) { $diagnostic.ZipPath } else { $diagnostic.FolderPath }
             Write-AIOLangLog -Level ERROR -Message "Diagnostico automatico: $($script:AIOLangLastDiagnosticPath)"
-            Write-Host "`n Diagnostico automatico: $($script:AIOLangLastDiagnosticPath)" -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.auto_diag' $script:AIOLangLastDiagnosticPath) -ForegroundColor Yellow
         }
         catch {
             Write-AIOLangLog -Level WARN -Message "No se pudo generar el diagnostico automatico: $($_.Exception.Message)"
@@ -6394,17 +6395,17 @@ function Invoke-AIOLangMediaIntegration {
             Write-AIOLangLog -Level WARN -Message "Restauracion aplazada. Se conserva el respaldo '$($backup.Root)' y la sesion '$script:AIOLangSessionRoot'."
         }
         elseif ($backup -and $mediaMutationStarted) {
-            Write-Host "`nLa operacion fallo despues de iniciar cambios en el medio." -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'actualizaciones.fail_after_mutation') -ForegroundColor Yellow
             if (Read-AIOLangYesNo -Prompt 'Restaurar automaticamente el medio al estado inicial' -Default $true) {
                 try {
                     $script:AIOLangCurrentPhase = 'Recuperacion'
                     [void](Restore-AIOLangPreflightBackup -BackupRoot $backup.Root -MediaRoot $MediaRoot -Force)
-                    Write-Host 'El medio fue restaurado y verificado correctamente.' -ForegroundColor Green
+                    Write-Host (Get-AIOString 'actualizaciones.media_restored_ok') -ForegroundColor Green
                     $restorationStatus = 'Restaurado y verificado'
                     Add-AIOLangOperation -Phase 'Recuperacion' -Context 'Restauracion automatica tras error' -State 'Success' -Details @{ BackupRoot = $backup.Root }
                 }
                 catch {
-                    Write-Host "[ERROR] No se pudo completar la restauracion automatica: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host (Get-AIOString 'actualizaciones.auto_restore_err' $_.Exception.Message) -ForegroundColor Red
                     $restorationStatus = "Fallo: $($_.Exception.Message)"
                     Add-AIOLangOperation -Phase 'Recuperacion' -Context 'Restauracion automatica tras error' -State 'Failed' -Details $_.Exception.Message
                 }
@@ -6414,8 +6415,8 @@ function Invoke-AIOLangMediaIntegration {
             }
         }
         elseif ($backup) {
-            Write-Host "`nLa operacion fallo antes de modificar el medio; no es necesario restaurarlo." -ForegroundColor Yellow
-            Write-Host "El respaldo Preflight se conserva en: $($backup.Root)" -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'lenguajes.fail_before_mutation') -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'lenguajes.preflight_kept' $backup.Root) -ForegroundColor DarkGray
             $restorationStatus = 'No requerida; el medio no fue modificado'
             Add-AIOLangOperation -Phase 'Recuperacion' -Context 'Restauracion no requerida' -State 'Skipped' -Details @{ BackupRoot = $backup.Root; Reason = 'Fallo anterior a la primera modificacion del medio.' }
         }
@@ -6443,13 +6444,13 @@ function Invoke-AIOLangMediaIntegration {
                 Copy-Item -LiteralPath $script:AIOLangDismTranscript -Destination $transcriptCopy -Force -ErrorAction SilentlyContinue
                 $script:AIOLangLastPersistentLogPath = $transcriptCopy
                 if ($script:AIOLangLastTerminalState) { $script:AIOLangLastTerminalState.LogPath = $transcriptCopy }
-                Write-Host "Log de idiomas: $transcriptCopy" -ForegroundColor DarkGray
+                Write-Host (Get-AIOString 'lenguajes.lang_log_lbl' $transcriptCopy) -ForegroundColor DarkGray
             }
             if ($mountsCleared) {
                 Remove-Item -LiteralPath $script:AIOLangSessionRoot -Recurse -Force -ErrorAction SilentlyContinue
             }
             else {
-                Write-Host "Se conserva la sesion para recuperar los montajes pendientes: $script:AIOLangSessionRoot" -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'actualizaciones.session_kept' $script:AIOLangSessionRoot) -ForegroundColor Yellow
                 Write-AIOLangLog -Level WARN -Message "Limpieza aplazada: $script:AIOLangSessionRoot"
             }
         }
@@ -6483,7 +6484,7 @@ function Start-AIOLangIntegrationWizard {
         $defaultRepository = Join-Path $script:AIOLangApplicationRoot 'Lenguajes'
         $repositoryRoot = $null
         if (Test-Path -LiteralPath $defaultRepository -PathType Container) {
-            Write-Host "`nRepositorio detectado: $defaultRepository" -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'actualizaciones.repo_detected' $defaultRepository) -ForegroundColor Cyan
             if (Read-AIOLangYesNo -Prompt 'Usar este repositorio' -Default $true) { $repositoryRoot = $defaultRepository }
         }
         if (-not $repositoryRoot) {
@@ -6501,7 +6502,7 @@ function Start-AIOLangIntegrationWizard {
         # Se obtiene primero la metadata de las imagenes. Asi el ADK se limita
         # desde el principio a la arquitectura, idiomas y builds realmente
         # requeridos, en lugar de inspeccionar miles de CAB de todo el Add-on.
-        Write-Host ' Leyendo indices y versiones del medio...' -ForegroundColor DarkCyan
+        Write-Host (Get-AIOString 'lenguajes.reading_media') -ForegroundColor DarkCyan
         $images = @(Get-AIOLangImageMetadata -ImagePath $installImage -SkipServicingEvidence)
         $indexes = @(Select-AIOLangInstallIndexes -Images $images)
         Assert-AIOLangEditionLanguageSupport -Images $images -Indexes $indexes
@@ -6545,7 +6546,7 @@ function Start-AIOLangIntegrationWizard {
             catch {
                 $adkInventoryError = $_.Exception.Message
                 Write-AIOLangLog -Level WARN -Message "No se pudo analizar el complemento WinPE detectado: $adkInventoryError"
-                Write-Host "[ADVERTENCIA] Se detecto WinPE, pero no pudo analizarse: $adkInventoryError" -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'lenguajes.winpe_scan_err' $adkInventoryError) -ForegroundColor Yellow
             }
         }
 
@@ -6553,11 +6554,11 @@ function Start-AIOLangIntegrationWizard {
 
         Clear-Host
         Write-Host '=======================================================' -ForegroundColor Cyan
-        Write-Host '                    RESUMEN PREVIO                     ' -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'actualizaciones.preview_title') -ForegroundColor Cyan
         Write-Host '=======================================================' -ForegroundColor Cyan
-        Write-Host " Medio origen           : $mediaRoot" -ForegroundColor White
-        Write-Host " Repositorio            : $repositoryRoot" -ForegroundColor White
-        Write-Host " Imagen                 : $([System.IO.Path]::GetFileName($installImage))" -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.preview_src' $mediaRoot) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.preview_repo' $repositoryRoot) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.preview_img' ([System.IO.Path]::GetFileName($installImage))) -ForegroundColor White
         Show-AIOLangAdkStatus -AdkInfo $adkInfo -MediaArchitectures $targetArchitecturesForAdk
         if ($adkInfo.WinPERoot) {
             $adkWinPeBuilds = @($adkInventory | Where-Object { $_.Build } | Select-Object -ExpandProperty Build -Unique | Sort-Object)
@@ -6571,18 +6572,18 @@ function Start-AIOLangIntegrationWizard {
             }
             $scanSummary = $script:AIOLangAdkScanSummary
             if ($adkInventoryError) {
-                Write-Host " Inventario WinPE       : No se pudo completar: $adkInventoryError" -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'lenguajes.winpe_inventory_err' $adkInventoryError) -ForegroundColor Yellow
             }
             elseif ($scanSummary -and $scanSummary.FullScanSkipped) {
-                Write-Host " Inventario WinPE       : Parcial | $($scanSummary.AnalyzedCount) sondeado(s) de $($scanSummary.CandidateCount) | Build(s): $adkBuildText" -ForegroundColor White
-                Write-Host '                         Escaneo completo omitido: la familia WinPE no es compatible con el medio.' -ForegroundColor DarkGray
+                Write-Host (Get-AIOString 'lenguajes.winpe_inv_partial' $scanSummary.AnalyzedCount $scanSummary.CandidateCount $adkBuildText) -ForegroundColor White
+                Write-Host (Get-AIOString 'lenguajes.winpe_inv_skip') -ForegroundColor DarkGray
             }
             else {
                 $analyzedCount = if ($scanSummary) { $scanSummary.AnalyzedCount } else { @($adkInventory).Count }
-                Write-Host " Inventario WinPE       : $analyzedCount analizados para las arquitecturas e idiomas del medio | Build(s): $adkBuildText" -ForegroundColor White
+                Write-Host (Get-AIOString 'lenguajes.winpe_inv_full' $analyzedCount $adkBuildText) -ForegroundColor White
             }
             if (-not $adkInventoryError) {
-                Write-Host " Compatibilidad WinPE   : $(@($adkCompatibleInstall).Count) coinciden con arquitectura/build de install.wim" -ForegroundColor White
+                Write-Host (Get-AIOString 'lenguajes.winpe_compat_count' (@($adkCompatibleInstall).Count)) -ForegroundColor White
             }
         }
         Write-Host ''
@@ -6628,7 +6629,7 @@ function Start-AIOLangIntegrationWizard {
             $null -ne $_ -and $_.PSObject.Properties['CompatibleCount'] -and [int]$_.CompatibleCount -eq 0
         })
 
-        Write-Host "`n Configuracion:" -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'actualizaciones.config_header') -ForegroundColor Yellow
         if ($winPeMismatchReports.Count -gt 0) {
             Show-AIOLangWinPECompatibilityDiagnostics -Reports $winPeMismatchReports -RepositoryRoot $repositoryRoot -AdkInfo $adkInfo
         }
@@ -6637,33 +6638,33 @@ function Start-AIOLangIntegrationWizard {
         if ($relevantFod.Count -gt 0) {
             $integrateFod = Read-AIOLangYesNo -Prompt "Integrar Features on Demand detectadas ($($relevantFod.Count))" -Default $true
         }
-        else { Write-Host ' [OMITIDO] No se detectaron Features on Demand compatibles.' -ForegroundColor DarkGray }
+        else { Write-Host (Get-AIOString 'lenguajes.skip_no_fod') -ForegroundColor DarkGray }
 
         $updateWinRE = $false
         if ($winRePackages.Count -gt 0) {
             $updateWinRE = Read-AIOLangYesNo -Prompt "Actualizar winre.wim con componentes WinPE ($($winRePackages.Count))" -Default $true
         }
         else {
-            Write-Host ' [OMITIDO] No hay paquetes WinPE compatibles para winre.wim.' -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'lenguajes.no_winpe_for_winre') -ForegroundColor DarkGray
         }
 
         $updateBootWim = $false
         if (-not (Test-Path -LiteralPath $bootWim -PathType Leaf)) {
-            Write-Host ' [OMITIDO] El medio no contiene sources\boot.wim.' -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'actualizaciones.no_boot_wim') -ForegroundColor DarkGray
         }
         elseif ([string]$bootLocalizationPlan.Mode -eq 'FullWinPE') {
             $updateBootWim = Read-AIOLangYesNo -Prompt "Actualizar boot.wim con localizacion WinPE completa ($($bootPackages.Count) paquetes compatibles)" -Default $true
         }
         else {
-            Write-Host ' [MODO SetupResourcesOnly] No hay un juego WinPE completo para todos los idiomas seleccionados.' -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'lenguajes.setup_res_only_hdr') -ForegroundColor Yellow
             Write-Host '   - install.wim: localizacion completa mediante LP/FOD' -ForegroundColor DarkYellow
-            Write-Host '   - boot.wim Setup: lang.ini + recursos MUI de Setup' -ForegroundColor DarkYellow
-            if (@($locales | Where-Object { Test-AIOLangEastAsianLocale -Locale $_ }).Count -gt 0) { Write-Host '   - boot.wim indice Setup: soporte de fuentes de Asia oriental desde install.wim' -ForegroundColor DarkYellow }
-            Write-Host '   - winre.wim: solo se modifica si existen CAB WinPE compatibles del repositorio' -ForegroundColor DarkYellow
+            Write-Host (Get-AIOString 'lenguajes.setup_res_only_boot') -ForegroundColor DarkYellow
+            if (@($locales | Where-Object { Test-AIOLangEastAsianLocale -Locale $_ }).Count -gt 0) { Write-Host (Get-AIOString 'lenguajes.setup_res_only_ea') -ForegroundColor DarkYellow }
+            Write-Host (Get-AIOString 'lenguajes.setup_res_only_winre') -ForegroundColor DarkYellow
             if (@($bootLocalizationPlan.MissingBase).Count -gt 0) { Write-Host "   LP WinPE faltante: $(@($bootLocalizationPlan.MissingBase) -join ', ')" -ForegroundColor DarkGray }
             if (@($bootLocalizationPlan.MissingFontSupport).Count -gt 0) { Write-Host "   FontSupport faltante: $(@($bootLocalizationPlan.MissingFontSupport) -join ', ')" -ForegroundColor DarkGray }
             $updateBootWim = $true
-            Write-Host ' [AUTOMATICO] Idiomas de Windows Setup habilitados mediante SetupResourcesOnly.' -ForegroundColor DarkCyan
+            Write-Host (Get-AIOString 'lenguajes.setup_res_only_auto') -ForegroundColor DarkCyan
         }
 
         if ($relevantWinPE.Count -eq 0 -and $adkInfo.WinPERoot -and $winPeMismatchReports.Count -eq 0) {
@@ -6688,7 +6689,7 @@ function Start-AIOLangIntegrationWizard {
 
             $requiredText = if ($requiredFamilies.Count -gt 0) { $requiredFamilies -join ', ' } else { 'N/D' }
             $availableText = if ($availableFamilies.Count -gt 0) { $availableFamilies -join ', ' } else { 'N/D' }
-            Write-Host " [ADVERTENCIA] WinPE detectado, pero no aplicable. Requerido: familia $requiredText; disponible: familia $availableText." -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'lenguajes.winpe_not_applicable' $requiredText $availableText) -ForegroundColor Yellow
         }
 
         $cleanup = Read-AIOLangYesNo -Prompt 'Ejecutar StartComponentCleanup' -Default $true
@@ -6696,29 +6697,29 @@ function Start-AIOLangIntegrationWizard {
         if ($cleanup) { $resetBase = Read-AIOLangYesNo -Prompt 'Usar ResetBase (impide desinstalar componentes)' -Default $false }
         $optimizeWims = Read-AIOLangYesNo -Prompt 'Reconstruir y optimizar los WIM al terminar' -Default $true
         $exportSingle = ($indexes.Count -eq 1)
-        if ($exportSingle) { Write-Host ' Unico indice seleccionado: install.wim conservara esa edicion automaticamente.' -ForegroundColor DarkCyan }
+        if ($exportSingle) { Write-Host (Get-AIOString 'lenguajes.single_idx_auto') -ForegroundColor DarkCyan }
 
         Write-Host "`n=======================================================" -ForegroundColor DarkCyan
-        Write-Host ' PLAN DE EJECUCION' -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'actualizaciones.plan_title') -ForegroundColor Cyan
         Write-Host '=======================================================' -ForegroundColor DarkCyan
-        Write-Host " Indices install.wim : $($indexes -join ', ')" -ForegroundColor White
-        Write-Host " Idiomas              : $($locales -join ', ')" -ForegroundColor White
-        Write-Host " Predeterminado       : $defaultLocale" -ForegroundColor White
-        Write-Host " Features on Demand   : $integrateFod ($($relevantFod.Count) detectadas)" -ForegroundColor White
+        Write-Host (Get-AIOString 'actualizaciones.plan_indexes' ($indexes -join ', ')) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_langs' ($locales -join ', ')) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_default' $defaultLocale) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_fod' $integrateFod $relevantFod.Count) -ForegroundColor White
         $adkInstalledForPlan = if ($adkInfo.PSObject.Properties['AdkInstalled']) { [bool]$adkInfo.AdkInstalled } else { [bool]$adkInfo.Detected }
-        Write-Host " ADK instalado        : $adkInstalledForPlan" -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_adk' $adkInstalledForPlan) -ForegroundColor White
         $compatibleWinPeCount = @($relevantWinPE).Count
-        Write-Host " Fuente WinPE         : $([bool]$adkInfo.WinPERoot) ($(@($adkInventory).Count) analizadas | $compatibleWinPeCount compatibles)" -ForegroundColor White
-        Write-Host " winre.wim            : $updateWinRE ($($winRePackages.Count) compatibles)" -ForegroundColor White
-        Write-Host " boot.wim             : $updateBootWim ($($bootPackages.Count) compatibles)" -ForegroundColor White
-        Write-Host " Modo boot.wim        : $($bootLocalizationPlan.Mode)" -ForegroundColor White
-        Write-Host " DISM                  : $($adkInfo.ActiveDismSource) $($adkInfo.ActiveDismVersion)" -ForegroundColor White
-        Write-Host " Limpieza             : $cleanup | ResetBase: $resetBase" -ForegroundColor White
-        Write-Host " Optimizar WIM        : $optimizeWims" -ForegroundColor White
-        Write-Host " Salida edicion unica : $exportSingle" -ForegroundColor White
-        Write-Host ' Respaldo previo      : Obligatorio y verificado' -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_winpe_src' ([bool]$adkInfo.WinPERoot) (@($adkInventory).Count) $compatibleWinPeCount) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_winre' $updateWinRE $winRePackages.Count) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_boot' $updateBootWim $bootPackages.Count) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_boot_mode' $bootLocalizationPlan.Mode) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_dism' $adkInfo.ActiveDismSource $adkInfo.ActiveDismVersion) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_cleanup' $cleanup $resetBase) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_optimize' $optimizeWims) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_single' $exportSingle) -ForegroundColor White
+        Write-Host (Get-AIOString 'lenguajes.plan_backup') -ForegroundColor White
         Write-Host ''
-        $start = (Read-MenuOption 'Escribe I para INICIAR o V para volver').Trim().ToUpperInvariant()
+        $start = (Read-MenuOption (Get-AIOString 'actualizaciones.start_prompt')).Trim().ToUpperInvariant()
         if ($start -ne 'I') {
             $script:AIOLangLastTerminalState.Status = 'Cancelled'
             $script:AIOLangLastTerminalState.Phase = 'Confirmacion del plan'
@@ -6763,23 +6764,23 @@ function Show-LanguageIntegrator-Menu {
     while ($true) {
         Clear-Host
         Write-Host '=======================================================' -ForegroundColor Cyan
-        Write-Host '          INTEGRADOR DE IDIOMAS DE WINDOWS             ' -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'lenguajes.menu_title') -ForegroundColor Cyan
         Write-Host '=======================================================' -ForegroundColor Cyan
         Write-Host ''
-        Write-Host '   [1] Integrar idiomas / crear medio multilingue' -ForegroundColor Green
-        Write-Host '       Paquetes de idioma, FOD, WinRE, boot.wim y Setup' -ForegroundColor Gray
+        Write-Host (Get-AIOString 'lenguajes.menu_opt1') -ForegroundColor Green
+        Write-Host (Get-AIOString 'lenguajes.menu_opt1_desc') -ForegroundColor Gray
         Write-Host ''
-        Write-Host '   [2] Restaurar un respaldo Preflight' -ForegroundColor Yellow
-        Write-Host '       Revierte WIM y archivos localizados del medio' -ForegroundColor Gray
+        Write-Host (Get-AIOString 'lenguajes.menu_opt2') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'lenguajes.menu_opt2_desc') -ForegroundColor Gray
         Write-Host ''
-        Write-Host '   [V] Volver al menu principal' -ForegroundColor Red
-        $choice = (Read-MenuOption "`nSelecciona una opcion").Trim().ToUpperInvariant()
+        Write-Host (Get-AIOString 'lenguajes.menu_back') -ForegroundColor Red
+        $choice = (Read-MenuOption ("`n" + (Get-AIOString 'common.select_option'))).Trim().ToUpperInvariant()
         switch ($choice) {
             '1' { Start-AIOLangIntegrationWizard }
             '2' { Show-AIOLangRestoreMenu }
             'V' { return }
             default {
-                Write-Host 'Opcion invalida.' -ForegroundColor Red
+                Write-Host (Get-AIOString 'common.invalid_option') -ForegroundColor Red
                 Start-Sleep -Seconds 1
             }
         }

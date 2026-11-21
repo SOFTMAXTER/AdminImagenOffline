@@ -52,22 +52,22 @@ function Save-Changes {
     # 1. Validacion de Montaje
     if ($Script:IMAGE_MOUNTED -eq 0) { 
         Write-Log -LogLevel WARN -Message "SaveManager: Operacion rechazada. No hay ninguna imagen montada en el sistema."
-        Write-Warning "No hay imagen montada para guardar."; Pause; return 
+        Write-Warning (Get-AIOString 'save.no_image_mounted'); Pause; return 
     }
 
     # 2. BLOQUEO VHD (Como discutimos antes)
     if ($Script:IMAGE_MOUNTED -eq 2) {
         Write-Log -LogLevel INFO -Message "SaveManager: Operacion omitida. El usuario esta trabajando sobre un VHD/VHDX (Guardado en tiempo real)."
         Clear-Host
-        Write-Warning "AVISO: Estas trabajando sobre un disco virtual (VHD/VHDX)."
-        Write-Host "Los cambios en VHD se guardan automaticamente en tiempo real al editar archivos." -ForegroundColor Cyan
-        Write-Host "No es necesario (ni posible) ejecutar operaciones de 'Commit' o 'Capture' aqui." -ForegroundColor Gray
-        Write-Host "Simplemente desmonta la imagen para finalizar." -ForegroundColor Yellow
+        Write-Warning (Get-AIOString 'save.vhd_warn')
+        Write-Host (Get-AIOString 'save.vhd_realtime') -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'save.vhd_no_commit') -ForegroundColor Gray
+        Write-Host (Get-AIOString 'save.vhd_unmount_hint') -ForegroundColor Yellow
         Pause
         return
     }
 
-    Write-Host "Preparando para guardar..." -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'save.preparing') -ForegroundColor Cyan
     Write-Log -LogLevel INFO -Message "SaveManager: Asegurando que las colmenas de registro (Hives) esten desmontadas antes de llamar a DISM."
     Unmount-Hives
 
@@ -79,14 +79,14 @@ function Save-Changes {
         Write-Log -LogLevel WARN -Message "SaveManager: Bloqueo de seguridad activado. Intento de escritura directa ('$Mode') sobre un archivo de compresion solida (.ESD)."
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Yellow
-        Write-Host "      OPERACION NO PERMITIDA EN ARCHIVOS .ESD          " -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'save.esd_title') -ForegroundColor Yellow
         Write-Host "=======================================================" -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "Has intentado hacer '$Mode' sobre una imagen ESD comprimida." -ForegroundColor Red
+        Write-Host (Get-AIOString 'save.esd_attempted' $Mode) -ForegroundColor Red
         Write-Host ""
-        Write-Host "EXPLICACION TECNICA:" -ForegroundColor Cyan
-        Write-Host "Los archivos ESD son de 'compresion solida' y no admiten escritura incremental." -ForegroundColor Gray
-        Write-Host "DISM fallara si intentas guardar cambios directamente sobre el archivo original." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'save.esd_tech_header') -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'save.esd_tech_line1') -ForegroundColor Gray
+        Write-Host (Get-AIOString 'save.esd_tech_line2') -ForegroundColor Gray
         Write-Host ""
         Pause
         return
@@ -95,21 +95,21 @@ function Save-Changes {
     # 4. Logica Original
     if ($Mode -eq 'Commit') {
         Clear-Host
-        Write-Host "[+] Guardando cambios en el indice $Script:MOUNTED_INDEX..." -ForegroundColor Yellow
-        Write-Host "    > Por favor espera. DISM esta inicializando el motor de guardado (puede tardar en comenzar)..." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'save.commit_start' $Script:MOUNTED_INDEX) -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'save.commit_wait') -ForegroundColor Gray
         Write-Log -LogLevel ACTION -Message "SaveManager: Ejecutando DISM /Commit-Image para sobrescribir el indice $Script:MOUNTED_INDEX."
         dism /commit-image /mountdir:"$Script:MOUNT_DIR"
     }
     elseif ($Mode -eq 'Append') {
         Clear-Host
-        Write-Host "[+] Guardando cambios en un nuevo indice (Append)..." -ForegroundColor Yellow
-        Write-Host "    > Por favor espera. DISM esta calculando las diferencias (puede tardar en comenzar)..." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'save.append_start') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'save.append_wait') -ForegroundColor Gray
         Write-Log -LogLevel ACTION -Message "SaveManager: Ejecutando DISM /Commit-Image /Append para crear un indice nuevo en la imagen."
         dism /commit-image /mountdir:"$Script:MOUNT_DIR" /append
     }
     elseif ($Mode -eq 'NewWim') {
         Clear-Host
-        Write-Host "--- Guardar como Nuevo Archivo WIM (Exportar Estado Actual) ---" -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'save.newwim_header') -ForegroundColor Cyan
         Write-Log -LogLevel INFO -Message "SaveManager: Modo NewWim (Capture-Image) activado. Solicitando ruta de destino y metadatos."
         
         # 1. Seleccionar destino
@@ -124,10 +124,10 @@ function Save-Changes {
         
         $DEFAULT_DEST_PATH = Join-Path $dirName "${baseName}_MOD.wim"
         
-        $DEST_WIM_PATH = Select-SavePathDialog -Title "Guardar copia como..." -Filter "Archivos WIM (*.wim)|*.wim" -DefaultFileName $DEFAULT_DEST_PATH
+        $DEST_WIM_PATH = Select-SavePathDialog -Title (Get-AIOString 'save.newwim_dialog_title') -Filter (Get-AIOString 'save.wim_filter') -DefaultFileName $DEFAULT_DEST_PATH
         if (-not $DEST_WIM_PATH) { 
             Write-Log -LogLevel INFO -Message "SaveManager: El usuario cancelo la seleccion de la ruta destino para NewWim."
-            Write-Warning "Operacion cancelada."; return 
+            Write-Warning (Get-AIOString 'common.operation_cancelled'); return 
         }
 
         # =========================================================
@@ -146,7 +146,7 @@ function Save-Changes {
         #  (Reutiliza la edicion efectiva del Dashboard y la descripcion
         #  del catalogo central, sin depender de haber abierto otro menu).
         # =========================================================
-        Write-Host "`n--- Obteniendo metadatos del sistema operativo ---" -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'save.reading_os_meta') -ForegroundColor Yellow
         $defaultName = "Custom Image"
         $defaultDesc = "Imagen personalizada creada con AdminImagenOffline el $(Get-Date -Format 'yyyy-MM-dd')"
         # Reutiliza los metadatos del Dashboard (nombre efectivo segun build y edicion,
@@ -196,16 +196,16 @@ function Save-Changes {
         }
         
         Write-Host ""
-        $IMAGE_NAME = Read-Host "Ingrese el NOMBRE para la imagen interna (Enter = '$defaultName')"
+        $IMAGE_NAME = Read-Host (Get-AIOString 'save.prompt_name' $defaultName)
         if ([string]::IsNullOrWhiteSpace($IMAGE_NAME)) { $IMAGE_NAME = $defaultName }
 
-        Write-Host "Descripcion predeterminada: " -ForegroundColor Cyan -NoNewline
+        Write-Host (Get-AIOString 'save.default_desc_label') -ForegroundColor Cyan -NoNewline
         Write-Host $defaultDesc -ForegroundColor Gray
-        $IMAGE_DESC = Read-Host "Ingrese la DESCRIPCION (Enter = conservar la predeterminada)"
+        $IMAGE_DESC = Read-Host (Get-AIOString 'save.prompt_desc')
         if ([string]::IsNullOrWhiteSpace($IMAGE_DESC)) { $IMAGE_DESC = $defaultDesc }
         
-        Write-Host "`n[+] Capturando estado actual a nuevo WIM..." -ForegroundColor Yellow
-        Write-Host "    > Por favor espera. DISM esta preparando la compresion maxima (puede tardar unos minutos en iniciar)..." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'save.capture_start') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'save.capture_wait') -ForegroundColor Gray
         Write-Log -LogLevel ACTION -Message "SaveManager: Ejecutando DISM /Capture-Image desde la carpeta de montaje hacia '$DEST_WIM_PATH' (Nombre: $IMAGE_NAME)."
         
         $pending = Join-Path $destParent ('.captura-' + [Guid]::NewGuid().ToString('N') + '.wim')
@@ -223,7 +223,7 @@ function Save-Changes {
                 $outputInfo.BootIndex -ne [int]$bootable) { throw 'No se pudo verificar el indice de la copia capturada.' }
             if ((Get-AIOFileIdentity $destParent).Id -ne $parentIdentity.Id) { throw 'Cambio el directorio de destino.' }
             Publish-AIOVerifiedFile $pending $DEST_WIM_PATH $previous
-            Write-Host "[OK] Copia verificada y guardada en $DEST_WIM_PATH" -ForegroundColor Green
+            Write-Host (Get-AIOString 'save.capture_ok' $DEST_WIM_PATH) -ForegroundColor Green
             Write-Log -LogLevel INFO -Message "SaveManager: Nueva copia verificada en '$DEST_WIM_PATH'."
         } catch {
             Write-Warning $_.Exception.Message
@@ -239,11 +239,11 @@ function Save-Changes {
     # Nota: Commit/Append vuelca el montaje actual al archivo .wim sin alterar
     # los metadatos del SO montado en MOUNT_DIR, por lo que se conserva la cache del Dashboard.
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "[OK] Cambios guardados." -ForegroundColor Green
+        Write-Host (Get-AIOString 'save.saved_ok') -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "SaveManager: Cambios ($Mode) guardados exitosamente en la imagen original."
     } else {
         # Si llegamos aqui con un error, es un error legitimo de DISM (no por bloqueo de ESD)
-        Write-Host "[ERROR] Fallo al guardar cambios (Codigo: $LASTEXITCODE)."
+        Write-Host (Get-AIOString 'save.save_failed' $LASTEXITCODE)
         Write-Log -LogLevel ERROR -Message "SaveManager: Fallo en DISM al guardar cambios ($Mode). Codigo LASTEXITCODE: $LASTEXITCODE"
     }
     Pause

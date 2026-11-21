@@ -44,7 +44,7 @@ function Show-Features-GUI {
     # 1. Validacion de imagen montada
     # ------------------------------------------------------------------
     if ($Script:IMAGE_MOUNTED -eq 0) {
-        [System.Windows.Forms.MessageBox]::Show("Primero debes montar una imagen.", "Error", 'OK', 'Error')
+        [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'drivers.mount_first'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
         return
     }
 
@@ -55,7 +55,7 @@ function Show-Features-GUI {
     # 2. Construccion del formulario
     # ------------------------------------------------------------------
     $form                 = New-Object System.Windows.Forms.Form
-    $form.Text            = "Caracteristicas de Windows (Features) - $Script:MOUNT_DIR"
+    $form.Text            = Get-AIOString 'features.form_title' $Script:MOUNT_DIR
     $form.Size            = New-Object System.Drawing.Size(900, 700)
     $form.StartPosition   = "CenterScreen"
     $form.BackColor       = [System.Drawing.Color]::FromArgb(30, 30, 30)
@@ -70,7 +70,7 @@ function Show-Features-GUI {
     $toolTip.ReshowDelay  = 500
 
     $lblTitle          = New-Object System.Windows.Forms.Label
-    $lblTitle.Text     = "Gestor de Caracteristicas"
+    $lblTitle.Text     = Get-AIOString 'features.title'
     $lblTitle.Font     = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
     $lblTitle.Location = "20, 10"
     $lblTitle.AutoSize = $true
@@ -78,7 +78,7 @@ function Show-Features-GUI {
 
     # Barra de busqueda
     $lblSearch          = New-Object System.Windows.Forms.Label
-    $lblSearch.Text     = "Buscar:"
+    $lblSearch.Text     = Get-AIOString 'features.lbl_search'
     $lblSearch.Location = "20, 45"
     $lblSearch.AutoSize = $true
     $form.Controls.Add($lblSearch)
@@ -101,14 +101,14 @@ function Show-Features-GUI {
     $lv.BackColor        = [System.Drawing.Color]::FromArgb(45, 45, 48)
     $lv.ForeColor        = [System.Drawing.Color]::White
     $lv.ShowItemToolTips = $true
-    $lv.Columns.Add("Caracteristica",  350) | Out-Null
-    $lv.Columns.Add("Estado",          150) | Out-Null
-    $lv.Columns.Add("Nombre Interno",  300) | Out-Null
+    $lv.Columns.Add((Get-AIOString 'features.col_feature'), 350) | Out-Null
+    $lv.Columns.Add((Get-AIOString 'features.col_state'), 150) | Out-Null
+    $lv.Columns.Add((Get-AIOString 'features.col_internal_name'), 300) | Out-Null
     $form.Controls.Add($lv)
 
     # Etiqueta de estado
     $lblStatus           = New-Object System.Windows.Forms.Label
-    $lblStatus.Text      = "Cargando datos... (La interfaz puede congelarse unos segundos)"
+    $lblStatus.Text      = Get-AIOString 'features.status_loading'
     $lblStatus.Location  = "20, 570"
     $lblStatus.AutoSize  = $true
     $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
@@ -116,7 +116,7 @@ function Show-Features-GUI {
 
     # Boton .NET 3.5 SXS
     $btnNetFx3           = New-Object System.Windows.Forms.Button
-    $btnNetFx3.Text      = "INTEGRAR .NET 3.5 (SXS)"
+    $btnNetFx3.Text      = Get-AIOString 'features.btn_netfx3'
     $btnNetFx3.Location  = "400, 600"
     $btnNetFx3.Size      = "220, 40"
     $btnNetFx3.BackColor = [System.Drawing.Color]::DodgerBlue
@@ -128,7 +128,7 @@ function Show-Features-GUI {
 
     # Boton aplicar cambios
     $btnApply           = New-Object System.Windows.Forms.Button
-    $btnApply.Text      = "APLICAR CAMBIOS"
+    $btnApply.Text      = Get-AIOString 'features.btn_apply'
     $btnApply.Location  = "640, 600"
     $btnApply.Size      = "220, 40"
     $btnApply.BackColor = [System.Drawing.Color]::SeaGreen
@@ -322,26 +322,26 @@ function Show-Features-GUI {
 
             switch ($stateString) {
                 "Enabled" {
-                    $stateDisplay  = "Habilitado"
+                    $stateDisplay  = Get-AIOString 'features.lv_state_enabled'
                     $color         = [System.Drawing.Color]::Cyan
                     $item.Checked  = $true
                 }
                 "Disabled" {
-                    $stateDisplay  = "Deshabilitado"
+                    $stateDisplay  = Get-AIOString 'features.lv_state_disabled'
                     $item.Checked  = $false
                 }
                 "DisabledWithPayloadRemoved" {
-                    $stateDisplay  = "Removido (Requiere Source)"
+                    $stateDisplay  = Get-AIOString 'features.lv_state_removed_src'
                     $color         = [System.Drawing.Color]::Salmon
                     $item.Checked  = $false
                 }
                 "EnablePending" {
-                    $stateDisplay  = "Pendiente (Habilitar)"
+                    $stateDisplay  = Get-AIOString 'features.lv_state_enable_pending'
                     $color         = [System.Drawing.Color]::Yellow
                     $item.Checked  = $true
                 }
                 "DisablePending" {
-                    $stateDisplay  = "Pendiente (Deshabilitar)"
+                    $stateDisplay  = Get-AIOString 'features.lv_state_disable_pending'
                     $color         = [System.Drawing.Color]::Orange
                     $item.Checked  = $false
                 }
@@ -382,12 +382,12 @@ function Show-Features-GUI {
             $script:cachedFeatures = Get-WindowsOptionalFeature -Path $Script:MOUNT_DIR
             & $PopulateList -FilterText ""
 
-            $lblStatus.Text      = "Total: $($script:cachedFeatures.Count). Listo para filtrar o aplicar."
+            $lblStatus.Text      = Get-AIOString 'features.status_total' $script:cachedFeatures.Count
             $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
             $btnApply.Enabled    = $true
             $btnNetFx3.Enabled   = $true
         } catch {
-            $lblStatus.Text      = "Error critico al leer features: $_"
+            $lblStatus.Text      = Get-AIOString 'features.status_read_error' $_
             $lblStatus.ForeColor = [System.Drawing.Color]::Red
             Write-Log -LogLevel ERROR -Message "FEATURES_GUI: Error carga inicial: $_"
         } finally {
@@ -409,14 +409,14 @@ function Show-Features-GUI {
         } else {
             # 2. Busqueda interactiva si no se encontro automaticamente
             $res = [System.Windows.Forms.MessageBox]::Show(
-                "No se detecto la carpeta 'sxs' en la raiz del script automaticamente.`n`nDeseas seleccionarla manualmente?",
-                "Buscar Origen (.NET 3.5)",
+                (Get-AIOString 'features.sxs_not_found_body'),
+                (Get-AIOString 'features.sxs_not_found_title'),
                 'YesNo',
                 'Question'
             )
             if ($res -eq 'Yes') {
                 $fbd             = New-Object System.Windows.Forms.FolderBrowserDialog
-                $fbd.Description = "Selecciona la carpeta 'sxs' (Puede ser la original del ISO de Windows)"
+                $fbd.Description = Get-AIOString 'features.sxs_folder_desc'
                 if ($fbd.ShowDialog() -eq 'OK') { $sxsPath = $fbd.SelectedPath } else { return }
             } else { return }
         }
@@ -427,15 +427,15 @@ function Show-Features-GUI {
 
             if (-not $cabFiles -or $cabFiles.Count -eq 0) {
                 [System.Windows.Forms.MessageBox]::Show(
-                    "No se encontro ningun paquete de .NET 3.5 (*netfx3*.cab) en la ruta seleccionada.`n`nPor favor verifica la carpeta.",
-                    "Origen Invalido", 'OK', 'Warning')
+                    (Get-AIOString 'features.sxs_invalid_body'),
+                    (Get-AIOString 'features.sxs_invalid_title'), 'OK', 'Warning')
                 return
             }
 
             $form.Cursor       = [System.Windows.Forms.Cursors]::WaitCursor
             $btnNetFx3.Enabled = $false
             $btnApply.Enabled  = $false
-            $lblStatus.Text      = "Aislando paquetes NetFx3 para instalacion rapida..."
+            $lblStatus.Text      = Get-AIOString 'features.status_isolating_netfx3'
             $lblStatus.ForeColor = [System.Drawing.Color]::Cyan
             $form.Refresh()
 
@@ -486,28 +486,28 @@ function Show-Features-GUI {
                 Write-Log -LogLevel ACTION -Message "Smart SXS: Aislados $neutralCount neutros, $langCount idioma. Omitidos $skippedCount incompatibles."
 
                 # C. Ejecutar DISM apuntando solo al directorio de staging
-                $lblStatus.Text      = "Instalando .NET 3.5 ($imgArch)..."
+                $lblStatus.Text      = Get-AIOString 'features.status_installing_netfx3' $imgArch
                 $lblStatus.ForeColor = [System.Drawing.Color]::Yellow
                 $form.Refresh()
 
                 dism /Image:"$Script:MOUNT_DIR" /Enable-Feature /FeatureName:NetFx3 /All /LimitAccess /Source:"$isolatedSxs" | Out-Null
 
                 if ($LASTEXITCODE -eq 0) {
-                    $lblStatus.Text      = "Instalacion de .NET 3.5 exitosa."
+                    $lblStatus.Text      = Get-AIOString 'features.status_netfx3_ok'
                     $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
 
-                    $msg = ".NET Framework 3.5 se integro correctamente.`n`nSe inyectaron:`n- $neutralCount Paquete(s) Base (Neutral)`n- $langCount Paquete(s) de Idioma (Satelite)"
-                    [System.Windows.Forms.MessageBox]::Show($msg, "Exito", 'OK', 'Information')
+                    $msg = Get-AIOString 'features.msg_netfx3_ok' $neutralCount $langCount
+                    [System.Windows.Forms.MessageBox]::Show($msg, (Get-AIOString 'features.success_title'), 'OK', 'Information')
 
                     $script:cachedFeatures = Get-WindowsOptionalFeature -Path $Script:MOUNT_DIR
                     & $PopulateList -FilterText $txtSearch.Text
                 } else {
-                    $lblStatus.Text      = "Error al instalar .NET 3.5 (Codigo $LASTEXITCODE)."
+                    $lblStatus.Text      = Get-AIOString 'features.status_netfx3_err' $LASTEXITCODE
                     $lblStatus.ForeColor = [System.Drawing.Color]::Red
-                    [System.Windows.Forms.MessageBox]::Show("Fallo la instalacion.`nCodigo DISM: $LASTEXITCODE", "Error", 'OK', 'Error')
+                    [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'features.msg_netfx3_err' $LASTEXITCODE), (Get-AIOString 'common.error_title'), 'OK', 'Error')
                 }
             } catch {
-                [System.Windows.Forms.MessageBox]::Show("Excepcion inesperada: $_", "Error", 'OK', 'Error')
+                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'features.msg_unexpected' $_), (Get-AIOString 'common.error_title'), 'OK', 'Error')
             } finally {
                 # D. Limpiar siempre el entorno de staging
                 if (Test-Path $isolatedSxs) { Remove-Item $isolatedSxs -Recurse -Force -ErrorAction SilentlyContinue }
@@ -522,8 +522,8 @@ function Show-Features-GUI {
     $btnApply.Add_Click({
         if ($txtSearch.Text.Length -gt 0) {
             $res = [System.Windows.Forms.MessageBox]::Show(
-                "Filtro activo. Solo se procesaran elementos visibles.`nContinuar?",
-                "Advertencia", 'YesNo', 'Warning')
+                (Get-AIOString 'features.filter_active_warn'),
+                (Get-AIOString 'drivers.warn_title'), 'YesNo', 'Warning')
             if ($res -ne 'Yes') { return }
         }
 
@@ -550,12 +550,12 @@ function Show-Features-GUI {
                 if ($shouldEnable -and $originalState -eq "DisabledWithPayloadRemoved") {
                     if ($feat.FeatureName -eq "NetFx3") {
                         [System.Windows.Forms.MessageBox]::Show(
-                            "Para habilitar .NET Framework 3.5, por favor usa el boton azul dedicado 'INTEGRAR .NET 3.5 (SXS)'.",
-                            "Aviso", 'OK', 'Information')
+                            (Get-AIOString 'features.msg_use_netfx3_btn'),
+                            (Get-AIOString 'servicios.notice_title'), 'OK', 'Information')
                     } else {
                         [System.Windows.Forms.MessageBox]::Show(
-                            "La caracteristica '$($feat.FeatureName)' no se puede habilitar porque sus archivos fuente fueron eliminados de esta imagen (Payload Removed).`n`nOperacion omitida.",
-                            "Archivos Faltantes", 'OK', 'Warning')
+                            (Get-AIOString 'features.msg_payload_removed' $feat.FeatureName),
+                            (Get-AIOString 'features.msg_payload_title'), 'OK', 'Warning')
                     }
                     $item.Checked = $false
                     continue
@@ -563,8 +563,8 @@ function Show-Features-GUI {
 
                 $action = if ($shouldEnable) { "Enable" } else { "Disable" }
 
-                $lblStatus.Text        = "Procesando ($action): $($feat.FeatureName). La ventana puede no responder..."
-                $item.SubItems[1].Text = "PROCESANDO..."
+                $lblStatus.Text        = Get-AIOString 'features.status_processing' $action $feat.FeatureName
+                $item.SubItems[1].Text = Get-AIOString 'features.state_processing'
                 $item.ForeColor        = [System.Drawing.Color]::Yellow
                 $item.EnsureVisible()
                 $form.Refresh()
@@ -575,12 +575,12 @@ function Show-Features-GUI {
 
                     if ($shouldEnable) {
                         Enable-WindowsOptionalFeature -Path $Script:MOUNT_DIR -FeatureName $feat.FeatureName -All -NoRestart -ErrorAction Stop | Out-Null
-                        $item.SubItems[1].Text = "Habilitado"
+                        $item.SubItems[1].Text = Get-AIOString 'features.state_enabled'
                         $item.ForeColor        = [System.Drawing.Color]::Cyan
                         $feat.State            = "Enabled"
                     } else {
                         Disable-WindowsOptionalFeature -Path $Script:MOUNT_DIR -FeatureName $feat.FeatureName -NoRestart -ErrorAction Stop | Out-Null
-                        $item.SubItems[1].Text = "Deshabilitado"
+                        $item.SubItems[1].Text = Get-AIOString 'features.state_disabled'
                         $item.ForeColor        = [System.Drawing.Color]::White
                         $feat.State            = "Disabled"
                     }
@@ -589,14 +589,14 @@ function Show-Features-GUI {
                     $errors++
                     Write-Log -LogLevel ERROR -Message "Fallo $action feature $($feat.FeatureName): $($_.Exception.Message)"
                     $item.ForeColor        = [System.Drawing.Color]::Red
-                    $item.SubItems[1].Text = "ERROR"
+                    $item.SubItems[1].Text = Get-AIOString 'features.state_error'
                 }
             }
         }
 
         # Sincronizar cache si hubo cambios (flag -All puede haber habilitado dependencias)
         if ($changes -gt 0) {
-            $lblStatus.Text = "Sincronizando estados dependientes desde la imagen..."
+            $lblStatus.Text = Get-AIOString 'features.status_syncing'
             $form.Refresh()
             try {
                 $script:cachedFeatures = Get-WindowsOptionalFeature -Path $Script:MOUNT_DIR
@@ -609,17 +609,17 @@ function Show-Features-GUI {
         $form.Cursor       = [System.Windows.Forms.Cursors]::Default
         $btnApply.Enabled  = $true
         $btnNetFx3.Enabled = $true
-        $lblStatus.Text    = "Proceso finalizado."
+        $lblStatus.Text    = Get-AIOString 'features.status_done'
 
         [System.Windows.Forms.MessageBox]::Show(
-            "Operacion completada.`nCambios: $changes`nErrores: $errors",
-            "Informe", 'OK', 'Information')
+            (Get-AIOString 'features.msg_completed' $changes $errors),
+            (Get-AIOString 'servicios.report_title'), 'OK', 'Information')
     })
 
 	$form.Add_FormClosing({ 
         $confirm = [System.Windows.Forms.MessageBox]::Show(
-            "Estas seguro de que deseas salir?", 
-            "Confirmar Salida", 
+            (Get-AIOString 'metadata.confirm_exit_body'),
+            (Get-AIOString 'metadata.confirm_exit_title'), 
             [System.Windows.Forms.MessageBoxButtons]::YesNo, 
             [System.Windows.Forms.MessageBoxIcon]::Question
         )

@@ -145,7 +145,7 @@ function Show-AIOWimMetadataDraftEditor {
     Add-Type -AssemblyName System.Drawing
     # Solo devuelve un borrador al aceptar. Cancelar nunca modifica $Image.
     $dialog = New-Object Windows.Forms.Form
-    $dialog.Text = 'Metadatos del indice de salida'
+    $dialog.Text = Get-AIOString 'metacommon.dialog_title'
     $dialog.Size = New-Object Drawing.Size(800, 530)
     $dialog.MinimumSize = New-Object Drawing.Size(660, 480)
     $dialog.StartPosition = 'CenterParent'
@@ -163,12 +163,12 @@ function Show-AIOWimMetadataDraftEditor {
     $dialog.Controls.Add($layout)
     $help = New-Object Windows.Forms.Label
     $help.Dock = 'Fill'
-    $help.Text = "Los cambios se aplicaran al crear el WIM de salida.`r`nArquitectura: $($Image.Architecture) | Build: $($Image.Build)`r`nCambiar el ID de edicion solo edita metadatos; no convierte ni activa Windows."
+    $help.Text = Get-AIOString 'metacommon.help_text' $Image.Architecture $Image.Build
     $layout.Controls.Add($help, 0, 0)
     $templates = New-Object Windows.Forms.ComboBox
     $templates.Dock = 'Fill'; $templates.DropDownStyle = 'DropDownList'
     $templates.BackColor = [Drawing.Color]::FromArgb(50, 50, 50); $templates.ForeColor = [Drawing.Color]::Yellow
-    [void]$templates.Items.Add('-- Plantilla de edicion (opcional) --')
+    [void]$templates.Items.Add((Get-AIOString 'metacommon.tpl_placeholder'))
     $choices = @(Get-AIOWimEditionChoices $Image)
     foreach ($choice in $choices) { [void]$templates.Items.Add($choice) }
     $templates.SelectedIndex = 0; $templates.Enabled = $choices.Count -gt 0
@@ -184,20 +184,20 @@ function Show-AIOWimMetadataDraftEditor {
     $grid.EnableHeadersVisualStyles = $false
     $grid.ColumnHeadersDefaultCellStyle.BackColor = [Drawing.Color]::FromArgb(50, 50, 50)
     $grid.ColumnHeadersDefaultCellStyle.ForeColor = [Drawing.Color]::Silver
-    [void]$grid.Columns.Add('Property', 'Propiedad'); [void]$grid.Columns.Add('Value', 'Valor')
+    [void]$grid.Columns.Add('Property', (Get-AIOString 'metadata.col_prop')); [void]$grid.Columns.Add('Value', (Get-AIOString 'metadata.col_val'))
     $grid.Columns[0].ReadOnly = $true; $grid.Columns[0].FillWeight = 35
     foreach ($column in $grid.Columns) { $column.SortMode = 'NotSortable' }
     $fields = @('Name', 'Description', 'DisplayName', 'DisplayDescription', 'Edition')
-    $labels = @('Nombre', 'Descripcion', 'Nombre mostrado', 'Descripcion mostrada', 'ID de edicion')
+    $labels = @((Get-AIOString 'metadata.prop_name'), (Get-AIOString 'metadata.prop_desc'), (Get-AIOString 'metadata.prop_display_name'), (Get-AIOString 'metadata.prop_display_desc'), (Get-AIOString 'metadata.prop_edition_id'))
     for ($i = 0; $i -lt $fields.Count; $i++) { [void]$grid.Rows.Add($labels[$i], [string]$Image.($fields[$i])) }
     $layout.Controls.Add($grid, 0, 2)
     $buttons = New-Object Windows.Forms.FlowLayoutPanel
     $buttons.Dock = 'Fill'; $buttons.FlowDirection = 'RightToLeft'
     $cancel = New-Object Windows.Forms.Button
-    $cancel.Text = 'Cancelar'; $cancel.Size = New-Object Drawing.Size(115, 32)
+    $cancel.Text = Get-AIOString 'tweaks.btn_cancel'; $cancel.Size = New-Object Drawing.Size(115, 32)
     $cancel.DialogResult = 'Cancel'
     $apply = New-Object Windows.Forms.Button
-    $apply.Text = 'Aplicar al plan'; $apply.Size = New-Object Drawing.Size(140, 32)
+    $apply.Text = Get-AIOString 'metacommon.btn_apply_plan'; $apply.Size = New-Object Drawing.Size(140, 32)
     foreach ($button in @($cancel, $apply)) {
         $button.FlatStyle = 'Flat'; $button.UseVisualStyleBackColor = $false
         $button.BackColor = [Drawing.Color]::FromArgb(60, 60, 60)
@@ -214,7 +214,7 @@ function Show-AIOWimMetadataDraftEditor {
             [void]$grid.EndEdit()
             $meta = Get-AIOWimMetadataTemplate $Image ([string]$templates.SelectedItem)
             for ($i = 0; $i -lt $fields.Count; $i++) { $grid.Rows[$i].Cells[1].Value = $meta.($fields[$i]) }
-        } catch { [void][Windows.Forms.MessageBox]::Show($dialog, $_.Exception.Message, 'Metadatos', 'OK', 'Warning') }
+        } catch { [void][Windows.Forms.MessageBox]::Show($dialog, $_.Exception.Message, (Get-AIOString 'metadata.msg_title'), 'OK', 'Warning') }
     })
     $apply.Add_Click({
         try {
@@ -225,7 +225,7 @@ function Show-AIOWimMetadataDraftEditor {
             Assert-AIOWimMetadata $draft
             $dialog.Tag = $draft
             $dialog.DialogResult = 'OK'
-        } catch { [void][Windows.Forms.MessageBox]::Show($dialog, $_.Exception.Message, 'Metadatos', 'OK', 'Warning') }
+        } catch { [void][Windows.Forms.MessageBox]::Show($dialog, $_.Exception.Message, (Get-AIOString 'metadata.msg_title'), 'OK', 'Warning') }
     })
     try {
         if ($dialog.ShowDialog($Owner) -eq 'OK') { return $dialog.Tag }

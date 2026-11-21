@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.15
+    1.5.16
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,10 +41,18 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.15"
+$script:Version = "1.5.16"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
+# Cargar motor de idiomas (i18n) antes de mensajes de arranque y updater
+$script:I18nBaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
+$script:I18nModulePath = Join-Path -Path $script:I18nBaseDir -ChildPath 'I18n.ps1'
+if (Test-Path -LiteralPath $script:I18nModulePath -PathType Leaf) {
+    . $script:I18nModulePath
+    [void](Initialize-AIOI18n)
+}
 
 function Write-Log {
     [CmdletBinding()]
@@ -65,7 +73,7 @@ function Write-Log {
         "[$timestamp] [$LogLevel] - $Message" | Out-File -FilePath $script:logFile -Append -Encoding utf8
     }
     catch {
-        Write-Warning "No se pudo escribir en el archivo de log: $_"
+        Write-Warning (Get-AIOString 'core.log_write_warn' $_)
     }
 }
 
@@ -76,12 +84,12 @@ function Release-SingleInstanceMutex {
             $mutex.ReleaseMutex()
         }
     } catch {
-        Write-Warning "No se pudo liberar el mutex de instancia unica: $($_.Exception.Message)"
+        Write-Warning (Get-AIOString 'core.mutex_release_warn' $_.Exception.Message)
     } finally {
         try {
             if ($null -ne $mutex) { $mutex.Dispose() }
         } catch {
-            Write-Warning "No se pudo cerrar el mutex de instancia unica: $($_.Exception.Message)"
+            Write-Warning (Get-AIOString 'core.mutex_close_warn' $_.Exception.Message)
         } finally {
             $Script:SingleInstanceMutex = $null
             $Script:SingleInstanceMutexOwned = $false
@@ -154,14 +162,14 @@ function Invoke-FullRepoUpdater {
 
     Write-Host ""
     Write-Host "  =======================================================" -ForegroundColor Cyan
-    Write-Host "           NUEVA VERSION DISPONIBLE DETECTADA!          " -ForegroundColor Green
+    Write-Host (Get-AIOString 'updater.title') -ForegroundColor Green
     Write-Host "  =======================================================" -ForegroundColor Cyan
-    Write-Host "     Version Local  : v$($script:Version)" -ForegroundColor Gray
-    Write-Host "     Version Remota : v$remoteVersionStr" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'updater.local_version' $script:Version) -ForegroundColor Gray
+    Write-Host (Get-AIOString 'updater.remote_version' $remoteVersionStr) -ForegroundColor Yellow
 
     if ($changelog.Count -gt 0) {
         Write-Host "  -------------------------------------------------------" -ForegroundColor Cyan
-        Write-Host "     NOVEDADES Y CAMBIOS: " -ForegroundColor Magenta
+        Write-Host (Get-AIOString 'updater.changelog_header') -ForegroundColor Magenta
         
         # 1. Obtener el ancho dinámico de la ventana para adaptar el texto 
         $consoleWidth = if ($Host.UI.RawUI.WindowSize.Width -gt 20) { $Host.UI.RawUI.WindowSize.Width - 4 } else { 80 }
@@ -184,16 +192,16 @@ function Invoke-FullRepoUpdater {
 
     Write-Host "  =======================================================" -ForegroundColor Cyan
 
-    $updateChoice = (Read-Host "`n  [?] Deseas descargar e instalar la actualizacion ahora? (S/N)").ToUpper()
-    if ($updateChoice -ne 'S') {
-        Write-Host "`n  [i] Actualizacion pospuesta por el usuario." -ForegroundColor Gray
+    $updateChoice = (Read-Host (Get-AIOString 'updater.prompt_install')).Trim()
+    if (-not (Test-AIOYesResponse $updateChoice)) {
+        Write-Host (Get-AIOString 'updater.postponed') -ForegroundColor Gray
         Write-Log -LogLevel INFO -Message "UPDATER: Actualizacion a v$remoteVersionStr pospuesta por el usuario. Respuesta: '$updateChoice'."
         Start-Sleep -Seconds 1
         return
     }
 
     Write-Log -LogLevel ACTION -Message "UPDATER: El usuario acepto instalar la version v$remoteVersionStr."
-    Write-Host "`n  [!] Preparando la actualizacion de forma segura..." -ForegroundColor Magenta
+    Write-Host (Get-AIOString 'updater.preparing') -ForegroundColor Magenta
 
     $installPath = $null
     $tempZip = $null
@@ -237,7 +245,7 @@ function Invoke-FullRepoUpdater {
             Remove-Item -LiteralPath $batPath -Force -ErrorAction Stop
         }
 
-        Write-Host "   > Descargando paquete (v$remoteVersionStr)..." -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'updater.downloading' $remoteVersionStr) -ForegroundColor Cyan
         Write-Log -LogLevel ACTION -Message "UPDATER: Descargando paquete v$remoteVersionStr."
         Invoke-WebRequest -Uri $zipUrl -OutFile $tempZip -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
 
@@ -248,7 +256,7 @@ function Invoke-FullRepoUpdater {
         if ($downloadSize -le 0) { throw "El paquete descargado esta vacio." }
         Write-Log -LogLevel INFO -Message "UPDATER: Descarga completada. Tamano: $downloadSize bytes."
 
-        Write-Host "   > Extrayendo archivos..." -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'updater.extracting') -ForegroundColor Cyan
         Write-Log -LogLevel ACTION -Message "UPDATER: Extrayendo paquete en '$tempExtract'."
         Expand-Archive -LiteralPath $tempZip -DestinationPath $tempExtract -Force -ErrorAction Stop
 
@@ -258,7 +266,7 @@ function Invoke-FullRepoUpdater {
         }
         Write-Log -LogLevel INFO -Message "UPDATER: Extraccion completada correctamente."
 
-        Write-Host "   > Generando motor de inyeccion..." -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'updater.generating_installer') -ForegroundColor Cyan
         Write-Log -LogLevel ACTION -Message "UPDATER: Generando instalador diferido '$batPath'."
 
         # ApplyUpdate.cmd continuara despues de que PowerShell termine. Se le pasa
@@ -352,7 +360,7 @@ del "%~f0"
         }
         Write-Log -LogLevel INFO -Message "UPDATER: Instalador diferido generado correctamente."
 
-        Write-Host "`n  [!] El sistema se cerrara para aplicar los cambios." -ForegroundColor Red
+        Write-Host (Get-AIOString 'updater.closing_to_apply') -ForegroundColor Red
         Write-Log -LogLevel ACTION -Message "UPDATER: Lanzando ApplyUpdate.cmd y cerrando la sesion actual para liberar archivos."
         Start-Sleep -Seconds 2
 
@@ -366,7 +374,7 @@ del "%~f0"
         $errorType = $_.Exception.GetType().FullName
         $errorLine = $_.InvocationInfo.ScriptLineNumber
 
-        Write-Host "`n  [ERROR] Fallo la actualizacion: $errorMessage" -ForegroundColor Red
+        Write-Host (Get-AIOString 'core.updater_failed' $errorMessage) -ForegroundColor Red
         Write-Log -LogLevel ERROR -Message "UPDATER: Fallo durante la preparacion de la actualizacion. Error: $errorMessage. Tipo: $errorType. Linea: $errorLine."
 
         if ($tempZip -and (Test-Path -LiteralPath $tempZip)) {
@@ -489,10 +497,10 @@ function Get-UnusedDriveLetter {
 # --- Carga la configuracion desde el archivo JSON ---
 function Load-Config {
     if (Test-Path $script:configFile) {
-        Write-Host "Cargando configuracion desde $script:configFile..." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'config.loading' $script:configFile) -ForegroundColor Gray
         Write-Log -LogLevel INFO -Message "Cargando configuracion desde $script:configFile"
         try {
-            $config = Get-Content -Path $script:configFile | ConvertFrom-Json
+            $config = [System.IO.File]::ReadAllText($script:configFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
             
             if ($config.MountDir) {
                 $Script:MOUNT_DIR = $config.MountDir
@@ -502,8 +510,15 @@ function Load-Config {
                 $Script:Scratch_DIR = $config.ScratchDir
                 Write-Log -LogLevel INFO -Message "Config: Scratch_DIR cargado como '$($Script:Scratch_DIR)'"
             }
+            if ($null -ne $config.PSObject.Properties['Language'] -and -not [string]::IsNullOrWhiteSpace([string]$config.Language)) {
+                $Script:UI_LANGUAGE = [string]$config.Language
+                Write-Log -LogLevel INFO -Message "Config: UI_LANGUAGE cargado como '$($Script:UI_LANGUAGE)'"
+                if (Get-Command -Name Initialize-AIOI18n -ErrorAction SilentlyContinue) {
+                    [void](Initialize-AIOI18n -PreferredLanguage $Script:UI_LANGUAGE)
+                }
+            }
         } catch {
-            Write-Warning "No se pudo leer el archivo de configuracion (JSON invalido o corrupto). Usando valores por defecto."
+            Write-Warning (Get-AIOString 'config.load_warn')
             Write-Log -LogLevel WARN -Message "Fallo al leer/parsear config.json. Error: $($_.Exception.Message)"
         }
     } else {
@@ -519,12 +534,13 @@ function Save-Config {
         $configToSave = @{
             MountDir   = $Script:MOUNT_DIR
             ScratchDir = $Script:Scratch_DIR
+            Language   = if ([string]::IsNullOrWhiteSpace($Script:UI_LANGUAGE)) { 'auto' } else { $Script:UI_LANGUAGE }
         }
         $configToSave | ConvertTo-Json | Set-Content -Path $script:configFile -Encoding utf8
-        Write-Host "[OK] Configuracion guardada." -ForegroundColor Green
+        Write-Host (Get-AIOString 'config.saved_ok') -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "Configuracion guardada en $script:configFile"
     } catch {
-        Write-Host "[ERROR] No se pudo guardar el archivo de configuracion en '$($script:configFile)'."
+        Write-Host (Get-AIOString 'config.save_error' $script:configFile)
         Write-Log -LogLevel ERROR -Message "Fallo al guardar config.json. Error: $($_.Exception.Message)"
         Pause
     }
@@ -537,41 +553,41 @@ function Ensure-WorkingDirectories {
     
     # --- 1. Verificar MOUNT_DIR ---
     if (-not (Test-Path $Script:MOUNT_DIR)) {
-        Write-Warning "El directorio de Montaje (MOUNT_DIR) no existe:"
+        Write-Warning (Get-AIOString 'core.mount_dir_missing')
         Write-Host $Script:MOUNT_DIR -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "   [C] Crearlo automaticamente"
-        Write-Host "   [S] Seleccionar un directorio diferente"
-        Write-Host "   [N] Salir del script"
-        $choice = Read-Host "`nSelecciona una opcion"
+        Write-Host (Get-AIOString 'core.dir_opt_create')
+        Write-Host (Get-AIOString 'core.dir_opt_select')
+        Write-Host (Get-AIOString 'core.dir_opt_exit')
+        $choice = Read-Host ("`n" + (Get-AIOString 'common.select_option'))
         
         switch ($choice.ToUpper()) {
             'C' {
-                Write-Host "[+] Creando directorio '$($Script:MOUNT_DIR)'..." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'core.dir_creating' $Script:MOUNT_DIR) -ForegroundColor Yellow
                 try {
                     New-Item -Path $Script:MOUNT_DIR -ItemType Directory -Force -ErrorAction Stop | Out-Null
-                    Write-Host "[OK] Directorio creado." -ForegroundColor Green
+                    Write-Host (Get-AIOString 'core.dir_created_ok') -ForegroundColor Green
                     Write-Log -LogLevel ACTION -Message "Directorio MOUNT_DIR '$($Script:MOUNT_DIR)' creado automaticamente."
                 } catch {
-                    Write-Host "[ERROR] No se pudo crear el directorio. Error: $($_.Exception.Message)"
+                    Write-Host (Get-AIOString 'core.dir_create_err' $_.Exception.Message)
                     Write-Log -LogLevel ERROR -Message "Fallo al auto-crear MOUNT_DIR. Error: $($_.Exception.Message)"
-                    Read-Host "Presiona Enter para salir."; Release-SingleInstanceMutex; exit
+                    Read-Host (Get-AIOString 'core.press_enter_exit'); Release-SingleInstanceMutex; exit
                 }
             }
             'S' {
-                Write-Host "[+] Selecciona el NUEVO Directorio de Montaje..." -ForegroundColor Yellow
-                $newPath = Select-PathDialog -DialogType Folder -Title "Selecciona el Directorio de Montaje (ej. D:\TEMP)"
+                Write-Host (Get-AIOString 'config.select_new_mount') -ForegroundColor Yellow
+                $newPath = Select-PathDialog -DialogType Folder -Title (Get-AIOString 'config.dialog_mount_title')
                 if (-not [string]::IsNullOrWhiteSpace($newPath)) {
                     $Script:MOUNT_DIR = $newPath
                     Write-Log -LogLevel ACTION -Message "CONFIG: MOUNT_DIR cambiado a '$newPath' (en el inicio)."
                     Save-Config # Guardar la nueva seleccion
                 } else {
-                    Write-Warning "No se selecciono ruta. Saliendo."
-                    Read-Host "Presiona Enter para salir."; Release-SingleInstanceMutex; exit
+                    Write-Warning (Get-AIOString 'core.dir_no_path_exit')
+                    Read-Host (Get-AIOString 'core.press_enter_exit'); Release-SingleInstanceMutex; exit
                 }
             }
             default {
-                Write-Host "Operacion cancelada por el usuario. Saliendo."
+                Write-Host (Get-AIOString 'core.dir_cancelled_exit')
                 Write-Log -LogLevel INFO -Message "Usuario cancelo en la verificacion de directorios."
                 Release-SingleInstanceMutex
                 exit
@@ -581,41 +597,41 @@ function Ensure-WorkingDirectories {
 
     # --- 2. Verificar Scratch_DIR ---
     if (-not (Test-Path $Script:Scratch_DIR)) {
-        Write-Warning "El directorio Temporal (Scratch_DIR) no existe:"
+        Write-Warning (Get-AIOString 'core.scratch_dir_missing')
         Write-Host $Script:Scratch_DIR -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "   [C] Crearlo automaticamente"
-        Write-Host "   [S] Seleccionar un directorio diferente (se guardara permanentemente)"
-        Write-Host "   [N] Salir del script"
-        $choice = Read-Host "`nSelecciona una opcion"
+        Write-Host (Get-AIOString 'core.dir_opt_create')
+        Write-Host (Get-AIOString 'core.dir_opt_select_perm')
+        Write-Host (Get-AIOString 'core.dir_opt_exit')
+        $choice = Read-Host ("`n" + (Get-AIOString 'common.select_option'))
         
         switch ($choice.ToUpper()) {
             'C' {
-                Write-Host "[+] Creando directorio '$($Script:Scratch_DIR)'..." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'core.dir_creating' $Script:Scratch_DIR) -ForegroundColor Yellow
                 try {
                     New-Item -Path $Script:Scratch_DIR -ItemType Directory -Force -ErrorAction Stop | Out-Null
-                    Write-Host "[OK] Directorio creado." -ForegroundColor Green
+                    Write-Host (Get-AIOString 'core.dir_created_ok') -ForegroundColor Green
                     Write-Log -LogLevel ACTION -Message "Directorio Scratch_DIR '$($Script:Scratch_DIR)' creado automaticamente."
                 } catch {
-                    Write-Host "[ERROR] No se pudo crear el directorio. Error: $($_.Exception.Message)"
+                    Write-Host (Get-AIOString 'core.dir_create_err' $_.Exception.Message)
                     Write-Log -LogLevel ERROR -Message "Fallo al auto-crear Scratch_DIR. Error: $($_.Exception.Message)"
-                    Read-Host "Presiona Enter para salir."; Release-SingleInstanceMutex; exit
+                    Read-Host (Get-AIOString 'core.press_enter_exit'); Release-SingleInstanceMutex; exit
                 }
             }
             'S' {
-                Write-Host "[+] Selecciona el NUEVO Directorio Temporal (Scratch)..." -ForegroundColor Yellow
-                $newPath = Select-PathDialog -DialogType Folder -Title "Selecciona el Directorio Temporal (ej. D:\Scratch)"
+                Write-Host (Get-AIOString 'config.select_new_scratch') -ForegroundColor Yellow
+                $newPath = Select-PathDialog -DialogType Folder -Title (Get-AIOString 'config.dialog_scratch_title')
                 if (-not [string]::IsNullOrWhiteSpace($newPath)) {
                     $Script:Scratch_DIR = $newPath
                     Write-Log -LogLevel ACTION -Message "CONFIG: Scratch_DIR cambiado a '$newPath' (en el inicio)."
                     Save-Config # Guardar la nueva seleccion
                 } else {
-                    Write-Warning "No se selecciono ruta. Saliendo."
-                    Read-Host "Presiona Enter para salir."; Release-SingleInstanceMutex; exit
+                    Write-Warning (Get-AIOString 'core.dir_no_path_exit')
+                    Read-Host (Get-AIOString 'core.press_enter_exit'); Release-SingleInstanceMutex; exit
                 }
             }
             default {
-                Write-Host "Operacion cancelada por el usuario. Saliendo."
+                Write-Host (Get-AIOString 'core.dir_cancelled_exit')
                 Write-Log -LogLevel INFO -Message "Usuario cancelo en la verificacion de directorios."
                 Release-SingleInstanceMutex
                 exit
@@ -636,7 +652,7 @@ function Initialize-ScratchSpace {
         }
         Write-Log -LogLevel INFO -Message "Scratch_DIR disponible. Se conserva el contenido existente: '$Script:Scratch_DIR'."
     } catch {
-        Write-Warning "No se pudo preparar Scratch_DIR: $($_.Exception.Message)"
+        Write-Warning (Get-AIOString 'core.scratch_prep_warn' $_.Exception.Message)
         Write-Log -LogLevel ERROR -Message "Fallo al preparar Scratch_DIR: $($_.Exception.Message)"
     }
 }
@@ -645,9 +661,9 @@ function Initialize-ScratchSpace {
 #  Verificacion de Permisos de Administrador
 # =================================================================
 if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Warning "Este script necesita ser ejecutado como Administrador."
-    Write-Host "Por favor, cierra esta ventana, haz clic derecho en el archivo del script y selecciona 'Ejecutar como Administrador'."
-    Read-Host "Presiona Enter para salir."
+    Write-Warning (Get-AIOString 'core.admin_req_warn')
+    Write-Host (Get-AIOString 'core.admin_req_hint')
+    Read-Host (Get-AIOString 'core.press_enter_exit')
     exit
 }
 
@@ -673,10 +689,10 @@ catch {
     Release-SingleInstanceMutex
     # No cambiar a Local ni continuar sin bloqueo: seria una instancia sin
     # coordinacion con las que ya adquirieron el mutex global.
-    Write-Host "`n[ERROR] No se pudo adquirir el bloqueo global de instancia unica." -ForegroundColor Red
-    Write-Host "El programa no continuara para proteger las imagenes y las colmenas offline." -ForegroundColor Yellow
-    Write-Host "Detalle: $mutexError" -ForegroundColor Gray
-    Read-Host "Presiona Enter para salir."
+    Write-Host (Get-AIOString 'core.mutex_acquire_err') -ForegroundColor Red
+    Write-Host (Get-AIOString 'core.mutex_protect_hint') -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'core.detail_fmt' $mutexError) -ForegroundColor Gray
+    Read-Host (Get-AIOString 'core.press_enter_exit')
     exit 1
 }
 
@@ -686,15 +702,15 @@ if (-not $Script:SingleInstanceMutexOwned) {
     try { [System.Console]::Beep(400, 250) } catch {}
     Write-Host ""
     Write-Host "  =======================================================" -ForegroundColor Red
-    Write-Host "           ¡INSTANCIA EN EJECUCION DETECTADA!            " -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'startup.single_instance_title') -ForegroundColor Yellow
     Write-Host "  =======================================================" -ForegroundColor Red
-    Write-Host "  AdminImagenOffline ya se encuentra abierto en otra ventana." -ForegroundColor White
-    Write-Host "  Para proteger las imagenes montadas (DISM) y las colmenas" -ForegroundColor Gray
-    Write-Host "  del Registro offline, no se permiten instancias simultaneas." -ForegroundColor Gray
+    Write-Host (Get-AIOString 'startup.single_instance_line1') -ForegroundColor White
+    Write-Host (Get-AIOString 'startup.single_instance_line2') -ForegroundColor Gray
+    Write-Host (Get-AIOString 'startup.single_instance_line3') -ForegroundColor Gray
     Write-Host ""
 
     for ($sec = 3; $sec -ge 1; $sec--) {
-        Write-Host ("`r  [!] Esta ventana se cerrara automaticamente en {0} segundo(s)... " -f $sec) -NoNewline -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'startup.single_instance_countdown' $sec) -NoNewline -ForegroundColor Cyan
         Start-Sleep -Seconds 1
     }
     Write-Host ""
@@ -754,14 +770,14 @@ try {
         # Si ya tienes declarada la funcion Write-Log en este punto, puedes descomentar la siguiente linea:
         # Write-Log -LogLevel INFO -Message "Soporte para rutas largas (Long Paths) preexistente y verificado."
     } else {
-        Write-Host " -> [-] Habilitando soporte para rutas largas en el Registro..." -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'startup.longpaths_enabling') -ForegroundColor Yellow
         Set-ItemProperty -Path $regPath -Name $name -Value 1 -Type DWord -Force -ErrorAction Stop
-        Write-Host " -> [OK] Soporte habilitado exitosamente." -ForegroundColor Green
+        Write-Host (Get-AIOString 'startup.longpaths_enabled') -ForegroundColor Green
         # Write-Log -LogLevel ACTION -Message "Soporte para rutas largas (Long Paths) habilitado dinamicamente."
     }
 } catch {
-    Write-Warning "No se pudo comprobar o habilitar el soporte para rutas largas de forma automatica."
-    Write-Host "Asegurate de que tu directorio temporal (Scratch_DIR) tenga una ruta muy corta (ej. C:\S) para evitar errores de extraccion con DISM." -ForegroundColor Yellow
+    Write-Warning (Get-AIOString 'startup.longpaths_warn')
+    Write-Host (Get-AIOString 'startup.longpaths_hint') -ForegroundColor Yellow
     # Write-Log -LogLevel ERROR -Message "Fallo al comprobar/habilitar LongPathsEnabled: $($_.Exception.Message)"
 }
 
@@ -787,7 +803,7 @@ try {
         
         # Si supera el límite, rotamos el archivo antes de iniciar la sesión
         if ($logItem.Length -gt ($maxLogSizeMB * 1MB)) {
-            Write-Host "Realizando mantenimiento del archivo de Log..." -ForegroundColor Gray
+            Write-Host (Get-AIOString 'startup.log_maintenance') -ForegroundColor Gray
             $oldLogFile = Join-Path -Path $script:logDir -ChildPath "Registro_old.log"
             
             # Sobrescribe el backup viejo con el log gigante actual y empieza uno nuevo
@@ -795,7 +811,7 @@ try {
         }
     }
 } catch {
-    Write-Warning "No se pudo crear el directorio de Logs. El registro de eventos se desactivará. Error: $_"
+    Write-Warning (Get-AIOString 'startup.log_dir_warn' $_)
     $script:logFile = $null
 }
 
@@ -820,7 +836,8 @@ $script:configFile = Join-Path $parentDir "config.json"
 # --- Inicializar variables globales con los valores por defecto ---
 $Script:WIM_FILE_PATH = $null
 $Script:MOUNT_DIR = $defaultMountDir
-$Script:Scratch_DIR = $defaultScratchDir 
+$Script:Scratch_DIR = $defaultScratchDir
+$Script:UI_LANGUAGE = 'auto'
 $Script:IMAGE_MOUNTED = 0
 $Script:MOUNTED_INDEX = $null
 $Script:CachedControlSet = $null
@@ -874,16 +891,16 @@ foreach ($modulo in $modulosACargar) {
 Write-Log -LogLevel INFO -Message "Modulos funcionales: $modulosCargados cargados | $($script:ModulosFallidos.Count) fallidos | $($modulosOmitidos.Count) omitidos."
 
 if ($modulosOmitidos.Count -gt 0) {
-    Write-Host "`n[ADVERTENCIA] Se omitieron $($modulosOmitidos.Count) archivo(s) por parecer copias duplicadas:" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'startup.modules_duplicates_warn' $modulosOmitidos.Count) -ForegroundColor Yellow
     foreach ($nombreOmitido in $modulosOmitidos) { Write-Host "  - $nombreOmitido" -ForegroundColor Yellow }
-    Write-Host "Revisa cual es la version correcta y elimina las demas manualmente.`n" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'startup.modules_duplicates_hint') -ForegroundColor Yellow
     Start-Sleep -Seconds 2
 }
 
 if ($script:ModulosFallidos.Count -gt 0) {
-    Write-Host "`n[ADVERTENCIA] $($script:ModulosFallidos.Count) modulo(s) no se cargaron correctamente:" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'startup.modules_failed_warn' $script:ModulosFallidos.Count) -ForegroundColor Yellow
     foreach ($nombreModulo in $script:ModulosFallidos) { Write-Host "  - $nombreModulo" -ForegroundColor Yellow }
-    Write-Host "Revisa Registro.log para mas detalles. Las opciones de esos modulos no estaran disponibles.`n" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'startup.modules_failed_hint') -ForegroundColor Yellow
     Start-Sleep -Seconds 2
 }
 
@@ -926,7 +943,7 @@ function Select-PathDialog {
             }
         }
     } catch {
-        Write-Host "No se pudo mostrar el dialogo de seleccion. Error: $($_.Exception.Message)"
+        Write-Host (Get-AIOString 'core.dialog_open_err' $_.Exception.Message)
         Write-Log -LogLevel ERROR -Message "Fallo al mostrar dialogo ABRIR: $($_.Exception.Message)"
     }
 
@@ -954,7 +971,7 @@ function Select-SavePathDialog {
             return $dialog.FileName
         }
     } catch {
-        Write-Host "No se pudo mostrar el dialogo de guardado. Error: $($_.Exception.Message)"
+        Write-Host (Get-AIOString 'core.dialog_save_err' $_.Exception.Message)
         Write-Log -LogLevel ERROR -Message "Fallo al mostrar dialogo GUARDAR: $($_.Exception.Message)"
     }
 
@@ -1011,53 +1028,63 @@ function Show-ConfigMenu {
     while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "             Configuracion de Rutas de Trabajo         " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'config.menu_title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "Estas rutas se guardaran permanentemente."
+        Write-Host (Get-AIOString 'config.menu_subtitle')
         Write-Host ""
-        Write-Host "   [1] Directorio de Montaje (MOUNT_DIR)"
-        Write-Host "       Ruta actual: " -NoNewline; Write-Host $Script:MOUNT_DIR -ForegroundColor Yellow
-        Write-Host "       (Donde se montara la imagen WIM para edicion)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'config.opt_mount_dir')
+        Write-Host (Get-AIOString 'config.current_path') -NoNewline; Write-Host $Script:MOUNT_DIR -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'config.opt_mount_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Directorio Temporal (Scratch_DIR)"
-        Write-Host "       Ruta actual: " -NoNewline; Write-Host $Script:Scratch_DIR -ForegroundColor Yellow
-        Write-Host "       (Usado por DISM para operaciones de limpieza)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'config.opt_scratch_dir')
+        Write-Host (Get-AIOString 'config.current_path') -NoNewline; Write-Host $Script:Scratch_DIR -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'config.opt_scratch_desc') -ForegroundColor Gray
+        Write-Host ""
+        Write-Host (Get-AIOString 'config.opt_language')
+        Write-Host (Get-AIOString 'config.current_language') -NoNewline; Write-Host (Get-AIOLanguageDisplaySummary) -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'config.opt_language_desc') -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
-        Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
         Write-Host ""
-        $opcionC = Read-MenuOption "Selecciona una opcion"
+        $opcionC = Read-MenuOption (Get-AIOString 'common.select_option')
 
         switch ($opcionC.ToUpper()) {
             "1" {
-                Write-Host "`n[+] Selecciona el NUEVO Directorio de Montaje..." -ForegroundColor Yellow
-                $newPath = Select-PathDialog -DialogType Folder -Title "Selecciona el Directorio de Montaje (ej. D:\TEMP)"
+                Write-Host (Get-AIOString 'config.select_new_mount') -ForegroundColor Yellow
+                $newPath = Select-PathDialog -DialogType Folder -Title (Get-AIOString 'config.dialog_mount_title')
                 if (-not [string]::IsNullOrWhiteSpace($newPath)) {
                     $Script:MOUNT_DIR = $newPath
                     Write-Log -LogLevel ACTION -Message "CONFIG: MOUNT_DIR cambiado a '$newPath'"
                     Save-Config
                 } else {
-                    Write-Warning "Operacion cancelada. No se realizaron cambios."
+                    Write-Warning (Get-AIOString 'common.operation_cancelled_no_changes')
                 }
                 Pause
             }
             "2" {
-                Write-Host "`n[+] Selecciona el NUEVO Directorio Temporal (Scratch)..." -ForegroundColor Yellow
-                $newPath = Select-PathDialog -DialogType Folder -Title "Selecciona el Directorio Temporal (ej. D:\Scratch)"
+                Write-Host (Get-AIOString 'config.select_new_scratch') -ForegroundColor Yellow
+                $newPath = Select-PathDialog -DialogType Folder -Title (Get-AIOString 'config.dialog_scratch_title')
                 if (-not [string]::IsNullOrWhiteSpace($newPath)) {
                     $Script:Scratch_DIR = $newPath
                     Write-Log -LogLevel ACTION -Message "CONFIG: Scratch_DIR cambiado a '$newPath'"
                     Save-Config
                 } else {
-                    Write-Warning "Operacion cancelada. No se realizaron cambios."
+                    Write-Warning (Get-AIOString 'common.operation_cancelled_no_changes')
                 }
                 Pause
+            }
+            "3" {
+                if (Show-AIOLanguageSelector) {
+                    Save-Config
+                    Start-Sleep -Seconds 1
+                }
             }
             "V" {
                 return
             }
-            default { Write-Warning "Opcion no valida."; Start-Sleep 1 }
+            default { Write-Warning (Get-AIOString 'common.invalid_option'); Start-Sleep 1 }
         }
     }
 }
@@ -1066,47 +1093,47 @@ function Mount-Save-Menu {
     while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "         Ciclo de Vida de la Imagen (Montaje/Guardado) " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.mount_save.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host " [ MONTAJE ]" -ForegroundColor Yellow
-        Write-Host "   [1] Montar Imagen"
-        Write-Host "       (Carga un .wim o .vhd/vhdx en $Script:MOUNT_DIR)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.mount_save.sec_mount') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'menu.mount_save.opt1')
+        Write-Host (Get-AIOString 'menu.mount_save.opt1_desc' $Script:MOUNT_DIR) -ForegroundColor Gray
         Write-Host ""
         if ($Script:IMAGE_MOUNTED -eq 1) {
-            Write-Host "   [2] Recargar WIM (descartar cambios del montaje)"
-			Write-Host ""
+            Write-Host (Get-AIOString 'menu.mount_save.opt2')
+            Write-Host ""
         }
         if ($Script:IMAGE_MOUNTED -gt 0) {
-            Write-Host " [ GUARDADO ]" -ForegroundColor Yellow
-            Write-Host "   [3] Guardar cambios en el Indice actual ($($Script:MOUNTED_INDEX))"
-            Write-Host "       (Sobrescribe el indice actual, sin desmontar)" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'menu.mount_save.sec_save') -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'menu.mount_save.opt3' $Script:MOUNTED_INDEX)
+            Write-Host (Get-AIOString 'menu.mount_save.opt3_desc') -ForegroundColor Gray
             Write-Host ""
-            Write-Host "   [4] Guardar cambios en un nuevo Indice (Append)"
-            Write-Host "       (Agrega un nuevo indice al final, sin desmontar)" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'menu.mount_save.opt4')
+            Write-Host (Get-AIOString 'menu.mount_save.opt4_desc') -ForegroundColor Gray
             Write-Host ""
-            Write-Host "   [5] Guardar en un NUEVO archivo WIM (Save As...)" -ForegroundColor Green
-            Write-Host "       (Crea un archivo .wim nuevo sin tocar el original)" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'menu.mount_save.opt5') -ForegroundColor Green
+            Write-Host (Get-AIOString 'menu.mount_save.opt5_desc') -ForegroundColor Gray
             Write-Host ""
-            Write-Host " [ DESMONTAJE ]" -ForegroundColor Yellow
-            Write-Host "   [6] Guardar y Desmontar Imagen (Commit)" -ForegroundColor Green
-            Write-Host "       (Guarda todos los cambios y luego descarga la imagen)" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'menu.mount_save.sec_unmount') -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'menu.mount_save.opt6') -ForegroundColor Green
+            Write-Host (Get-AIOString 'menu.mount_save.opt6_desc') -ForegroundColor Gray
             Write-Host ""
-            Write-Host "   [7] Desmontar Imagen (Descartar Cambios)"
-            Write-Host "       (Descarga la imagen. Cambios no guardados se pierden!)" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'menu.mount_save.opt7')
+            Write-Host (Get-AIOString 'menu.mount_save.opt7_desc') -ForegroundColor Gray
             Write-Host ""
         }
-        Write-Host "   [L] Limpiar montajes invalidos de DISM" -ForegroundColor Yellow
-        Write-Host "       (Recursos corruptos no recuperables)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.mount_save.opt_clean') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'menu.mount_save.opt_clean_desc') -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
-        Write-Host "   [V] Volver al menu anterior" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_previous') -ForegroundColor Red
         Write-Host ""
-        $opcionMS = Read-MenuOption "Selecciona una opcion"
+        $opcionMS = Read-MenuOption (Get-AIOString 'common.select_option')
 
         if ($opcionMS.ToUpper() -in @("3","4","5","6","7") -and $Script:IMAGE_MOUNTED -eq 0) {
-            Write-Warning "No hay imagen montada para guardar/desmontar."
+            Write-Warning (Get-AIOString 'menu.mount_save.not_mounted_warn')
             Pause
             continue
         }
@@ -1155,7 +1182,7 @@ function Mount-Save-Menu {
                 return
             }
             default {
-                Write-Warning "Opcion no valida."
+                Write-Warning (Get-AIOString 'common.invalid_option')
                 Start-Sleep 1
             }
         }
@@ -1166,23 +1193,23 @@ function Edit-Indexes-Menu {
      while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "                  Editar Indices del WIM               " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.edit_indexes.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "   [1] Exportar un Indice"
-        Write-Host "       (Crea un nuevo WIM solo con el indice seleccionado)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.edit_indexes.opt1')
+        Write-Host (Get-AIOString 'menu.edit_indexes.opt1_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Eliminar un Indice"
-        Write-Host "       (Borra permanentemente un indice del WIM)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.edit_indexes.opt2')
+        Write-Host (Get-AIOString 'menu.edit_indexes.opt2_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [3] Integrar y ordenar indices"
-        Write-Host "       (Combina fuentes WIM/ESD y define el orden del nuevo WIM)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.edit_indexes.opt3')
+        Write-Host (Get-AIOString 'menu.edit_indexes.opt3_desc') -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
-        Write-Host "   [V] Volver al menu anterior" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_previous') -ForegroundColor Red
         Write-Host ""
-        $opcionEI = Read-MenuOption "Selecciona una opcion"
+        $opcionEI = Read-MenuOption (Get-AIOString 'common.select_option')
                 
         switch ($opcionEI.ToUpper()) {
             "1" { 
@@ -1201,7 +1228,7 @@ function Edit-Indexes-Menu {
                 return 
             }
             default { 
-                Write-Warning "Opcion no valida."
+                Write-Warning (Get-AIOString 'common.invalid_option')
                 Start-Sleep 1 
             }
         }
@@ -1212,31 +1239,31 @@ function Convert-Image-Menu {
     while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "              Convertir Formato de Imagen               " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.convert.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "   IMAGENES WIM / ESD" -ForegroundColor Yellow
-        Write-Host "   [1] Convertir WIM a ESD"
-        Write-Host "       Comprime los indices seleccionados en un archivo ESD." -ForegroundColor Gray
-        Write-Host "   [2] Convertir ESD a WIM"
-        Write-Host "       Exporta los indices seleccionados de un ESD a WIM." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.convert.sec_wim_esd') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'menu.convert.opt1')
+        Write-Host (Get-AIOString 'menu.convert.opt1_desc') -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.convert.opt2')
+        Write-Host (Get-AIOString 'menu.convert.opt2_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   ARCHIVOS DIVIDIDOS SWM" -ForegroundColor Yellow
-        Write-Host "   [3] Dividir WIM/ESD en SWM"
-        Write-Host "       Divide la imagen en partes del tamano que elijas." -ForegroundColor Gray
-        Write-Host "   [4] Reunir SWM en WIM"
-        Write-Host "       Reune las partes SWM y exporta sus indices a WIM." -ForegroundColor Gray
-        Write-Host "   [5] Reunir SWM en ESD"
-        Write-Host "       Reune las partes SWM y exporta sus indices a ESD." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.convert.sec_swm') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'menu.convert.opt3')
+        Write-Host (Get-AIOString 'menu.convert.opt3_desc') -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.convert.opt4')
+        Write-Host (Get-AIOString 'menu.convert.opt4_desc') -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.convert.opt5')
+        Write-Host (Get-AIOString 'menu.convert.opt5_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   DISCOS VIRTUALES" -ForegroundColor Yellow
-        Write-Host "   [6] Convertir VHD/VHDX a WIM"
-        Write-Host "       Captura la particion Windows del disco virtual en WIM." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.convert.sec_vhd') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'menu.convert.opt6')
+        Write-Host (Get-AIOString 'menu.convert.opt6_desc') -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
-        Write-Host "   [V] Volver al menu anterior" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_previous') -ForegroundColor Red
         Write-Host ""
-        $opcionCI = Read-MenuOption "Selecciona una opcion"
+        $opcionCI = Read-MenuOption (Get-AIOString 'common.select_option')
 
         switch ($opcionCI.ToUpper()) {
             "1" {
@@ -1256,7 +1283,7 @@ function Convert-Image-Menu {
             }
             "V" { return }
             default {
-                Write-Warning "Opcion no valida."
+                Write-Warning (Get-AIOString 'common.invalid_option')
                 Start-Sleep 1
             }
         }
@@ -1267,23 +1294,23 @@ function Image-Management-Menu {
      while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "                  Gestion de Imagen                    " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.image_mgmt.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "   [1] Montar / Guardar / Desmontar Imagen" -ForegroundColor White
-        Write-Host "       (Ciclo de vida completo del montaje)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.image_mgmt.opt1') -ForegroundColor White
+        Write-Host (Get-AIOString 'menu.image_mgmt.opt1_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Editar Info/Metadatos (Nombre, Descripcion, etc..)" -ForegroundColor Green
-        Write-Host "       (Cambia el nombre que aparece al instalar Windows)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.image_mgmt.opt2') -ForegroundColor Green
+        Write-Host (Get-AIOString 'menu.image_mgmt.opt2_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [3] Editar Indices (Exportar/Eliminar/Integrar)" -ForegroundColor White
-        Write-Host "       (Gestiona los indices dentro de un .wim)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.image_mgmt.opt3') -ForegroundColor White
+        Write-Host (Get-AIOString 'menu.image_mgmt.opt3_desc') -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         Write-Host ""
-        Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
         Write-Host ""
-        $opcionIM = Read-MenuOption "Selecciona una opcion"
+        $opcionIM = Read-MenuOption (Get-AIOString 'common.select_option')
 
         switch ($opcionIM.ToUpper()) {
             "1" {
@@ -1304,7 +1331,7 @@ function Image-Management-Menu {
                 return
             }
             default {
-                Write-Warning "Opcion no valida."
+                Write-Warning (Get-AIOString 'common.invalid_option')
                 Start-Sleep 1
             }
         }
@@ -1314,7 +1341,7 @@ function Image-Management-Menu {
 function Cambio-Edicion-Menu {
     Clear-Host
     if ($Script:IMAGE_MOUNTED -eq 0) {
-        Write-Warning "Necesita montar imagen primero."
+        Write-Warning (Get-AIOString 'common.mount_required_short')
         Pause
         return
     }
@@ -1327,7 +1354,7 @@ function Cambio-Edicion-Menu {
     if (Test-Path $editionsFile) { 
         . $editionsFile 
     } else { 
-        Write-Warning "No se encontró el catálogo de Ediciones. Se usarán los nombres crudos."
+        Write-Warning (Get-AIOString 'edition.catalog_missing_warn')
         Start-Sleep -Seconds 2
     }
 
@@ -1344,29 +1371,29 @@ function Cambio-Edicion-Menu {
     if ($Script:IMAGE_MOUNTED -eq 2) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Red
-        Write-Host "            ! ADVERTENCIA DE SEGURIDAD (VHD) !         " -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'edition.vhd_warn_title') -ForegroundColor Yellow
         Write-Host "=======================================================" -ForegroundColor Red
         Write-Host ""
-        Write-Host "Estas a punto de cambiar la edicion en un DISCO VIRTUAL (VHD/VHDX)." -ForegroundColor White
-        Write-Host "A diferencia de los archivos WIM, los cambios en VHD afectan al disco inmediatamente." -ForegroundColor Gray
+        Write-Host (Get-AIOString 'edition.vhd_warn_l1') -ForegroundColor White
+        Write-Host (Get-AIOString 'edition.vhd_warn_l2') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "RIESGOS:" -ForegroundColor Red
-        Write-Host " * Si el proceso se interrumpe, el VHD podria quedar corrupto (BSOD)."
-        Write-Host " * El cambio de edicion (ej. Home -> Pro) es generalmente IRREVERSIBLE."
-        Write-Host " * Asegurate de tener una COPIA DE SEGURIDAD del archivo .vhdx antes de seguir."
+        Write-Host (Get-AIOString 'edition.vhd_risks_hdr') -ForegroundColor Red
+        Write-Host (Get-AIOString 'edition.vhd_risk1')
+        Write-Host (Get-AIOString 'edition.vhd_risk2')
+        Write-Host (Get-AIOString 'edition.vhd_risk3')
         Write-Host ""
         Write-Host "-------------------------------------------------------"
         
-        $confirmVHD = Read-Host "Escribe 'CONFIRMAR' para asumir el riesgo y continuar"
+        $confirmVHD = Read-Host (Get-AIOString 'edition.vhd_confirm_prompt')
         if ($confirmVHD.ToUpper() -ne 'CONFIRMAR') {
-            Write-Warning "Operacion cancelada por seguridad."
+            Write-Warning (Get-AIOString 'edition.vhd_cancelled_sec')
             Start-Sleep -Seconds 2
             return
         }
         Clear-Host
     }
     
-    Write-Host "[+] Obteniendo info de version/edicion..." -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'edition.reading_info') -ForegroundColor Yellow
     Write-Log -LogLevel INFO -Message "CAMBIO_EDICION: Obteniendo info..."
 
     $WIN_PRODUCT_NAME = $null
@@ -1398,7 +1425,7 @@ function Cambio-Edicion-Menu {
             $dismEdition = dism /Image:$Script:MOUNT_DIR /Get-CurrentEdition /English 2>$null
             $currentEditionLine = $dismEdition | Select-String -Pattern "(Current Edition|Edici.n actual)\s*:"
             if ($currentEditionLine) { $CURRENT_EDITION_DETECTED = ($currentEditionLine.Line -split ':', 2)[1].Trim() }
-        } catch { Write-Warning "No se pudo obtener la edicion actual via DISM." }
+        } catch { Write-Warning (Get-AIOString 'edition.current_err') }
     }
 
     # Traducir nombre de la edición actual usando el catálogo
@@ -1409,13 +1436,13 @@ function Cambio-Edicion-Menu {
 
     Clear-Host
     Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host "               Cambiar Edicion de Windows                " -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'edition.menu_title') -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host "  Imagen: $Script:MOUNT_DIR" -ForegroundColor Gray
-    Write-Host "    SO Actual : $WIN_VERSION_FRIENDLY" -ForegroundColor Gray
-    Write-Host "    Edicion   : $DISPLAY_EDITION" -ForegroundColor Gray
+    Write-Host (Get-AIOString 'edition.lbl_image' $Script:MOUNT_DIR) -ForegroundColor Gray
+    Write-Host (Get-AIOString 'edition.lbl_os' $WIN_VERSION_FRIENDLY) -ForegroundColor Gray
+    Write-Host (Get-AIOString 'edition.lbl_edition' $DISPLAY_EDITION) -ForegroundColor Gray
     Write-Host ""
-    Write-Host "--- Ediciones de Destino Disponibles ---" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'edition.targets_hdr') -ForegroundColor Yellow
     Write-Host ""
 
     $targetEditions = @()
@@ -1427,17 +1454,17 @@ function Cambio-Edicion-Menu {
         }
     } catch { 
         Write-Host ""
-        Write-Warning "No se pudieron obtener las ediciones de destino."
+        Write-Warning (Get-AIOString 'edition.targets_err')
     }
 
     # Validacion: Si es null o tiene 0 elementos
     if ($null -eq $targetEditions -or $targetEditions.Count -eq 0) {
         Write-Host ""
-        Write-Warning "No se encontraron ediciones de destino compatibles para esta imagen."
-        Write-Host "Causas posibles:" -ForegroundColor Gray
-        Write-Host " 1. La imagen ya es la edicion mas alta (ej. Enterprise)." -ForegroundColor Gray
-        Write-Host " 2. La imagen no admite upgrades (ej. algunas versiones VL)." -ForegroundColor Gray
-        Write-Host " 3. Error interno de DISM al leer los metadatos." -ForegroundColor Gray
+        Write-Warning (Get-AIOString 'edition.no_targets')
+        Write-Host (Get-AIOString 'edition.causes_hdr') -ForegroundColor Gray
+        Write-Host (Get-AIOString 'edition.cause1') -ForegroundColor Gray
+        Write-Host (Get-AIOString 'edition.cause2') -ForegroundColor Gray
+        Write-Host (Get-AIOString 'edition.cause3') -ForegroundColor Gray
         Pause
         return
     }
@@ -1483,23 +1510,23 @@ function Cambio-Edicion-Menu {
     Write-Host ""
     Write-Host "-------------------------------------------------------"
     Write-Host ""
-    Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
+    Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
     Write-Host ""
-    $opcionEdicion = Read-MenuOption "Seleccione la edicion a la que desea cambiar (1-$($targetEditions.Count)) o V"
+    $opcionEdicion = Read-MenuOption (Get-AIOString 'edition.select_prompt' $targetEditions.Count)
 
     if ($opcionEdicion.ToUpper() -eq "V") { return }
 
     $opcionIndex = 0
     if (-not [int]::TryParse($opcionEdicion, [ref]$opcionIndex) -or $opcionIndex -lt 1 -or $opcionIndex -gt $targetEditions.Count) {
-        Write-Warning "Opcion no valida."
+        Write-Warning (Get-AIOString 'common.invalid_option')
         Pause
         return
     }
 
     $selectedEdition = $targetEditions[$opcionIndex - 1] 
 
-    Write-Host "[+] Cambiando la edicion de $DISPLAY_EDITION a: $selectedEdition" -ForegroundColor Yellow
-    Write-Host "Esta operacion puede tardar varios minutos. Por favor, espere..." -ForegroundColor Gray
+    Write-Host (Get-AIOString 'edition.changing_to' $DISPLAY_EDITION $selectedEdition) -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'edition.wait_minutes') -ForegroundColor Gray
     Write-Log -LogLevel ACTION -Message "CAMBIO_EDICION: Cambiando edicion de '$DISPLAY_EDITION' a '$selectedEdition'."
 
     dism /Image:$Script:MOUNT_DIR /Set-Edition:$selectedEdition
@@ -1507,9 +1534,9 @@ function Cambio-Edicion-Menu {
         if (-not [string]::Equals([string]$selectedEdition, [string]$CURRENT_EDITION_DETECTED, [StringComparison]::OrdinalIgnoreCase)) {
             $Script:ForceMenuRefresh = $true
         }
-        Write-Host "[OK] Proceso de cambio de edicion finalizado." -ForegroundColor Green
+        Write-Host (Get-AIOString 'edition.done_ok') -ForegroundColor Green
     } else {
-        Write-Host "[ERROR] Fallo el cambio de edicion (Codigo: $LASTEXITCODE)."
+        Write-Host (Get-AIOString 'edition.failed' $LASTEXITCODE)
         Write-Log -LogLevel ERROR -Message "Fallo cambio edicion. Codigo: $LASTEXITCODE"
     }
     Pause
@@ -1518,22 +1545,22 @@ function Cambio-Edicion-Menu {
 function Drivers-Menu {
     while ($true) {
         Clear-Host
-        if ($Script:IMAGE_MOUNTED -eq 0) { Write-Warning "Necesita montar imagen primero."; Pause; return }
+        if ($Script:IMAGE_MOUNTED -eq 0) { Write-Warning (Get-AIOString 'common.mount_required_short'); Pause; return }
         
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "             Gestion de Drivers (Offline)              " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.drivers.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "   [1] Inyectar Drivers (Instalacion Inteligente)"
-        Write-Host "       (GUI: Compara carpeta local vs imagen)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.drivers.opt1')
+        Write-Host (Get-AIOString 'menu.drivers.opt1_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Desinstalar Drivers"
-        Write-Host "       (GUI: Lista drivers instalados y permite borrarlos)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.drivers.opt2')
+        Write-Host (Get-AIOString 'menu.drivers.opt2_desc') -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
-        Write-Host "   [V] Volver" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_short') -ForegroundColor Red
         
-        $opcionD = Read-MenuOption "`nSelecciona una opcion"
+        $opcionD = Read-MenuOption ("`n" + (Get-AIOString 'common.select_option'))
         
         switch ($opcionD.ToUpper()) {
             "1" { 
@@ -1542,7 +1569,7 @@ function Drivers-Menu {
                     Show-Drivers-GUI 
                 } else { 
                     Write-Log -LogLevel WARN -Message "MenuDrivers: Intento de acceso a inyeccion denegado. No hay ninguna imagen montada."
-                    Write-Warning "Monta una imagen primero."
+                    Write-Warning (Get-AIOString 'common.mount_required_first')
                     Pause 
                 } 
             }
@@ -1552,7 +1579,7 @@ function Drivers-Menu {
                     Show-Uninstall-Drivers-GUI 
                 } else { 
                     Write-Log -LogLevel WARN -Message "MenuDrivers: Intento de acceso a eliminacion denegado. No hay ninguna imagen montada."
-                    Write-Warning "Monta una imagen primero."
+                    Write-Warning (Get-AIOString 'common.mount_required_first')
                     Pause 
                 } 
             }
@@ -1560,7 +1587,7 @@ function Drivers-Menu {
                 return 
             }
             default { 
-                Write-Warning "Opcion no valida."
+                Write-Warning (Get-AIOString 'common.invalid_option')
                 Start-Sleep 1 
             }
         }
@@ -1571,33 +1598,33 @@ function Content-Menu {
     while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "         Contenido de la Imagen (Apps y Paquetes)      " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.content.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host " Estado: " -NoNewline
+        Write-Host (Get-AIOString 'common.status_label') -NoNewline
         switch ($Script:IMAGE_MOUNTED) {
-            1 { Write-Host "IMAGEN WIM MONTADA" -ForegroundColor Green }
-            2 { Write-Host "DISCO VHD MONTADO" -ForegroundColor Cyan }
-            Default { Write-Host "NO MONTADA" -ForegroundColor Red }
+            1 { Write-Host (Get-AIOString 'common.status_wim_mounted') -ForegroundColor Green }
+            2 { Write-Host (Get-AIOString 'common.status_vhd_mounted') -ForegroundColor Cyan }
+            Default { Write-Host (Get-AIOString 'common.status_not_mounted') -ForegroundColor Red }
         }
         Write-Host ""
-        Write-Host "   [1] Eliminar Bloatware (Apps)" -ForegroundColor White
-        Write-Host "       (Gestor grafico para borrar aplicaciones preinstaladas)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.content.opt1') -ForegroundColor White
+        Write-Host (Get-AIOString 'menu.content.opt1_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Inyector de Apps Modernas (Appx/MSIX)" -ForegroundColor Green
-        Write-Host "       (Aprovisiona aplicaciones UWP y sus dependencias offline)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.content.opt2') -ForegroundColor Green
+        Write-Host (Get-AIOString 'menu.content.opt2_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [3] Inyector de Addons (.tpk, .bpk, .reg)" -ForegroundColor Magenta
-        Write-Host "       (Preinstalar programas y utilidades extra como 7-Zip o Visual C++)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.content.opt3') -ForegroundColor Magenta
+        Write-Host (Get-AIOString 'menu.content.opt3_desc') -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
-        Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
         Write-Host ""
 
-        $opcionCont = Read-MenuOption "Selecciona una opcion"
+        $opcionCont = Read-MenuOption (Get-AIOString 'common.select_option')
 
         if ($opcionCont.ToUpper() -ne "V" -and $Script:IMAGE_MOUNTED -eq 0) {
             Write-Log -LogLevel WARN -Message "MenuContent: Acceso denegado a la opcion [$opcionCont]. No hay ninguna imagen montada."
-            Write-Warning "Debes montar una imagen antes de usar estas herramientas."
+            Write-Warning (Get-AIOString 'common.mount_required_tools')
             Pause
             continue
         }
@@ -1608,7 +1635,7 @@ function Content-Menu {
             "3" { Write-Log -LogLevel INFO -Message "MenuContent: Accediendo a 'Show-Addons-GUI'"; Show-Addons-GUI }
             "V" { return }
             default {
-                Write-Warning "Opcion no valida."
+                Write-Warning (Get-AIOString 'common.invalid_option')
                 Start-Sleep 1
             }
         }
@@ -1619,33 +1646,33 @@ function System-Tweaks-Menu {
     while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "         Sistema y Comportamiento (Ajustes del OS)     " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.system_tweaks.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host " Estado: " -NoNewline
+        Write-Host (Get-AIOString 'common.status_label') -NoNewline
         switch ($Script:IMAGE_MOUNTED) {
-            1 { Write-Host "IMAGEN WIM MONTADA" -ForegroundColor Green }
-            2 { Write-Host "DISCO VHD MONTADO" -ForegroundColor Cyan }
-            Default { Write-Host "NO MONTADA" -ForegroundColor Red }
+            1 { Write-Host (Get-AIOString 'common.status_wim_mounted') -ForegroundColor Green }
+            2 { Write-Host (Get-AIOString 'common.status_vhd_mounted') -ForegroundColor Cyan }
+            Default { Write-Host (Get-AIOString 'common.status_not_mounted') -ForegroundColor Red }
         }
         Write-Host ""
-        Write-Host "   [1] Caracteristicas de Windows y .NET 3.5" -ForegroundColor White
-        Write-Host "       (Habilitar/Deshabilitar SMB, Hyper-V, WSL e Integrar .NET 3.5)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.system_tweaks.opt1') -ForegroundColor White
+        Write-Host (Get-AIOString 'menu.system_tweaks.opt1_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Servicios del Sistema" -ForegroundColor White
-        Write-Host "       (Optimizar el arranque deshabilitando servicios inecesarios (Seguros))" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.system_tweaks.opt2') -ForegroundColor White
+        Write-Host (Get-AIOString 'menu.system_tweaks.opt2_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [3] Tweaks y Registro" -ForegroundColor White
-        Write-Host "       (Ajustes de rendimiento, privacidad e importador .REG)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.system_tweaks.opt3') -ForegroundColor White
+        Write-Host (Get-AIOString 'menu.system_tweaks.opt3_desc') -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
-        Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
         Write-Host ""
 
-        $opcionSys = Read-MenuOption "Selecciona una opcion"
+        $opcionSys = Read-MenuOption (Get-AIOString 'common.select_option')
 
         if ($opcionSys.ToUpper() -ne "V" -and $Script:IMAGE_MOUNTED -eq 0) {
             Write-Log -LogLevel WARN -Message "MenuSystemTweaks: Acceso denegado a la opcion [$opcionSys]. No hay ninguna imagen montada."
-            Write-Warning "Debes montar una imagen antes de usar estas herramientas."
+            Write-Warning (Get-AIOString 'common.mount_required_tools')
             Pause
             continue
         }
@@ -1656,7 +1683,7 @@ function System-Tweaks-Menu {
             "3" { Write-Log -LogLevel INFO -Message "MenuSystemTweaks: Accediendo a 'Show-Tweaks-Offline-GUI'"; Show-Tweaks-Offline-GUI }
             "V" { return }
             default {
-                Write-Warning "Opcion no valida."
+                Write-Warning (Get-AIOString 'common.invalid_option')
                 Start-Sleep 1
             }
         }
@@ -1667,30 +1694,30 @@ function OOBE-Branding-Menu {
     while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "          Despliegue OOBE y Marca (Branding)           " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.oobe.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host " Estado: " -NoNewline
+        Write-Host (Get-AIOString 'common.status_label') -NoNewline
         switch ($Script:IMAGE_MOUNTED) {
-            1 { Write-Host "IMAGEN WIM MONTADA" -ForegroundColor Green }
-            2 { Write-Host "DISCO VHD MONTADO" -ForegroundColor Cyan }
-            Default { Write-Host "NO MONTADA" -ForegroundColor Red }
+            1 { Write-Host (Get-AIOString 'common.status_wim_mounted') -ForegroundColor Green }
+            2 { Write-Host (Get-AIOString 'common.status_vhd_mounted') -ForegroundColor Cyan }
+            Default { Write-Host (Get-AIOString 'common.status_not_mounted') -ForegroundColor Red }
         }
         Write-Host ""
-        Write-Host "   [1] Automatizacion OOBE (Unattend.xml)" -ForegroundColor White
-        Write-Host "       (Configurar usuario, saltar EULA y privacidad automaticamente)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.oobe.opt1') -ForegroundColor White
+        Write-Host (Get-AIOString 'menu.oobe.opt1_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] OEM Branding (Fondos y Metadatos del Sistema)" -ForegroundColor Cyan
-        Write-Host "       (Aplica wallpaper/lockscreen e informacion del fabricante)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.oobe.opt2') -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.oobe.opt2_desc') -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
-        Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
         Write-Host ""
 
-        $opcionOOBE = Read-MenuOption "Selecciona una opcion"
+        $opcionOOBE = Read-MenuOption (Get-AIOString 'common.select_option')
 
         if ($opcionOOBE.ToUpper() -ne "V" -and $Script:IMAGE_MOUNTED -eq 0) {
             Write-Log -LogLevel WARN -Message "MenuOOBEBranding: Acceso denegado a la opcion [$opcionOOBE]. No hay ninguna imagen montada."
-            Write-Warning "Debes montar una imagen antes de usar estas herramientas."
+            Write-Warning (Get-AIOString 'common.mount_required_tools')
             Pause
             continue
         }
@@ -1700,7 +1727,7 @@ function OOBE-Branding-Menu {
             "2" { Write-Log -LogLevel INFO -Message "MenuOOBEBranding: Accediendo a 'Show-OEMBranding-GUI'"; Show-OEMBranding-GUI }
             "V" { return }
             default {
-                Write-Warning "Opcion no valida."
+                Write-Warning (Get-AIOString 'common.invalid_option')
                 Start-Sleep 1
             }
         }
@@ -1711,26 +1738,26 @@ function Updates-Languages-Menu {
     while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "          Actualizaciones e Idiomas (Servicing)        " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.updates_lang.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "   [1] Integrar Actualizaciones" -ForegroundColor Green
-        Write-Host "       (install.wim, winre.wim, boot.wim y SetupDU)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.updates_lang.opt1') -ForegroundColor Green
+        Write-Host (Get-AIOString 'menu.updates_lang.opt1_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Integrar Idiomas / Crear Medio Multilingue" -ForegroundColor Cyan
-        Write-Host "       (Agrega Language Packs y Features on Demand a la imagen)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.updates_lang.opt2') -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.updates_lang.opt2_desc') -ForegroundColor Gray
         Write-Host ""
         Write-Host "-------------------------------------------------------"
-        Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
         Write-Host ""
 
-        $opcionUL = (Read-MenuOption "Selecciona una opcion").Trim().ToUpper()
+        $opcionUL = (Read-MenuOption (Get-AIOString 'common.select_option')).Trim().ToUpper()
         switch ($opcionUL) {
             "1" { Write-Log -LogLevel INFO -Message "MenuUpdatesLang: Accediendo a 'WindowsUpdate-Menu'"; WindowsUpdate-Menu }
             "2" { Write-Log -LogLevel INFO -Message "MenuUpdatesLang: Accediendo a 'LanguagePack-Menu'"; LanguagePack-Menu }
             "V" { return }
             default {
-                Write-Warning "Opcion no valida."
+                Write-Warning (Get-AIOString 'common.invalid_option')
                 Start-Sleep 1
             }
         }
@@ -1749,20 +1776,20 @@ function Get-AIOSfcAssessment {
         [string]$ExecutionError = ''
     )
     $status = 'Indeterminate'; $success = $false; $level = 'WARN'; $color = 'Yellow'
-    $message = 'Resultado no confirmado: falta el codigo de salida o un log de verificacion completo.'
+    $message = Get-AIOString 'limpieza.sfc_unconfirmed'
     if ($ExecutionError) {
         $status = 'Failed'; $level = 'ERROR'; $color = 'Red'
-        $message = "No se pudo completar o supervisar SFC: $ExecutionError"
+        $message = Get-AIOString 'limpieza.sfc_exec_failed' $ExecutionError
     } elseif ($null -ne $ExitCode -and [int]$ExitCode -ne 0) {
         $status = 'Failed'; $level = 'ERROR'; $color = 'Red'
         $message = "SFC termino con codigo $ExitCode. Revisa la salida y el log detallado."
     } elseif ($null -ne $ExitCode -and $LogReadSucceeded -and $Batches -gt 0 -and $CompletedBatches -eq $Batches) {
         if ($FailureCount -gt 0) {
             $status = 'ReviewRequired'
-            $message = 'SFC registro incidencias de reparacion; se requiere revisar el detalle antes de continuar.'
+            $message = Get-AIOString 'limpieza.sfc_repair_incidents'
         } elseif ($ChangeCount -gt 0) {
             $status = 'CompletedWithChanges'; $success = $true
-            $message = 'SFC finalizo con eventos de reparacion o cambios. Consulta el detalle.'
+            $message = Get-AIOString 'limpieza.sfc_repair_events'
         } else {
             $status = 'NoIssuesReported'; $success = $true; $level = 'INFO'; $color = 'Green'
             $message = 'Verificacion completa sin incidencias de integridad registradas.'
@@ -1851,7 +1878,7 @@ function Invoke-AIOImageHealthCheck {
     $exitText = if ($null -eq $exitCode) { 'No disponible' } else { [string]$exitCode }
     $level = if (-not $success) { 'ERROR' } elseif ($healthState -eq 'Healthy') { 'INFO' } else { 'WARN' }
     Write-Log -LogLevel $level -Message "LIMPIEZA: DISM /$Mode terminado (ExitCode=$exitText, Estado=$healthState, Tiempo=$($sw.Elapsed.ToString()), Log='$healthLog', Salida='$consoleLog')."
-    Write-Host "   Estado: $healthState | Codigo: $exitText | Log: $healthLog"
+    Write-Host (Get-AIOString 'limpieza.health_summary' $healthState $exitText $healthLog)
     [pscustomobject]@{ Success=$success; ExitCode=$exitCode; ImageHealthState=$healthState; LogPath=$healthLog; ConsoleLogPath=$consoleLog }
 }
 
@@ -1927,9 +1954,9 @@ function Invoke-AIOComponentStoreAnalysis {
     $exitText = if ($null -eq $exitCode) { 'No disponible' } else { [string]$exitCode }
     $level = if ($success) { 'INFO' } else { 'ERROR' }
     Write-Log -LogLevel $level -Message "LIMPIEZA: AnalyzeComponentStore (ExitCode=$exitText, Recomendacion=$cleanupRecommended, Error='$runError', Log='$analysisLog', Salida='$consoleLog')."
-    Write-Host "   Recomendacion: $cleanupRecommended | Codigo: $exitText | Log: $analysisLog"
+    Write-Host (Get-AIOString 'limpieza.comp_summary' $cleanupRecommended $exitText $analysisLog)
     if (-not $success) {
-        Write-Warning "Analisis no confirmado: $runError Salida: $consoleLog"
+        Write-Warning (Get-AIOString 'limpieza.comp_unconfirmed' $runError $consoleLog)
     }
     [pscustomobject]@{ Success=$success; ExitCode=$exitCode; CleanupRecommended=$cleanupRecommended; LogPath=$analysisLog; ConsoleLogPath=$consoleLog }
 }
@@ -1943,7 +1970,7 @@ function Limpieza-Menu {
             [switch]$IsSequence
         )
 
-        Write-Host "`n[+] Ejecutando DISM /RestoreHealth..." -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'limpieza.restore_start') -ForegroundColor Yellow
         Write-Log -LogLevel ACTION -Message "LIMPIEZA: Ejecutando DISM /RestoreHealth..."
 
         $exitCode = $null
@@ -1951,23 +1978,23 @@ function Limpieza-Menu {
             $restoreResult = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments @("/Image:$MountDir", '/Cleanup-Image', '/RestoreHealth')
             $exitCode = $restoreResult.ExitCode
         } catch {
-            Write-Warning "No se pudo ejecutar RestoreHealth: $($_.Exception.Message)"
+            Write-Warning (Get-AIOString 'limpieza.restore_run_err' $_.Exception.Message)
             Write-Log -LogLevel ERROR -Message "LIMPIEZA: Error ejecutando RestoreHealth: $($_.Exception.Message)"
         }
 
         if ($exitCode -notin @(0, 3010)) {
-            Write-Host "[ADVERTENCIA] DISM /RestoreHealth no pudo reparar la imagen (Codigo: $exitCode)." -ForegroundColor Red
-            Write-Host "Es probable que falten los archivos necesarios y el sistema este offline." -ForegroundColor Gray
+            Write-Host (Get-AIOString 'limpieza.restore_failed_code' $exitCode) -ForegroundColor Red
+            Write-Host (Get-AIOString 'limpieza.restore_offline_hint') -ForegroundColor Gray
             Write-Log -LogLevel WARN -Message "LIMPIEZA: RestoreHealth inicial devolvio $exitCode. Iniciando protocolo de Fallback."
 
-            $useSourceChoice = Read-Host "`nDeseas intentar la reparacion usando un archivo WIM intacto como fuente? (S/N)"
+            $useSourceChoice = Read-Host (Get-AIOString 'limpieza.restore_use_wim_prompt')
 
-            if ($useSourceChoice -match '^(s|S)$') {
+            if (Test-AIOYesResponse $useSourceChoice) {
                 Write-Log -LogLevel INFO -Message "LIMPIEZA: Usuario eligio usar fuente WIM para RestoreHealth."
-                $sourceWimPath = Select-PathDialog -DialogType File -Title "Selecciona el WIM de origen (ej. install.wim)" -Filter "Archivos WIM (*.wim)|*.wim"
+                $sourceWimPath = Select-PathDialog -DialogType File -Title (Get-AIOString 'limpieza.restore_dialog_title') -Filter (Get-AIOString 'save.wim_filter')
 
                 if ($sourceWimPath) {
-                    Write-Host "`n[+] Analizando indices del WIM seleccionado..." -ForegroundColor Yellow
+                    Write-Host (Get-AIOString 'limpieza.restore_analyzing_wim') -ForegroundColor Yellow
                     try {
                         $sourceInfo = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments @('/Get-WimInfo', "/WimFile:$sourceWimPath")
                         if ($null -eq $sourceInfo.ExitCode -or $sourceInfo.ExitCode -notin @(0, 3010)) {
@@ -1975,10 +2002,10 @@ function Limpieza-Menu {
                         }
 
                         [int]$sourceIndex = 0
-                        $inputIndex = Read-Host "`nIntroduce el numero de INDICE que coincide con tu edicion de Windows"
+                        $inputIndex = Read-Host (Get-AIOString 'limpieza.restore_index_prompt')
 
                         if ([int]::TryParse($inputIndex, [ref]$sourceIndex) -and $sourceIndex -gt 0) {
-                            Write-Host "`n[+] Reintentando reparacion forzando la fuente local (/LimitAccess)..." -ForegroundColor Yellow
+                            Write-Host (Get-AIOString 'limpieza.restore_retrying_local') -ForegroundColor Yellow
                             Write-Log -LogLevel ACTION -Message "LIMPIEZA: Reintentando RestoreHealth con /LimitAccess y Source WIM."
 
                             $ext = [System.IO.Path]::GetExtension($sourceWimPath).ToUpper()
@@ -1990,26 +2017,26 @@ function Limpieza-Menu {
                             $exitCode = $restoreResult.ExitCode
 
                             if ($exitCode -in @(0, 3010)) {
-                                Write-Host "[OK] DISM /RestoreHealth reparo la imagen exitosamente usando la fuente WIM." -ForegroundColor Green
+                                Write-Host (Get-AIOString 'limpieza.restore_wim_ok') -ForegroundColor Green
                                 Write-Log -LogLevel INFO -Message "LIMPIEZA: RestoreHealth exitoso con fuente WIM."
                             } else {
-                                Write-Host "[ERROR] La reparacion fallo de nuevo con fuente WIM (Codigo: $exitCode)." -ForegroundColor Red
+                                Write-Host (Get-AIOString 'limpieza.restore_wim_err' $exitCode) -ForegroundColor Red
                                 Write-Log -LogLevel ERROR -Message "LIMPIEZA: RestoreHealth fallo con fuente WIM (Codigo: $exitCode)."
                             }
                         } else {
-                            Write-Warning "Indice no valido. Omitiendo reintento."
+                            Write-Warning (Get-AIOString 'limpieza.restore_invalid_idx')
                         }
                     } catch {
                         $exitCode = $null
-                        Write-Warning "No se pudo completar la reparacion con fuente WIM: $($_.Exception.Message)"
+                        Write-Warning (Get-AIOString 'limpieza.restore_wim_exc' $_.Exception.Message)
                         Write-Log -LogLevel ERROR -Message "LIMPIEZA: Error en fallback RestoreHealth: $($_.Exception.Message)"
                     }
                 } else {
-                    Write-Warning "No se selecciono un archivo WIM."
+                    Write-Warning (Get-AIOString 'limpieza.restore_no_wim')
                 }
             }
         } else {
-            Write-Host "[OK] DISM /RestoreHealth completado exitosamente." -ForegroundColor Green
+            Write-Host (Get-AIOString 'limpieza.restore_ok') -ForegroundColor Green
             Write-Log -LogLevel INFO -Message "LIMPIEZA: DISM /RestoreHealth exitoso."
         }
 
@@ -2032,7 +2059,7 @@ function Limpieza-Menu {
         $sfcWin = Join-Path -Path $MountDir -ChildPath "Windows"
 
         if (-not (Test-Path -LiteralPath $sfcWin -PathType Container)) {
-            Write-Host "No se encuentra la carpeta Windows en $sfcWin. ¿Esta montada correctamente?" -ForegroundColor Red
+            Write-Host (Get-AIOString 'limpieza.sfc_no_win_dir' $sfcWin) -ForegroundColor Red
             Write-Log -LogLevel ERROR -Message "LIMPIEZA: No se encontro la carpeta Windows en '$sfcWin' para ejecutar SFC."
             return $false
         }
@@ -2154,8 +2181,8 @@ function Limpieza-Menu {
         $logArg  = if ($sfcLogPath -match '\s') { "/offlogfile=`"$sfcLogPath`"" } else { "/offlogfile=$sfcLogPath" }
         $sfcCmdArgs = "/scannow $bootArg $winArg $logArg"
 
-        Write-Host "`n[+] Verificando archivos (SFC Offline)..." -ForegroundColor Yellow
-        Write-Host "    Log detallado : $sfcLogPath" -ForegroundColor DarkGray
+        Write-Host (Get-AIOString 'limpieza.sfc_start') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'limpieza.sfc_log_lbl' $sfcLogPath) -ForegroundColor DarkGray
         Write-Log -LogLevel ACTION -Message "LIMPIEZA: Iniciando SFC Offline -> sfc.exe $sfcCmdArgs"
 
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -2253,10 +2280,10 @@ function Limpieza-Menu {
                 $spinIdx++
                 $elapsedStr = $sw.Elapsed.ToString("mm\:ss")
                 if ($liveComponents -gt 0) {
-                    $progressTxt = if ($liveBatches -eq $liveComponents) { "Componentes verificados: $liveComponents" } else { "Lote #$liveBatches ($liveComponents componentes verificados)" }
-                    $statusMsg = "   [$spin] Actividad SFC: $progressTxt | Tiempo: $elapsedStr"
+                    $progressTxt = if ($liveBatches -eq $liveComponents) { Get-AIOString 'limpieza.sfc_comp_verified' $liveComponents } else { Get-AIOString 'limpieza.sfc_batch_verified' $liveBatches $liveComponents }
+                    $statusMsg = Get-AIOString 'limpieza.sfc_live_progress' $spin $progressTxt $elapsedStr
                 } else {
-                    $statusMsg = "   [$spin] Actividad SFC: Analizando almacen WinSxS e integridad de archivos | Tiempo: $elapsedStr"
+                    $statusMsg = Get-AIOString 'limpieza.sfc_live_analyzing' $spin $elapsedStr
                 }
                 $padWidth = [Math]::Min(100, $lineWidth)
                 if ($statusMsg.Length -gt $padWidth) { $statusMsg = $statusMsg.Substring(0, $padWidth) }
@@ -2268,7 +2295,7 @@ function Limpieza-Menu {
             Clear-SfcStaleSpinner
             Clear-SfcLiveLine
             $sw.Stop()
-            Write-Host "   [+] Analisis SFC finalizado | Tiempo: $($sw.Elapsed.ToString('mm\:ss'))" -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'limpieza.sfc_finished' ($sw.Elapsed.ToString('mm\:ss'))) -ForegroundColor Cyan
             $sfcProc.WaitForExit()
             $sfcExit = $sfcProc.ExitCode
             if ($null -eq $sfcExit) { throw 'SFC no proporciono codigo de salida.' }
@@ -2360,20 +2387,20 @@ function Limpieza-Menu {
 
         $totalElapsed = $sw.Elapsed.ToString("mm\:ss")
         Write-Host "`n   =======================================================" -ForegroundColor DarkCyan
-        Write-Host "              ACTIVIDAD Y RESULTADO DE SFC OFFLINE        " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'limpieza.sfc_report_title') -ForegroundColor Cyan
         Write-Host "   =======================================================" -ForegroundColor DarkCyan
         if ($wcpVersion) {
-            Write-Host "   - Motor CSI (wcp.dll)     : v$wcpVersion" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'limpieza.sfc_wcp' $wcpVersion) -ForegroundColor Gray
         }
-        Write-Host "   - Tiempo de ejecucion     : $totalElapsed" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'limpieza.sfc_elapsed' $totalElapsed) -ForegroundColor Gray
         $batchTxt = if ($totalBatches -ne $totalComponents) { " (en $totalBatches lotes CSI)" } else { "" }
-        Write-Host "   - Componentes verificados : $totalComponents$batchTxt" -ForegroundColor Gray
-        Write-Host "   - Codigo de salida        : $sfcExitText" -ForegroundColor Gray
-        Write-Host "   - Cola de reparacion      : $repairQueueText" -ForegroundColor Gray
-        Write-Host "   - Resultado               : $($sfcAssessment.Message)" -ForegroundColor $sfcAssessment.Color
+        Write-Host (Get-AIOString 'limpieza.sfc_components' $totalComponents $batchTxt) -ForegroundColor Gray
+        Write-Host (Get-AIOString 'limpieza.sfc_exit_code' $sfcExitText) -ForegroundColor Gray
+        Write-Host (Get-AIOString 'limpieza.sfc_queue' $repairQueueText) -ForegroundColor Gray
+        Write-Host (Get-AIOString 'limpieza.sfc_result' $sfcAssessment.Message) -ForegroundColor $sfcAssessment.Color
 
         if ($hashMismatchEntries.Count -gt 0) {
-            Write-Host "   - Archivos modificados/danados detectados por Hash ($($hashMismatchEntries.Count)):" -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'limpieza.sfc_hash_hdr' $hashMismatchEntries.Count) -ForegroundColor Yellow
             foreach ($hmItem in $hashMismatchEntries) {
                 $hmShow = (ConvertTo-SfcCleanText -Text $hmItem).Trim("'")
                 Write-SfcWrapped -Text $hmShow -FirstPrefix "     * " -NextPrefix "       " -Color "White"
@@ -2382,7 +2409,7 @@ function Limpieza-Menu {
         }
 
         if ($srRepairEntries.Count -gt 0) {
-            Write-Host "   - Acciones de reparacion [SR] ($($srRepairEntries.Count)):" -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'limpieza.sfc_sr_hdr' $srRepairEntries.Count) -ForegroundColor Cyan
             foreach ($srItem in $srRepairEntries) {
                 $col = if ($srItem -match 'Cannot repair|Could not reproject|also corrupted') { 'Red' }
                        elseif ($srItem -match 'referenced by') { 'Yellow' }
@@ -2392,30 +2419,30 @@ function Limpieza-Menu {
             }
         }
         elseif ($null -ne $repairQueueCount -and $repairQueueCount -eq 0) {
-            Write-Host "   - Componentes en cola de reparacion [SR]: 0" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'limpieza.sfc_sr_zero') -ForegroundColor Gray
             if ($overlapEntries.Count -gt 0) {
-                Write-Host "   - Ajustes de metadatos CSI   : $($overlapEntries.Count) directorio(s) con propiedad/SDDL solapada corregidos:" -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'limpieza.sfc_csi_overlap' $overlapEntries.Count) -ForegroundColor Yellow
                 foreach ($ovItem in ($overlapEntries | Select-Object -First 8)) {
                     Write-SfcWrapped -Text (ConvertTo-SfcCleanText -Text $ovItem) -FirstPrefix "     * " -NextPrefix "       " -Color "Gray"
                     Write-Log -LogLevel INFO -Message "SFC_OFFLINE_OVERLAP: $ovItem"
                 }
                 if ($overlapEntries.Count -gt 8) {
-                    Write-Host "     * ... y $($overlapEntries.Count - 8) mas en el log detallado." -ForegroundColor DarkGray
+                    Write-Host (Get-AIOString 'limpieza.sfc_more_log' ($overlapEntries.Count - 8)) -ForegroundColor DarkGray
                 }
             }
             else {
-                Write-Host "   - Detalle: sin eventos adicionales de reparacion en el log." -ForegroundColor Gray
+                Write-Host (Get-AIOString 'limpieza.sfc_no_extra') -ForegroundColor Gray
             }
         }
         elseif ($repairQueueCount -gt 0) {
-            Write-Host "   - Componentes en cola [SR] (no confirma reparacion): $repairQueueCount" -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'limpieza.sfc_sr_unconfirmed' $repairQueueCount) -ForegroundColor Yellow
         }
 
         if (Test-Path -LiteralPath $sfcLogPath -PathType Leaf) {
             $logLenKB = [Math]::Round((Get-Item -LiteralPath $sfcLogPath).Length / 1KB, 1)
-            Write-Host "   - Log completo (${logLenKB} KB) : $sfcLogPath" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'limpieza.sfc_full_log' $logLenKB $sfcLogPath) -ForegroundColor Gray
         } else {
-            Write-Host "   - Aviso: sfc.exe no genero el archivo de log en '$sfcLogPath'." -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'limpieza.sfc_no_log_warn' $sfcLogPath) -ForegroundColor Yellow
         }
         Write-Host "   =======================================================" -ForegroundColor DarkCyan
         Write-Host ""
@@ -2432,38 +2459,38 @@ function Limpieza-Menu {
         Clear-Host
         if ($Script:IMAGE_MOUNTED -eq 0)
         {
-            Write-Warning "Necesita montar imagen primero."
+            Write-Warning (Get-AIOString 'common.mount_required_short')
             Pause
             return
         }
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "             Herramientas de Limpieza de Imagen          " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'limpieza.menu_title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "   [1] Verificar Salud (Rapido)" -NoNewline; Write-Host " (DISM /CheckHealth)" -ForegroundColor Gray
-        Write-Host "   [2] Escaneo Avanzado (Lento)" -NoNewline; Write-Host " (DISM /ScanHealth)" -ForegroundColor Gray
-        Write-Host "   [3] Reparar Imagen" -NoNewline; Write-Host "           (DISM /RestoreHealth)" -ForegroundColor Gray
-        Write-Host "   [4] Reparacion SFC (Offline)" -NoNewline; Write-Host " (SFC /Scannow /OffWindir)" -ForegroundColor Gray
-        Write-Host "   [5] Analizar Componentes" -NoNewline; Write-Host "   (DISM /AnalyzeComponentStore)" -ForegroundColor Gray
-        Write-Host "   [6] Limpiar Componentes" -NoNewline; Write-Host "    (DISM /StartComponentCleanup)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'limpieza.opt1') -NoNewline; Write-Host " (DISM /CheckHealth)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'limpieza.opt2') -NoNewline; Write-Host " (DISM /ScanHealth)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'limpieza.opt3') -NoNewline; Write-Host "           (DISM /RestoreHealth)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'limpieza.opt4') -NoNewline; Write-Host " (SFC /Scannow /OffWindir)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'limpieza.opt5') -NoNewline; Write-Host "   (DISM /AnalyzeComponentStore)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'limpieza.opt6') -NoNewline; Write-Host "    (DISM /StartComponentCleanup)" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [7] Ejecutar TODO (1-6)" -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'limpieza.opt7') -ForegroundColor Yellow
         Write-Host ""
         Write-Host "-------------------------------------------------------"
-        Write-Host "   [V] Volver" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_short') -ForegroundColor Red
 
-        $opcionL = Read-MenuOption "`nSelecciona una opcion"
+        $opcionL = Read-MenuOption ("`n" + (Get-AIOString 'common.select_option'))
         Write-Log -LogLevel INFO -Message "MENU_LIMPIEZA: Usuario selecciono '$opcionL'."
 
         switch ($opcionL.ToUpper()) {
             "1" {
-                Write-Host "`n[+] Verificando salud..." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'limpieza.running_checkhealth') -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /CheckHealth..."
                 Invoke-AIOImageHealthCheck -MountDir $Script:MOUNT_DIR -Mode CheckHealth | Out-Null
                 Pause
             }
             "2" {
-                Write-Host "`n[+] Escaneando corrupcion..." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'limpieza.running_scanhealth') -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /ScanHealth..."
                 Invoke-AIOImageHealthCheck -MountDir $Script:MOUNT_DIR -Mode ScanHealth | Out-Null
                 Pause
@@ -2476,31 +2503,31 @@ function Limpieza-Menu {
                 Pause
             }
             "5" {
-                Write-Host "`n[+] Analizando componentes..." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'limpieza.running_analyze') -ForegroundColor Yellow
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /AnalyzeComponentStore..."
                 $analysisResult = Invoke-AIOComponentStoreAnalysis -MountDir $Script:MOUNT_DIR
                 if ($analysisResult.Success) {
                     $recommendationText = if ($analysisResult.CleanupRecommended -eq 'Yes') { 'Si' } else { 'No' }
-                    Write-Host "[OK] Analisis completado. Limpieza recomendada: $recommendationText." -ForegroundColor Green
+                    Write-Host (Get-AIOString 'limpieza.analyze_done' $recommendationText) -ForegroundColor Green
                     if ($analysisResult.ExitCode -eq 3010) {
-                        Write-Warning 'DISM devolvio 3010 (operacion completada; reinicio requerido).'
+                        Write-Warning (Get-AIOString 'limpieza.dism_3010_warn')
                     }
                 }
                 Pause
             }
             "6" {
-                Write-Host "`n[+] Preparando limpieza de componentes..." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'limpieza.prep_cleanup') -ForegroundColor Yellow
                 
                 # --- NUEVA LOGICA: Preguntar por /ResetBase ---
-                $useResetBase = Read-Host "`nDeseas incluir el parametro /ResetBase?`n[ADVERTENCIA] Esto ahorra espacio, pero no podras desinstalar actualizaciones previas (S/N)"
+                $useResetBase = Read-Host (Get-AIOString 'limpieza.resetbase_prompt')
 
                 $cleanupArgs = @("/Image:$Script:MOUNT_DIR", '/Cleanup-Image', '/StartComponentCleanup', "/ScratchDir:$Script:Scratch_DIR")
-                if ($useResetBase -match '^(s|S)$') {
-                    Write-Host "`nEjecutando limpieza CON /ResetBase..." -ForegroundColor Cyan
+                if (Test-AIOYesResponse $useResetBase) {
+                    Write-Host (Get-AIOString 'limpieza.cleanup_with_rb') -ForegroundColor Cyan
                     Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /StartComponentCleanup /ResetBase..."
                     $cleanupArgs += '/ResetBase'
                 } else {
-                    Write-Host "`nEjecutando limpieza estandar SIN /ResetBase..." -ForegroundColor Cyan
+                    Write-Host (Get-AIOString 'limpieza.cleanup_no_rb') -ForegroundColor Cyan
                     Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /StartComponentCleanup (Sin ResetBase)..."
                 }
                 try {
@@ -2508,13 +2535,13 @@ function Limpieza-Menu {
                     if ($null -eq $cleanupResult.ExitCode -or $cleanupResult.ExitCode -notin @(0, 3010)) {
                         throw "DISM /StartComponentCleanup termino con codigo $($cleanupResult.ExitCode)."
                     }
-                    Write-Host '[OK] Limpieza de componentes completada.' -ForegroundColor Green
+                    Write-Host (Get-AIOString 'limpieza.cleanup_ok') -ForegroundColor Green
                     Write-Log -LogLevel INFO -Message "LIMPIEZA: Limpieza manual completada (ExitCode=$($cleanupResult.ExitCode))."
                     if ($cleanupResult.ExitCode -eq 3010) {
-                        Write-Warning 'DISM devolvio 3010 (operacion completada; reinicio requerido).'
+                        Write-Warning (Get-AIOString 'limpieza.dism_3010_warn')
                     }
                 } catch {
-                    Write-Warning "Fallo la limpieza de componentes: $($_.Exception.Message)"
+                    Write-Warning (Get-AIOString 'limpieza.cleanup_err' $_.Exception.Message)
                     Write-Log -LogLevel ERROR -Message "LIMPIEZA: Error en limpieza manual: $($_.Exception.Message)"
                 }
                 Pause
@@ -2523,44 +2550,44 @@ function Limpieza-Menu {
                 Write-Log -LogLevel ACTION -Message "LIMPIEZA: Iniciando secuencia COMPLETA..."
 
                 # Preguntar por /ResetBase antes de iniciar la secuencia para no interrumpir el flujo después
-                $useResetBaseSeq = Read-Host "`nAntes de iniciar: Deseas incluir el parametro /ResetBase en la limpieza final?`n[ADVERTENCIA] Impide desinstalar actualizaciones previas (S/N)"
-                $resetBaseFlag = ($useResetBaseSeq -match '^(s|S)$')
+                $useResetBaseSeq = Read-Host (Get-AIOString 'limpieza.seq_resetbase_prompt')
+                $resetBaseFlag = (Test-AIOYesResponse $useResetBaseSeq)
 
                 # --- PASO 1 ---
-                Write-Host "`n[1/5] Verificando salud rapida (CheckHealth)..." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'limpieza.seq_step1') -ForegroundColor Yellow
                 $checkResult = Invoke-AIOImageHealthCheck -MountDir $Script:MOUNT_DIR -Mode CheckHealth
                 if (-not $checkResult.Success) {
-                    Write-Warning 'CheckHealth no confirmo un resultado valido. Se detiene la secuencia.'
+                    Write-Warning (Get-AIOString 'limpieza.seq_step1_stop')
                     Pause; continue
                 }
                 $sequenceRestartRequired = ($checkResult.ExitCode -eq 3010)
 
                 # --- PASO 2 ---
-                Write-Host "`n[2/5] Escaneando a fondo (ScanHealth)..." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'limpieza.seq_step2') -ForegroundColor Yellow
                 $scanResult = Invoke-AIOImageHealthCheck -MountDir $Script:MOUNT_DIR -Mode ScanHealth
                 $imageState = $scanResult.ImageHealthState
                 if (-not $scanResult.Success) {
-                    Write-Warning 'No se pudo confirmar el resultado de ScanHealth. Se detiene la secuencia.'
+                    Write-Warning (Get-AIOString 'limpieza.seq_step2_stop')
                     Pause; continue
                 }
                 $sequenceRestartRequired = $sequenceRestartRequired -or ($scanResult.ExitCode -eq 3010)
 
                 # --- LOGICA DE DECISION (PASO 3) ---
                 if ($imageState -eq "NonRepairable") {
-                    Write-Host "`n[!] ALERTA DE SEGURIDAD" -ForegroundColor Red
-                    Write-Warning "La imagen es IRREPARABLE. Deteniendo secuencia."
-                    [System.Windows.Forms.MessageBox]::Show("La imagen esta en estado 'NonRepairable'.`nLa secuencia se detendra.", "Error Fatal", 'OK', 'Error')
+                    Write-Host (Get-AIOString 'limpieza.seq_sec_alert') -ForegroundColor Red
+                    Write-Warning (Get-AIOString 'limpieza.seq_nonrepairable_warn')
+                    [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'limpieza.seq_nonrepairable_msg'), (Get-AIOString 'limpieza.fatal_error_title'), 'OK', 'Error')
                     Pause; continue
                 }
                 elseif ($imageState -eq "Healthy") {
-                    Write-Host "`n[3/5] Reparando imagen..." -ForegroundColor DarkGray
-                    Write-Host "   >>> OMITIDO: La imagen ya esta saludable." -ForegroundColor Green
+                    Write-Host (Get-AIOString 'limpieza.seq_step3') -ForegroundColor DarkGray
+                    Write-Host (Get-AIOString 'limpieza.seq_step3_skip') -ForegroundColor Green
                 }
                 else {
-                    Write-Host "`n[3/5] Reparando imagen..." -ForegroundColor Yellow
+                    Write-Host (Get-AIOString 'limpieza.seq_step3') -ForegroundColor Yellow
                     $restoreResult = Invoke-RestoreHealthWithFallback -MountDir $Script:MOUNT_DIR -IsSequence
                     if (-not $restoreResult.Success) {
-                        Write-Warning 'RestoreHealth no confirmo una reparacion satisfactoria. Se detiene la secuencia antes de ejecutar SFC y limpiar componentes.'
+                        Write-Warning (Get-AIOString 'limpieza.seq_step3_stop')
                         Write-Log -LogLevel ERROR -Message 'LIMPIEZA: Secuencia detenida por reparacion fallida o cancelada.'
                         Pause; continue
                     }
@@ -2568,18 +2595,18 @@ function Limpieza-Menu {
                 }
 
                 # --- PASO 4 ---
-                Write-Host "`n[4/5] Verificando archivos (SFC)..." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'limpieza.seq_step4') -ForegroundColor Yellow
                 $sfcOk = Invoke-AIOOfflineSfcScan -MountDir $Script:MOUNT_DIR
                 if (-not $sfcOk) {
-                    Write-Warning 'SFC no confirmo un resultado satisfactorio. Se detiene la secuencia antes de limpiar componentes.'
+                    Write-Warning (Get-AIOString 'limpieza.seq_step4_stop')
                     Pause; continue
                 }
 
                 # --- PASO 5 ---
-                Write-Host "`n[5/5] Analizando/Limpiando componentes..." -ForegroundColor Yellow
+                Write-Host (Get-AIOString 'limpieza.seq_step5') -ForegroundColor Yellow
                 $analysisResult = Invoke-AIOComponentStoreAnalysis -MountDir $Script:MOUNT_DIR
                 if (-not $analysisResult.Success) {
-                    Write-Warning 'No se pudo confirmar la recomendacion de limpieza. Se detiene la secuencia sin limpiar componentes.'
+                    Write-Warning (Get-AIOString 'limpieza.seq_step5_stop')
                     Pause; continue
                 }
                 $cleanupRecommended = $analysisResult.CleanupRecommended
@@ -2587,7 +2614,7 @@ function Limpieza-Menu {
 
                 # ScanHealth ya detiene la secuencia si el estado es Unknown.
                 if ($cleanupRecommended -eq "Yes") {
-                    Write-Host "Procediendo con la limpieza..." -ForegroundColor Cyan;
+                    Write-Host (Get-AIOString 'limpieza.seq_cleanup_go') -ForegroundColor Cyan;
                     
                     $cleanupArgs = @("/Image:$Script:MOUNT_DIR", '/Cleanup-Image', '/StartComponentCleanup', "/ScratchDir:$Script:Scratch_DIR")
                     # Se conserva la decision existente sobre cuando aplicar /ResetBase.
@@ -2605,23 +2632,23 @@ function Limpieza-Menu {
                         Write-Log -LogLevel INFO -Message "LIMPIEZA: StartComponentCleanup completado (ExitCode=$($cleanupResult.ExitCode))."
                         $sequenceRestartRequired = $sequenceRestartRequired -or ($cleanupResult.ExitCode -eq 3010)
                     } catch {
-                        Write-Warning "Fallo la limpieza de componentes: $($_.Exception.Message) Se detiene la secuencia."
+                        Write-Warning (Get-AIOString 'limpieza.seq_cleanup_err' $_.Exception.Message)
                         Write-Log -LogLevel ERROR -Message "LIMPIEZA: Secuencia detenida por error en StartComponentCleanup: $($_.Exception.Message)"
                         Pause; continue
                     }
                 } else {
-                    Write-Host "La limpieza del almacen de componentes no es estrictamente necesaria (Omitida)." -ForegroundColor Green;
+                    Write-Host (Get-AIOString 'limpieza.seq_cleanup_skip') -ForegroundColor Green;
                 }
                 
-                Write-Host "`n[OK] Secuencia completada." -ForegroundColor Green
+                Write-Host (Get-AIOString 'limpieza.seq_done') -ForegroundColor Green
                 Write-Log -LogLevel INFO -Message "LIMPIEZA: Secuencia completada con resultados verificados. ReinicioRequerido=$sequenceRestartRequired."
                 if ($sequenceRestartRequired) {
-                    Write-Warning 'DISM devolvio 3010 (operacion completada; reinicio requerido).'
+                    Write-Warning (Get-AIOString 'limpieza.dism_3010_warn')
                 }
                 Pause
             }
             "V" { return }
-            default { Write-Warning "Opcion invalida."; Start-Sleep 1 }
+            default { Write-Warning (Get-AIOString 'common.invalid_option'); Start-Sleep 1 }
         }
     }
 }
@@ -3014,7 +3041,7 @@ function Mount-Hives {
 
     # 2. Validacion critica (SYSTEM y SOFTWARE son obligatorios incluso en Boot.wim)
     if (-not (Test-Path $sysHive) -or -not (Test-Path $softHive)) { 
-        [System.Windows.Forms.MessageBox]::Show("Error Critico: No se encuentran SYSTEM o SOFTWARE.`nLa imagen esta corrupta o no es valida?", "Error Fatal", 'OK', 'Error')
+        [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'hives.missing_critical'), (Get-AIOString 'limpieza.fatal_error_title'), 'OK', 'Error')
         return $false 
     }
 
@@ -3026,25 +3053,25 @@ function Mount-Hives {
 
     try {
         # --- CARGA OBLIGATORIA (SYSTEM / SOFTWARE) ---
-        Write-Host "Cargando SYSTEM..." -NoNewline
+        Write-Host (Get-AIOString 'hives.loading_system') -NoNewline
         $p1 = Start-Process reg.exe -ArgumentList "load HKLM\OfflineSystem `"$sysHive`"" -Wait -PassThru -NoNewWindow
         $ec1 = $p1.ExitCode; $p1.Dispose()
         if ($ec1 -ne 0) { throw "Fallo SYSTEM" } else { Write-Host "OK" -ForegroundColor Green; $resumenMount.Cargadas++ }
 
-        Write-Host "Cargando SOFTWARE..." -NoNewline
+        Write-Host (Get-AIOString 'hives.loading_software') -NoNewline
         $p2 = Start-Process reg.exe -ArgumentList "load HKLM\OfflineSoftware `"$softHive`"" -Wait -PassThru -NoNewWindow
         $ec2 = $p2.ExitCode; $p2.Dispose()
         if ($ec2 -ne 0) { throw "Fallo SOFTWARE" } else { Write-Host "OK" -ForegroundColor Green; $resumenMount.Cargadas++ }
 
         # --- Carga del Perfil Default (.DEFAULT) ---
         if (Test-Path $defaultHive) {
-            Write-Host "Cargando DEFAULT USER..." -NoNewline
+            Write-Host (Get-AIOString 'hives.loading_default_user') -NoNewline
             $p = Start-Process reg.exe -ArgumentList "load HKLM\OfflineDefaultUser `"$defaultHive`"" -Wait -PassThru -NoNewWindow
             if ($p.ExitCode -eq 0) { 
                 Write-Host "OK" -ForegroundColor Green 
                 $resumenMount.Cargadas++
             } else { 
-                Write-Host "FALLO (Omitido)" -ForegroundColor Red 
+                Write-Host (Get-AIOString 'hives.failed_skipped') -ForegroundColor Red 
                 $resumenMount.Fallidas += "DEFAULT"
                 Write-Log -LogLevel WARN -Message "Fallo al cargar DEFAULT (ExitCode: $($p.ExitCode))"
             }
@@ -3054,13 +3081,13 @@ function Mount-Hives {
 
         # COMPONENTS (A veces no existe en WinPE/Boot.wim muy ligeros)
         if (Test-Path $compHive) {
-            Write-Host "Cargando COMPONENTS..." -NoNewline
+            Write-Host (Get-AIOString 'hives.loading_components') -NoNewline
             $p = Start-Process reg.exe -ArgumentList "load HKLM\OfflineComponents `"$compHive`"" -Wait -PassThru -NoNewWindow
             if ($p.ExitCode -eq 0) { 
                 Write-Host "OK" -ForegroundColor Green 
                 $resumenMount.Cargadas++
             } else { 
-                Write-Host "FALLO (Omitido)" -ForegroundColor Red 
+                Write-Host (Get-AIOString 'hives.failed_skipped') -ForegroundColor Red 
                 $resumenMount.Fallidas += "COMPONENTS"
                 Write-Log -LogLevel WARN -Message "Fallo al cargar COMPONENTS (ExitCode: $($p.ExitCode))"
             }
@@ -3068,18 +3095,18 @@ function Mount-Hives {
 
         # NTUSER.DAT (No existe en Boot.wim)
         if (Test-Path $userHive) {
-            Write-Host "Cargando USER..." -NoNewline
+            Write-Host (Get-AIOString 'hives.loading_user') -NoNewline
             $p = Start-Process reg.exe -ArgumentList "load HKLM\OfflineUser `"$userHive`"" -Wait -PassThru -NoNewWindow
             if ($p.ExitCode -eq 0) { 
                 Write-Host "OK" -ForegroundColor Green 
                 $resumenMount.Cargadas++
             } else { 
-                Write-Host "FALLO (Omitido)" -ForegroundColor Red 
+                Write-Host (Get-AIOString 'hives.failed_skipped') -ForegroundColor Red 
                 $resumenMount.Fallidas += "USER"
                 Write-Log -LogLevel WARN -Message "Fallo al cargar NTUSER.DAT (ExitCode: $($p.ExitCode))"
             }
         } else {
-            Write-Host "USER (Omitido - Modo Boot/WinPE)" -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'hives.user_skipped_winpe') -ForegroundColor DarkGray
             $resumenMount.Omitidas++
         }
 
@@ -3116,13 +3143,13 @@ function Mount-Hives {
         }
 
         if (Test-Path $classHive) {
-            Write-Host "Cargando CLASSES..." -NoNewline
+            Write-Host (Get-AIOString 'hives.loading_classes') -NoNewline
             $p = Start-Process reg.exe -ArgumentList "load HKLM\OfflineUserClasses `"$classHive`"" -Wait -PassThru -NoNewWindow
             if ($p.ExitCode -eq 0) { 
                 Write-Host "OK" -ForegroundColor Green 
                 $resumenMount.Cargadas++
             } else { 
-                Write-Host "FALLO (Omitido)" -ForegroundColor Red 
+                Write-Host (Get-AIOString 'hives.failed_skipped') -ForegroundColor Red 
                 $resumenMount.Fallidas += "CLASSES"
                 Write-Log -LogLevel WARN -Message "Fallo al cargar UsrClass.dat (ExitCode: $($p.ExitCode))"
             }
@@ -3165,7 +3192,7 @@ if (-not ([System.Management.Automation.PSTypeName]'NativeRegistry').Type) {
 }
 
 function Unmount-Hives {
-    Write-Host "Guardando y descargando Hives..." -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'hives.unloading') -ForegroundColor Yellow
     Write-Log -LogLevel INFO -Message "UNMOUNT_HIVES: Iniciando proceso de descarga de colmenas de registro."
     $swUnmount = [System.Diagnostics.Stopwatch]::StartNew()
     $resumen = [ordered]@{
@@ -3196,7 +3223,7 @@ function Unmount-Hives {
     # responder a mensajes y queda desdibujada, y cualquier MessageBox pendiente
     # se atrasa junto con ella. Se sustituye por una espera equivalente que sigue
     # llamando a Application::DoEvents() en tramos cortos.
-    Write-Host "Esperando a que el sistema libere los manejadores de archivos..." -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'hives.waiting_handles') -ForegroundColor DarkGray
     Write-Log -LogLevel INFO -Message "UNMOUNT_HIVES: Pausa de seguridad de 5 segundos para liberar bloqueos del kernel."
     $waitUntil = (Get-Date).AddSeconds(5)
     while ((Get-Date) -lt $waitUntil) {
@@ -3270,10 +3297,10 @@ function Unmount-Hives {
                 Write-Log -LogLevel ERROR -Message "UNMOUNT_HIVES: Fallo CRITICO al desmontar $hive tras 5 intentos. Archivo permanentemente bloqueado."
                 
                 # FRENO DE EMERGENCIA: Si no abortamos aquí, DISM corromperá la imagen (CONFIG_INITIALIZATION_FAILED)
-                $errMsg = "ERROR LETAL: La colmena $hive sigue bloqueada en memoria por un proceso externo o el Antivirus.`n`nSi la imagen se guarda (Commit) en este estado, QUEDARA CORRUPTA (Pantallazo Azul).`nCierra cualquier programa, pausa el Antivirus e intentalo de nuevo."
+                $errMsg = Get-AIOString 'core.hive_locked_fatal' $hive
                 
                 Add-Type -AssemblyName System.Windows.Forms
-                [System.Windows.Forms.MessageBox]::Show($errMsg, "Peligro de Corrupcion", 'OK', 'Error')
+                [System.Windows.Forms.MessageBox]::Show($errMsg, (Get-AIOString 'hives.corruption_danger_title'), 'OK', 'Error')
                 
                 throw $errMsg
             }
@@ -3283,7 +3310,7 @@ function Unmount-Hives {
         }
     }
     $swUnmount.Stop()
-    Write-Host " [Proceso Finalizado]" -ForegroundColor Green
+    Write-Host (Get-AIOString 'hives.process_done') -ForegroundColor Green
     Write-Log -LogLevel INFO -Message ("UNMOUNT_HIVES: [RESUMEN] Desmontadas: $($resumen.Desmontadas) (Fallback nativo: $($resumen.ViaFallback)) | " +
         "Ya libres: $($resumen.NoMontadas) | Reintentos totales: $($resumen.Reintentos)" +
         $(if ($resumen.Fallidas.Count -gt 0) { " | FALLIDAS: $($resumen.Fallidas -join ', ')" } else { "" }) +
@@ -3845,7 +3872,7 @@ function Get-OfflineControlSet {
 
 # Funcion auxiliar de Check y Reparacion Montaje
 function Check-And-Repair-Mounts {
-    Write-Host 'Verificando consistencia del entorno WIM...' -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'mounts_repair.checking_wim') -ForegroundColor DarkGray
     if ($Script:IMAGE_MOUNTED -eq 2) { return }
     if (Test-AIOHostWinREProtectedMount -Path $Script:MOUNT_DIR) {
         Write-Log -LogLevel INFO -Message 'MountRepair: Se omite la recuperacion automatica por la comprobacion de WinRE del host.'
@@ -3868,8 +3895,8 @@ function Check-And-Repair-Mounts {
         if ($Script:IMAGE_MOUNTED -eq 1) { return }
     } elseif ($current.Status -in @('Needs Remount', 'Invalid')) {
         $msgResult = [System.Windows.Forms.MessageBox]::Show(
-            "DISM informa '$($current.Status)' en '$Script:MOUNT_DIR'.`n`n[Si] = Reconectar esta sesion para recuperar sus cambios (Remount-Image).`n[No] = Limpiar recursos corruptos no recuperables del equipo (Cleanup-Mountpoints). DISM conserva montajes validos y recuperables.`n[Cancelar] = Dejar el estado actual.",
-            'Recuperacion de Imagen', 'YesNoCancel', 'Warning'
+            (Get-AIOString 'mounts_repair.dialog_body' $current.Status $Script:MOUNT_DIR),
+            (Get-AIOString 'mounts_repair.dialog_title'), 'YesNoCancel', 'Warning'
         )
         if ($msgResult -eq 'No') {
             Repair-InvalidMounts
@@ -3877,23 +3904,23 @@ function Check-And-Repair-Mounts {
         }
         if ($msgResult -ne 'Yes') { return }
 
-        Write-Host '>>> INTENTANDO RECUPERAR SESION (Remount-Image)...' -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'mounts_repair.attempting_remount') -ForegroundColor Yellow
         Write-Log -LogLevel ACTION -Message "MountRepair: Iniciando Remount-Image de '$($current.ImageFile)', indice $($current.ImageIndex), en '$Script:MOUNT_DIR'."
         try {
             $remountResult = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -WaitForToolOnly -Arguments @('/Remount-Image',"/MountDir:$Script:MOUNT_DIR",'/English')
             $remountCode = $remountResult.ExitCode
             Write-Log -LogLevel INFO -Message "MountRepair: Remount-Image termino con codigo $remountCode."
         } catch {
-            Write-Warning "No se pudo ejecutar la recuperacion de la sesion: $($_.Exception.Message)"
+            Write-Warning (Get-AIOString 'mounts_repair.remount_exec_err' $_.Exception.Message)
             Write-Log -LogLevel ERROR -Message "MountRepair: Error ejecutando Remount-Image: $($_.Exception.Message)"
             return
         }
         if ($remountCode -ne 0) {
-            Write-Warning "No se pudo recuperar la sesion (codigo $remountCode). Los cambios no se han descartado."
+            Write-Warning (Get-AIOString 'mounts_repair.remount_failed_code' $remountCode)
             Write-Log -LogLevel ERROR -Message "MountRepair: Remount-Image fallo en '$Script:MOUNT_DIR': $remountCode"
             return
         }
-        Write-Host "DISM termino. Verificando el montaje en $Script:MOUNT_DIR..." -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'mounts_repair.dism_done_verifying' $Script:MOUNT_DIR) -ForegroundColor Cyan
         Write-Log -LogLevel INFO -Message "MountRepair: Consultando Get-MountedImageInfo despues del remonte."
         try {
             $updated = Get-AIOMountForPath -Mounts @(Get-AIOMountedImages) -Path $Script:MOUNT_DIR
@@ -3904,7 +3931,7 @@ function Check-And-Repair-Mounts {
             return
         }
     } else {
-        Write-Warning "Estado de montaje no reconocido en '$Script:MOUNT_DIR': $($current.Status)"
+        Write-Warning (Get-AIOString 'mounts_repair.status_unrecognized' $Script:MOUNT_DIR $current.Status)
         return
     }
     try {
@@ -3925,7 +3952,7 @@ function Check-And-Repair-Mounts {
         $Script:CachedControlSet = $null
         $Script:AIODashboardCache = $null
         $Script:ForceMenuRefresh = $false
-        Write-Host '[OK] Imagen recuperada y verificada.' -ForegroundColor Green
+        Write-Host (Get-AIOString 'mounts_repair.recovered_ok') -ForegroundColor Green
         Write-Log -LogLevel INFO -Message "MountRepair: Sesion recuperada en '$Script:MOUNT_DIR'."
     } catch {
         Write-Warning $_.Exception.Message
@@ -3953,25 +3980,25 @@ function Boot-Tools-Menu {
     while ($true) {
         Clear-Host
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host "       Gestion de Arranque y Medios (Boot Tools)       " -ForegroundColor Cyan
+        Write-Host (Get-AIOString 'menu.boot_tools.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "   [1] Editar boot.wim (Inyectar DaRT/Drivers)" -ForegroundColor Yellow
-        Write-Host "       (Modifica el entorno de instalacion o rescate)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.boot_tools.opt1') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'menu.boot_tools.opt1_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [2] Gestionar WinRE (Inyectar DaRT / Herramientas)" -ForegroundColor Yellow
-        Write-Host "       (Extrae, monta y modifica el entorno de recuperacion nativo)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.boot_tools.opt2') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'menu.boot_tools.opt2_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [3] Crear ISO Booteable" -ForegroundColor White
-        Write-Host "       (Genera una ISO compatible con BIOS/UEFI)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.boot_tools.opt3') -ForegroundColor White
+        Write-Host (Get-AIOString 'menu.boot_tools.opt3_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [4] Despliegue a VHD / Disco Fisico" -ForegroundColor White
-        Write-Host "       (Aplica una imagen WIM/ESD a un VHDX o disco USB/externo)" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.boot_tools.opt4') -ForegroundColor White
+        Write-Host (Get-AIOString 'menu.boot_tools.opt4_desc') -ForegroundColor Gray
         Write-Host ""
-        Write-Host "   [V] Volver al Menu Principal" -ForegroundColor Red
+        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
         Write-Host ""
 
-        $bootOpt = (Read-MenuOption " Elige una opcion").Trim().ToUpper()
+        $bootOpt = (Read-MenuOption (Get-AIOString 'common.select_option_spaced')).Trim().ToUpper()
         switch ($bootOpt) {
             "1" { Write-Log -LogLevel INFO -Message "MenuBoot: Accediendo a 'Manage-BootWim-Menu'"; Manage-BootWim-Menu }
             "2" { Invoke-IfMounted "Manage-WinRE-Menu" { Manage-WinRE-Menu } }
@@ -3980,7 +4007,7 @@ function Boot-Tools-Menu {
             "V" { Write-Log -LogLevel INFO -Message "MenuBoot: Volviendo al menu principal"; return }
             default {
                 Write-Log -LogLevel WARN -Message "MenuBoot: Opcion invalida seleccionada ($bootOpt)."
-                Write-Warning "Opcion invalida"
+                Write-Warning (Get-AIOString 'common.invalid_option_short')
             }
         }
     }
@@ -3994,11 +4021,11 @@ function Main-Menu {
     $width        = 80
     $separator    = "=" * $width
     $separatorMid = "-" * $width
-    $title        = "ADMINISTRADOR DE IMAGEN OFFLINE"
     $verStr       = "v$($script:Version)"
     $auth         = "by SOFTMAXTER"
 
     while ($true) {
+        $title = Get-AIOString 'menu.main.title'
         $metadata = Get-AIOCachedDashboardMetadata -MountState $Script:IMAGE_MOUNTED -MountPath $Script:MOUNT_DIR `
             -ImagePath $Script:WIM_FILE_PATH -Index $Script:MOUNTED_INDEX -ForceRefresh:$Script:ForceMenuRefresh
         # Consumir la solicitud una sola vez; la navegacion conserva la cache.
@@ -4015,19 +4042,18 @@ function Main-Menu {
         
         # Panel de Estado
         Write-Host ""
-        Write-Host " ESTADO ACTUAL:" -ForegroundColor Yellow
-        Write-Host "  + Fuente      : " -NoNewline
-        if ($Script:WIM_FILE_PATH) { 
-            # Truncar ruta si es muy larga para que no rompa el diseno
+        Write-Host (Get-AIOString 'menu.main.status_header') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'menu.main.source_label') -NoNewline
+        if ($Script:WIM_FILE_PATH) {
             $displayPath = if ($Script:WIM_FILE_PATH.Length -gt 60) { "..." + $Script:WIM_FILE_PATH.Substring($Script:WIM_FILE_PATH.Length - 60) } else { $Script:WIM_FILE_PATH }
-            Write-Host $displayPath -ForegroundColor White 
-        } else { Write-Host "Ninguna seleccionada" -ForegroundColor DarkGray }
+            Write-Host $displayPath -ForegroundColor White
+        } else { Write-Host (Get-AIOString 'menu.main.source_none') -ForegroundColor DarkGray }
 
-        Write-Host "  + Montaje     : " -NoNewline
+        Write-Host (Get-AIOString 'menu.main.mount_label') -NoNewline
         switch ($Script:IMAGE_MOUNTED) {
-            1 { Write-Host "[WIM] EN EDICION"    -ForegroundColor Green   -NoNewline; Write-Host " (Indice: $Script:MOUNTED_INDEX)" -ForegroundColor Gray }
-            2 { Write-Host "[VHD] DISCO VIRTUAL" -ForegroundColor Magenta -NoNewline; Write-Host " (Modo Directo)"                 -ForegroundColor Gray }
-            Default { Write-Host "NO MONTADA" -ForegroundColor Red }
+            1 { Write-Host (Get-AIOString 'menu.main.mount_wim_active') -ForegroundColor Green   -NoNewline; Write-Host (Get-AIOString 'menu.main.mount_wim_index' $Script:MOUNTED_INDEX) -ForegroundColor Gray }
+            2 { Write-Host (Get-AIOString 'menu.main.mount_vhd_active') -ForegroundColor Magenta -NoNewline; Write-Host (Get-AIOString 'menu.main.mount_vhd_mode') -ForegroundColor Gray }
+            Default { Write-Host (Get-AIOString 'common.status_not_mounted') -ForegroundColor Red }
         }
         Write-Host ""
 
@@ -4039,45 +4065,45 @@ function Main-Menu {
         Write-Host ""
 
         if ($Script:AIOHostWinREAttentionRequired) {
-            Write-Host ' AVISO DE INICIO: se conservaron montajes WinRE o no pudieron verificarse.' -ForegroundColor Yellow
-            Write-Host ' No se recuperaron automaticamente. Consulta Registro.log para el detalle.' -ForegroundColor Gray
+            Write-Host (Get-AIOString 'startup.winre_notice_line1') -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'startup.winre_notice_line2') -ForegroundColor Gray
             Write-Host ''
         }
 
         # Menu de Opciones
-        Write-Host " [ GESTION DE IMAGEN ]" -ForegroundColor Yellow
-        Write-Host "   1. Montar / Guardar / Desmontar Imagen"
-        Write-Host "   2. Convertir Formatos (ESD -> WIM, VHD -> WIM)"
-        Write-Host "   3. Herramientas de Arranque y Medios (Boot.wim, WinRE, ISO, VHD)"
-        Write-Host "   4. Actualizaciones e Idiomas (install.wim, winre.wim, boot.wim, LangPacks)" -ForegroundColor Green
+        Write-Host (Get-AIOString 'menu.main.section_image') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'menu.main.opt1')
+        Write-Host (Get-AIOString 'menu.main.opt2')
+        Write-Host (Get-AIOString 'menu.main.opt3')
+        Write-Host (Get-AIOString 'menu.main.opt4') -ForegroundColor Green
         Write-Host ""
-        Write-Host " [ INGENIERIA & AJUSTES ]" -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'menu.main.section_engineering') -ForegroundColor Yellow
         if ($Script:IMAGE_MOUNTED -gt 0) {
-            Write-Host "   5. Drivers (Inyectar/Eliminar)"                            -ForegroundColor White
-            Write-Host "   6. Contenido de la Imagen (Bloatware, Appx, Addons)"       -ForegroundColor White
-            Write-Host "   7. Sistema y Comportamiento (Features, Servicios, Tweaks)" -ForegroundColor White
-            Write-Host "   8. OOBE y Marca (Unattend, OEM Branding)"                  -ForegroundColor White
-            Write-Host "   9. Limpieza y Reparacion (DISM/SFC)"                       -ForegroundColor White
-            Write-Host "   10. Cambiar Edicion (Home -> Pro)"                         -ForegroundColor White
+            Write-Host (Get-AIOString 'menu.main.opt5_on')  -ForegroundColor White
+            Write-Host (Get-AIOString 'menu.main.opt6_on')  -ForegroundColor White
+            Write-Host (Get-AIOString 'menu.main.opt7_on')  -ForegroundColor White
+            Write-Host (Get-AIOString 'menu.main.opt8_on')  -ForegroundColor White
+            Write-Host (Get-AIOString 'menu.main.opt9_on')  -ForegroundColor White
+            Write-Host (Get-AIOString 'menu.main.opt10_on') -ForegroundColor White
         } else {
             # Opciones deshabilitadas visualmente
-            Write-Host "   5. Drivers (Requiere Montaje)"                       -ForegroundColor DarkGray
-            Write-Host "   6. Contenido de la Imagen (Requiere Montaje)"        -ForegroundColor DarkGray
-            Write-Host "   7. Sistema y Comportamiento (Requiere Montaje)"      -ForegroundColor DarkGray
-            Write-Host "   8. OOBE y Marca (Requiere Montaje)"                  -ForegroundColor DarkGray
-            Write-Host "   9. Limpieza y Reparacion (Requiere Montaje)"         -ForegroundColor DarkGray
-            Write-Host "   10. Cambiar Edicion (Requiere Montaje)"              -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'menu.main.opt5_off')  -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'menu.main.opt6_off')  -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'menu.main.opt7_off')  -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'menu.main.opt8_off')  -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'menu.main.opt9_off')  -ForegroundColor DarkGray
+            Write-Host (Get-AIOString 'menu.main.opt10_off') -ForegroundColor DarkGray
         }
         Write-Host ""
-        Write-Host " [ SISTEMA ]" -ForegroundColor Yellow
-        Write-Host "   [R] Configuracion (Rutas)"
+        Write-Host (Get-AIOString 'menu.main.section_system') -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'menu.main.opt_config')
         Write-Host ""
         Write-Host $separatorMid
-        Write-Host "   [L] Ver Logs   [H] Ayuda/Info   [S] Salir" -ForegroundColor Gray
+        Write-Host (Get-AIOString 'menu.main.footer') -ForegroundColor Gray
         Write-Host ""
 
         # [FIX] .Trim() antes de .ToUpper() para tolerar espacios accidentales en el input
-        $prompt  = if ($Script:IMAGE_MOUNTED -gt 0) { "Comando (Imagen Lista)" } else { "Seleccione una opcion" }
+        $prompt  = if ($Script:IMAGE_MOUNTED -gt 0) { Get-AIOString 'menu.main.prompt_ready' } else { Get-AIOString 'menu.main.prompt_idle' }
         $opcionM = (Read-Host " $prompt").Trim().ToUpper()
         
         # Manejo de Errores y Navegacion
@@ -4092,61 +4118,56 @@ function Main-Menu {
             "8"  { Invoke-IfMounted "OOBE-Branding-Menu"  { OOBE-Branding-Menu  } }
             "9"  { Invoke-IfMounted "Limpieza-Menu"       { Limpieza-Menu       } }
             "10" { Invoke-IfMounted "Cambio-Edicion-Menu" { Cambio-Edicion-Menu } }
-            "R"  { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Show-ConfigMenu'"; Show-ConfigMenu }
+            "C"  { Write-Log -LogLevel INFO -Message "MenuMain: Accediendo a 'Show-ConfigMenu'"; Show-ConfigMenu }
             "L" {
                 if ($null -ne $script:logFile -and (Test-Path $script:logFile)) {
                     Write-Log -LogLevel INFO -Message "MenuMain: El usuario abrio el archivo de Log principal."
                     Start-Process notepad.exe -ArgumentList $script:logFile
                 } else {
                     Write-Log -LogLevel ERROR -Message "MenuMain: Intento de abrir el log fallido. El archivo no existe aun."
-                    [System.Windows.Forms.MessageBox]::Show("El archivo de log aun no existe o la ruta no es valida.", "Error", 'OK', 'Error')
+                    [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'menu.main.log_missing'), (Get-AIOString 'common.error_title'), 'OK', 'Error')
                 }
             }
             "H" {
-                $msg = "AdminImagenOffline v$($script:Version)`n" +
-                       "Desarrollado por SOFTMAXTER`n`n" +
-                       "Email: softmaxter@hotmail.com`n" +
-                       "Blog: softmaxter.blogspot.com`n`n" +
-                       "Una suite integral para el mantenimiento proactivo de sistemas Windows."
-                
-                [System.Windows.Forms.MessageBox]::Show($msg, "Acerca de", 0, 64)
+                $msg = Get-AIOString 'menu.main.about_body' $script:Version
+                [System.Windows.Forms.MessageBox]::Show($msg, (Get-AIOString 'menu.main.about_title'), 0, 64)
             }
             "S" { 
                 Write-Log -LogLevel ACTION -Message "MenuMain: El usuario inicio la secuencia de salida del programa."
                 if ($Script:IMAGE_MOUNTED -gt 0) {
                     [System.Console]::Beep(500, 300)
-                    $confirmExit = Read-Host "¡Hay una imagen montada! Si sales ahora, quedara bloqueada en el sistema.`nDeseas GUARDAR LOS CAMBIOS y desmontarla antes de salir? (S/N/Cancelar)"
+                    $confirmExit = Read-Host (Get-AIOString 'menu.main.exit_mounted_prompt')
                     
-                    if ($confirmExit -eq 'S') { 
+                    if (Test-AIOYesResponse $confirmExit) {
                         Write-Log -LogLevel ACTION -Message "MenuExit: El usuario acepto desmontar (con guardado) antes de salir."
                         Unmount-Image -Commit
                         
                         # Validacion post-desmontaje (Previene el cierre si fallo DISM)
                         if ($Script:IMAGE_MOUNTED -eq 0) { exit }
-                        else { 
+                        else {
                             Write-Log -LogLevel WARN -Message "MenuExit: Abortando salida. El desmontaje fracasó."
-                            Write-Warning "No se pudo cerrar el programa de forma segura. Resuelve el error de DISM e intentalo de nuevo."
+                            Write-Warning (Get-AIOString 'menu.main.exit_dism_failed')
                             Start-Sleep -Seconds 3
                         }
                     }
-                    elseif ($confirmExit -eq 'N') { 
+                    elseif (Test-AIONoResponse $confirmExit) {
                         Write-Log -LogLevel ERROR -Message "MenuExit: ALERTA - El usuario forzo la salida dejando una imagen montada (Huerfana)."
-                        Write-Warning "Saliendo... La imagen quedara huerfana. Recuerda ejecutar 'Limpieza' en tu proxima sesion."
+                        Write-Warning (Get-AIOString 'menu.main.exit_orphan_warn')
                         Start-Sleep -Seconds 2
-                        exit 
+                        exit
                     }
                     else {
                         Write-Log -LogLevel INFO -Message "MenuExit: El usuario cancelo la salida. Volviendo al menu."
                     }
                 } else {
                     Write-Log -LogLevel INFO -Message "MenuExit: Saliendo del programa limpiamente (Sin imagenes montadas)."
-                    Write-Host "Hasta luego, Ingeniero." -ForegroundColor Green
+                    Write-Host (Get-AIOString 'menu.main.goodbye') -ForegroundColor Green
                     Start-Sleep -Seconds 1
                     exit 
                 }
             }
             default { 
-                Write-Host " Opcion no valida. Intente de nuevo." -ForegroundColor Red -BackgroundColor Black
+                Write-Host (Get-AIOString 'common.invalid_option_retry') -ForegroundColor Red -BackgroundColor Black
                 Start-Sleep -Milliseconds 500
             }
         }
@@ -4156,7 +4177,7 @@ function Main-Menu {
 # Pequeña funcion auxiliar para evitar repetir el mensaje de error
 function Show-Mount-Warning {
     [System.Console]::Beep(400, 200)
-    Write-Host " [!] ACCION BLOQUEADA: Debe montar una imagen primero (Opcion 1)." -ForegroundColor Yellow -BackgroundColor DarkRed
+    Write-Host (Get-AIOString 'common.mount_blocked') -ForegroundColor Yellow -BackgroundColor DarkRed
     Start-Sleep -Seconds 2
 }
 
@@ -4192,7 +4213,7 @@ function Invoke-AIOConsoleSystemTool {
         if ($WaitForToolOnly) {
             Write-Log -LogLevel INFO -Message "ConsoleTool: $Tool iniciado, PID=$($process.Id)."
             while (-not $process.WaitForExit(30000)) {
-                Write-Host "Esperando a $Tool (PID $($process.Id))..." -ForegroundColor DarkGray
+                Write-Host (Get-AIOString 'core.waiting_tool' $Tool $process.Id) -ForegroundColor DarkGray
             }
         } else {
             $process.WaitForExit()
@@ -4443,21 +4464,21 @@ function Test-AIOHostWinREProtectedMount {
 function Read-AIOHostWinREUnmountChoice {
     param([Parameter(Mandatory=$true)]$Mount)
     if ($Mount.ReadWrite -eq 'Yes') {
-        Write-Host '  [1] Guardar cambios y desmontar (/Commit)' -ForegroundColor Green
-        Write-Host '  [2] Descartar TODOS los cambios pendientes y desmontar (/Discard)' -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'host_winre.opt_commit') -ForegroundColor Green
+        Write-Host (Get-AIOString 'host_winre.opt_discard') -ForegroundColor Yellow
     } else {
-        Write-Host '  [1] Desmontar la imagen de solo lectura' -ForegroundColor Green
+        Write-Host (Get-AIOString 'host_winre.opt_readonly') -ForegroundColor Green
     }
-    Write-Host '  [3] Conservar montado (Enter = conservar)' -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'host_winre.opt_keep') -ForegroundColor Cyan
     while ($true) {
-        $choice = ([string](Read-Host 'Selecciona una opcion' -ErrorAction Stop)).Trim()
+        $choice = ([string](Read-Host (Get-AIOString 'common.select_option') -ErrorAction Stop)).Trim()
         if ($choice -eq '' -or $choice -eq '3') { return 'Keep' }
         if ($choice -eq '1') {
             if ($Mount.ReadWrite -eq 'Yes') { return 'Commit' }
             return 'Discard' # DISM exige Discard para cerrar una imagen de solo lectura.
         }
         if ($choice -eq '2' -and $Mount.ReadWrite -eq 'Yes') { return 'Discard' }
-        Write-Host 'Opcion no valida. No se ha modificado el montaje.' -ForegroundColor Yellow
+        Write-Host (Get-AIOString 'host_winre.invalid_unchanged') -ForegroundColor Yellow
     }
 }
 
@@ -4472,7 +4493,7 @@ function Dismount-AIOHostWinREBeforeMenu {
     } catch {
         $Script:AIOHostWinRECheckFailed = $true
         $Script:AIOHostWinREAttentionRequired = $true
-        Write-Warning "No se pudo verificar el WinRE del host. Se omite la recuperacion automatica de montajes: $($_.Exception.Message)"
+        Write-Warning (Get-AIOString 'host_winre.verify_failed_warn' $_.Exception.Message)
         Write-Log -LogLevel WARN -Message "HostWinRECheck: Comprobacion incompleta; montajes intactos. $($_.Exception.Message)"
         return
     }
@@ -4485,16 +4506,16 @@ function Dismount-AIOHostWinREBeforeMenu {
             $Script:AIOHostWinREProtectedMounts += $match.MountPath
             if (-not $match.Confirmed) {
                 $Script:AIOHostWinREAttentionRequired = $true
-                Write-Warning "No se confirmo que '$($mount.ImageFile)' pertenezca al host. Se conserva '$($mount.MountDir)' y no se recupera automaticamente."
+                Write-Warning (Get-AIOString 'host_winre.unconfirmed_host_warn' $mount.ImageFile $mount.MountDir)
                 Write-Log -LogLevel WARN -Message "HostWinRECheck: Origen no confirmado; se conserva '$($mount.MountDir)' ($($mount.ImageFile))."
                 continue
             }
-            Write-Host "`n[!] WinRE del anfitrion confirmado:" -ForegroundColor Yellow
-            Write-Host "    Archivo : $($mount.ImageFile)" -ForegroundColor Gray
-            Write-Host "    Montaje : $($mount.MountDir) | Indice: $($mount.ImageIndex) | Estado: $($mount.Status)" -ForegroundColor Gray
+            Write-Host (Get-AIOString 'host_winre.confirmed_hdr') -ForegroundColor Yellow
+            Write-Host (Get-AIOString 'host_winre.lbl_file' $mount.ImageFile) -ForegroundColor Gray
+            Write-Host (Get-AIOString 'host_winre.lbl_mount' $mount.MountDir $mount.ImageIndex $mount.Status) -ForegroundColor Gray
             if ($mount.Status -ne 'OK' -or $mount.ReadWrite -notin @('Yes','No') -or $mount.ImageIndex -lt 1) {
                 $Script:AIOHostWinREAttentionRequired = $true
-                Write-Warning 'El montaje requiere revision manual. Se conserva sin intentar reparar ni descartar cambios.'
+                Write-Warning (Get-AIOString 'host_winre.manual_review_warn')
                 Write-Log -LogLevel WARN -Message "HostWinRECheck: Se conserva '$($mount.MountDir)'; estado/permisos/indice no aptos para desmontaje."
                 continue
             }
@@ -4509,7 +4530,7 @@ function Dismount-AIOHostWinREBeforeMenu {
             # Revalidar inventario, origen del host, indice, permisos y metodo.
             $current = Get-AIOMountForPath -Mounts @(Get-AIOMountedImages) -Path $mount.MountDir
             if ($null -eq $current) {
-                Write-Host 'El montaje ya no figura en DISM; no se ejecutara ningun desmontaje.' -ForegroundColor Gray
+                Write-Host (Get-AIOString 'host_winre.no_longer_listed') -ForegroundColor Gray
                 continue
             }
             $freshConfig = Get-AIOHostWinREConfiguration
@@ -4521,7 +4542,7 @@ function Dismount-AIOHostWinREBeforeMenu {
                 throw 'El montaje o la configuracion de WinRE cambio. Se cancelo el desmontaje para no actuar sobre otra imagen.'
             }
 
-            Write-Host "[+] Desmontando WinRE del host (/$choice)..." -ForegroundColor Cyan
+            Write-Host (Get-AIOString 'host_winre.unmounting' $choice) -ForegroundColor Cyan
             Write-Log -LogLevel ACTION -Message "HostWinRECheck: Usuario eligio /$choice para '$($current.MountDir)' ($($current.ImageFile))."
             # No descargar colmenas ajenas ni usar Cleanup-Mountpoints. Si otro
             # proceso mantiene archivos abiertos, conservar el error y el montaje.
@@ -4543,14 +4564,14 @@ function Dismount-AIOHostWinREBeforeMenu {
             $Script:AIOHostWinREProtectedMounts = @(
                 $Script:AIOHostWinREProtectedMounts | Where-Object { $_ -ine $match.MountPath }
             )
-            Write-Host '[OK] Desmontaje del WinRE del host verificado.' -ForegroundColor Green
+            Write-Host (Get-AIOString 'host_winre.unmounted_ok') -ForegroundColor Green
             Write-Log -LogLevel INFO -Message "HostWinRECheck: /$choice completado y ausencia en DISM verificada: '$($current.MountDir)'."
         } catch {
             # No declarar exito ni permitir que las rutas posteriores adopten
             # imagenes cuyo estado/origen no se pudo comprobar en esta sesion.
             $Script:AIOHostWinRECheckFailed = $true
             $Script:AIOHostWinREAttentionRequired = $true
-            Write-Warning "No se confirmo el desmontaje de '$($mount.MountDir)': $($_.Exception.Message)"
+            Write-Warning (Get-AIOString 'host_winre.unmount_unconfirmed' $mount.MountDir $_.Exception.Message)
             Write-Log -LogLevel ERROR -Message "HostWinRECheck: Se suspende la recuperacion automatica. $($_.Exception.Message)"
             return
         }
@@ -4563,7 +4584,7 @@ function Dismount-AIOHostWinREBeforeMenu {
 # =================================================================
 $Script:IMAGE_MOUNTED = 0; $Script:WIM_FILE_PATH = $null; $Script:MOUNTED_INDEX = $null
 
-Write-Host "Verificando imagenes montadas..." -ForegroundColor Gray
+Write-Host (Get-AIOString 'core.checking_mounted') -ForegroundColor Gray
 
 # --- PASO 0: COMPROBAR WINRE DEL HOST Y ELEGIR QUE HACER CON SUS CAMBIOS ---
 Dismount-AIOHostWinREBeforeMenu
@@ -4584,7 +4605,7 @@ try {
         Write-Log -LogLevel INFO -Message "WIM detectado y validado: $Script:WIM_FILE_PATH en $Script:MOUNT_DIR"
     }
 } catch {
-    Write-Warning "No se pudo comprobar el inventario de DISM: $($_.Exception.Message)"
+    Write-Warning (Get-AIOString 'startup.dism_inventory_warn' $_.Exception.Message)
     Write-Log -LogLevel WARN -Message "Error verificando DISM: $($_.Exception.Message)"
 }
 
@@ -4597,8 +4618,8 @@ if ($Script:IMAGE_MOUNTED -eq 0 -and -not $Script:AIOHostWinRECheckFailed) {
 if ($Script:IMAGE_MOUNTED -eq 0) {
     Write-Log -LogLevel INFO -Message "No se recupero ninguna imagen previa para edicion."
 } elseif ($Script:IMAGE_MOUNTED -eq 1) {
-    Write-Host "Imagen WIM encontrada: $($Script:WIM_FILE_PATH)" -ForegroundColor Yellow
-    Write-Host "Indice: $($Script:MOUNTED_INDEX) | Montada en: $($Script:MOUNT_DIR)" -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'startup.wim_recovered' $Script:WIM_FILE_PATH) -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'startup.wim_recovered_detail' $Script:MOUNTED_INDEX $Script:MOUNT_DIR) -ForegroundColor Yellow
     
     # Limpieza preventiva de hives huerfanos si se detecto un montaje previo
     Unmount-Hives 
@@ -4622,7 +4643,7 @@ Check-And-Repair-Mounts
 $OnExitScript = {
     # Solo intentamos desmontar si detectamos que se quedaron montados
     if (Test-Path "Registry::HKLM\OfflineSystem") {
-        Write-Host "`n[EVENTO SALIDA] Finalizando la sesion. Limpiando Hives..." -ForegroundColor Red
+        Write-Host (Get-AIOString 'startup.exit_event_hives') -ForegroundColor Red
         # Invocamos la logica de desmontaje directamente (sin llamar a la funcion para evitar conflictos de scope)
         $hives = @("HKLM\OfflineSystem", "HKLM\OfflineSoftware", "HKLM\OfflineComponents", "HKLM\OfflineDefaultUser", "HKLM\OfflineUser", "HKLM\OfflineUserClasses")
         foreach ($h in $hives) { 
@@ -4657,12 +4678,12 @@ catch {
     # 2. Formatear mensaje para el usuario (Limpio)
     Clear-Host
     Write-Host "=======================================================" -ForegroundColor Red
-    Write-Host "             ¡ERROR CRITICO DEL SISTEMA!               " -ForegroundColor Red
+    Write-Host (Get-AIOString 'crash.title') -ForegroundColor Red
     Write-Host "=======================================================" -ForegroundColor Red
     Write-Host ""
-    Write-Host "Ha ocurrido un error inesperado que detuvo la ejecucion." -ForegroundColor Gray
-    Write-Host "Error: " -NoNewline; Write-Host $_.ToString() -ForegroundColor Yellow
-    Write-Host "Línea: " -NoNewline; Write-Host $line -ForegroundColor Cyan
+    Write-Host (Get-AIOString 'crash.unexpected') -ForegroundColor Gray
+    Write-Host (Get-AIOString 'crash.error_label') -NoNewline; Write-Host $_.ToString() -ForegroundColor Yellow
+    Write-Host (Get-AIOString 'crash.line_label') -NoNewline; Write-Host $line -ForegroundColor Cyan
     Write-Host ""
 
     # 3. Escribir Log Técnico Completo (Reporte Forense)
@@ -4690,14 +4711,14 @@ $stack
     Write-Log -LogLevel ERROR -Message $logPayload
 
     # 4. Opción de recuperación
-    Write-Host "El detalle tecnico forense se ha guardado en el archivo de registro (Logs\Registro.log)." -ForegroundColor Gray
-    Write-Warning "El sistema intentara desmontar las colmenas y limpiar el entorno automaticamente."
+    Write-Host (Get-AIOString 'crash.forensic_saved') -ForegroundColor Gray
+    Write-Warning (Get-AIOString 'crash.auto_cleanup_warn')
     Pause
 }
 
 finally {
     # ESTO SE EJECUTA SIEMPRE: Ya sea que salgas bien, por error, o con CTRL+C
-    Write-Host "`n[SISTEMA] Finalizando y asegurando limpieza..." -ForegroundColor DarkGray
+    Write-Host (Get-AIOString 'startup.finalizing_cleanup') -ForegroundColor DarkGray
     
     try {
         # No ocultar el error si alguna colmena sigue cargada.
