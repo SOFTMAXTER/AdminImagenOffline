@@ -4,9 +4,9 @@
     # ANTI-BLOATWARE
     # =========================================================
     [PSCustomObject]@{
-        Name           = "Bloquear Reinstalacion de Apps Basura (Consumer Features)"
-        Category       = "Anti-Bloatware"
-        Description    = "Impide que Windows descargue automaticamente Candy Crush, Spotify y otras apps patrocinadas al conectar a internet."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t01')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.antibloat')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t01')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\CloudContent"
         RegistryKey    = "DisableWindowsConsumerFeatures"
@@ -15,9 +15,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Bloquear Sugerencias en el Inicio (Soft Landing)"
-        Category       = "Anti-Bloatware"
-        Description    = "Evita que Windows muestre sugerencias y consejos de 'Bienvenida' que a menudo instalan software no deseado."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t02')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.antibloat')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t02')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\CloudContent"
         RegistryKey    = "DisableSoftLanding"
@@ -30,9 +30,9 @@
     # RENDIMIENTO DEL SISTEMA (JUEGOS Y GENERAL)
     # =========================================================
     [PSCustomObject]@{
-        Name           = "Maximo Rendimiento Multimedia (SystemResponsiveness 0)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Asigna el 100% de la CPU a juegos y multimedia, eliminando la reserva del 20% para procesos en segundo plano."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t03')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t03')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
         RegistryKey    = "SystemResponsiveness"
@@ -41,9 +41,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Prioridad de GPU Extrema para Juegos"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Fuerza al planificador multimedia a dar maxima prioridad grafica a las aplicaciones de pantalla completa."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t04')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t04')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games"
         RegistryKey    = "GPU Priority"
@@ -52,9 +52,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Prioridad de CPU Extrema para Juegos"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Fuerza al planificador multimedia a dar prioridad alta de CPU a los juegos."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t05')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t05')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Games"
         RegistryKey    = "Priority"
@@ -63,9 +63,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Desactivar Grabacion en Segundo Plano (GameDVR)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Deshabilita la funcion de Xbox Game DVR a nivel de directiva de maquina para evitar tirones de FPS."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t06')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t06')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PolicyManager\default\ApplicationManagement\AllowGameDVR"
         RegistryKey    = "value"
@@ -74,9 +74,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Habilitar Programacion de GPU (HAGS)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Hardware Accelerated GPU Scheduling. Reduce latencia en juegos (requiere hardware compatible)."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t07')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t07')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\GraphicsDrivers"
         RegistryKey    = "HwSchMode"
@@ -85,9 +85,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Priorizar Aplicacion en Primer Plano (CPU Boost)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Modifica el planificador para dar mas prioridad de CPU a la ventana activa."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t08')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t08')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\PriorityControl"
         RegistryKey    = "Win32PrioritySeparation"
@@ -96,9 +96,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Optimizar Uso de Memoria NTFS"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Aumenta la cache del sistema de archivos. Recomendado para equipos con mas de 8GB de RAM."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t09')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t09')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem"
         RegistryKey    = "NtfsMemoryUsage"
@@ -107,9 +107,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Acelerar Apagado (WaitToKillService)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Reduce el tiempo de espera para cerrar servicios al apagar (2000ms)."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t10')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t10')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control"
         RegistryKey    = "WaitToKillServiceTimeout"
@@ -118,9 +118,9 @@
         RegistryType   = "String"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Indexacion 'Mejorada' (Forzar Clasico)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Evita que Windows indexe todo el disco duro, limitandolo a bibliotecas y escritorio para ahorrar CPU/Disco."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t11')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t11')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows Search"
         RegistryKey    = "EnableEnhancedSearchMode"
@@ -129,9 +129,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Superfetch / SysMain"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Recomendado para discos SSD. Evita la pre-carga constante en memoria y ahorra desgaste de escritura."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t12')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t12')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\SysMain"
         RegistryKey    = "Start"
@@ -140,9 +140,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Desactivar Hibernacion (Hiberfil.sys)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Libera gigabytes de espacio en el disco C: desactivando el archivo de hibernacion de Windows."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t13')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t13')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Power"
         RegistryKey    = "HibernateEnabled"
@@ -151,9 +151,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Aislamiento del Nucleo (VBS / Memory Integrity)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Mejora el rendimiento en juegos (hasta un 15%) apagando la virtualizacion de seguridad. (Reduce seguridad)."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t14')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t14')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity"
         RegistryKey    = "Enabled"
@@ -162,9 +162,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Mapas Descargados (MapsBroker)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "Apaga el administrador de mapas offline. Excelente para ahorrar RAM si no usas la app Mapas de Windows."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t15')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t15')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\MapsBroker"
         RegistryKey    = "Start"
@@ -173,9 +173,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Cola de Impresion (Print Spooler)"
-        Category       = "Rendimiento del Sistema"
-        Description    = "ATENCION: Activa esto SOLO si jamas vas a usar una impresora fisica o imprimir en PDF. Ahorra RAM y cierra brechas de seguridad."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t16')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.sysperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t16')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Spooler"
         RegistryKey    = "Start"
@@ -188,9 +188,9 @@
     # RENDIMIENTO UI E INTERFAZ
     # =========================================================
     [PSCustomObject]@{
-        Name           = "Deshabilitar Retraso de Inicio (StartupDelay)"
-        Category       = "Rendimiento UI"
-        Description    = "Elimina la demora artificial al cargar programas de inicio a nivel de maquina."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t17')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.uiperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t17')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Serialize"
         RegistryKey    = "StartupDelayInMSec"
@@ -199,9 +199,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Aumentar Cache de Iconos (4MB)"
-        Category       = "Rendimiento UI"
-        Description    = "Evita que los iconos se recarguen o parpadeen en el Explorador."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t18')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.uiperf')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t18')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer"
         RegistryKey    = "MaxCachedIcons"
@@ -214,9 +214,9 @@
     # WINDOWS 11 UI
     # =========================================================
     [PSCustomObject]@{
-        Name           = "Deshabilitar Windows Copilot"
-        Category       = "Windows 11 UI"
-        Description    = "Elimina el asistente de IA de la barra de tareas mediante directiva de maquina."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t19')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.win11ui')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t19')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot"
         RegistryKey    = "TurnOffWindowsCopilot"
@@ -225,9 +225,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Search Highlights (Dibujos)"
-        Category       = "Windows 11 UI"
-        Description    = "Quita los iconos animados del cuadro de busqueda a nivel de maquina."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t20')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.win11ui')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t20')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
         RegistryKey    = "EnableSearchHighlights"
@@ -236,9 +236,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Ocultar Boton de Vista de Tareas (Global)"
-        Category       = "Windows 11 UI"
-        Description    = "Elimina el icono de multiples escritorios de la barra de tareas para todos los usuarios."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t21')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.win11ui')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t21')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Explorer"
         RegistryKey    = "HideTaskViewButton"
@@ -247,9 +247,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Desenfoque (Blur) en Pantalla de Bloqueo"
-        Category       = "Windows 11 UI"
-        Description    = "Muestra el fondo de la pantalla de inicio de sesion nitido, sin el efecto acrilico borroso que consume GPU."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t22')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.win11ui')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t22')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\System"
         RegistryKey    = "DisableAcrylicBackgroundOnLogon"
@@ -262,9 +262,9 @@
     # PRIVACIDAD Y TELEMETRIA
     # =========================================================
     [PSCustomObject]@{
-        Name           = "Desactivar ID de Publicidad (Global)"
-        Category       = "Privacidad"
-        Description    = "Impide el rastreo para anuncios personalizados a nivel de maquina."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t23')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.privacy')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t23')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo"
         RegistryKey    = "Enabled"
@@ -273,9 +273,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Desactivar Telemetria (AllowTelemetry)"
-        Category       = "Privacidad"
-        Description    = "Reduce el envio de datos a Microsoft al minimo (Security Only)."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t24')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.privacy')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t24')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\DataCollection"
         RegistryKey    = "AllowTelemetry"
@@ -284,9 +284,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Windows Recall (IA Snapshots)"
-        Category       = "Privacidad"
-        Description    = "Evita que la IA saque capturas de tu actividad."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t25')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.privacy')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t25')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\WindowsAI"
         RegistryKey    = "DisableAIDataAnalysis"
@@ -295,9 +295,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Cortana"
-        Category       = "Privacidad"
-        Description    = "Desactiva Cortana por directiva global."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t26')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.privacy')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t26')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
         RegistryKey    = "AllowCortana"
@@ -306,9 +306,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Busqueda Web (Bing) en Inicio"
-        Category       = "Privacidad"
-        Description    = "Evita que lo que escribes en el menu inicio se envie a internet."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t27')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.privacy')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t27')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
         RegistryKey    = "DisableWebSearch"
@@ -317,9 +317,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Apps en Segundo Plano (Global)"
-        Category       = "Privacidad"
-        Description    = "Impide que las apps de la tienda se ejecuten sin abrirse para todos los usuarios."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t28')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.privacy')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t28')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy"
         RegistryKey    = "LetAppsRunInBackground"
@@ -328,9 +328,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Desactivar Windows Error Reporting (WER)"
-        Category       = "Privacidad"
-        Description    = "Evita que Windows envie reportes de bloqueos y fallos de aplicaciones a los servidores de Microsoft."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t29')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.privacy')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t29')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting"
         RegistryKey    = "Disabled"
@@ -339,9 +339,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Seguimiento de Lanzamiento de Apps (Global)"
-        Category       = "Privacidad"
-        Description    = "Impide que Windows rastree que programas abres para personalizar el menu de inicio de los usuarios."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t30')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.privacy')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t30')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\EdgeUI"
         RegistryKey    = "DisableMFUTracking"
@@ -350,9 +350,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Desactivar Diagnostico de Experiencia del Usuario (DiagTrack)"
-        Category       = "Privacidad"
-        Description    = "Apaga el servicio 'Connected User Experiences and Telemetry' a nivel de kernel."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t31')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.privacy')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t31')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\DiagTrack"
         RegistryKey    = "Start"
@@ -361,9 +361,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Servicio de Rastreo WAP (dmwappushservice)"
-        Category       = "Privacidad"
-        Description    = "Apaga el servicio de enrutamiento de mensajes push que Microsoft usa para recopilar telemetria."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t32')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.privacy')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t32')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\dmwappushservice"
         RegistryKey    = "Start"
@@ -372,9 +372,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Servicio de Politica de Diagnostico (DPS)"
-        Category       = "Privacidad"
-        Description    = "Desactiva el diagnostico de problemas del sistema, reduciendo el uso del disco y CPU en segundo plano."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t33')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.privacy')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t33')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\DPS"
         RegistryKey    = "Start"
@@ -387,9 +387,9 @@
     # RED / NETWORK
     # =========================================================
     [PSCustomObject]@{
-        Name           = "Liberar Ancho de Banda (NetworkThrottling)"
-        Category       = "Red"
-        Description    = "Desactiva el limite de red para multimedia, liberando la conexion."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t34')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.network')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t34')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile"
         RegistryKey    = "NetworkThrottlingIndex"
@@ -398,9 +398,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Servicio NDU (Fugas de RAM)"
-        Category       = "Red"
-        Description    = "Desactiva el monitor de uso de datos de red, que a menudo causa fugas de memoria no paginada."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t35')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.network')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t35')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Ndu"
         RegistryKey    = "Start"
@@ -413,9 +413,9 @@
     # EXTRAS / COMPORTAMIENTO
     # =========================================================
     [PSCustomObject]@{
-        Name           = "Restaurar Menu Contextual Clasico (Win11 Global)"
-        Category       = "Extras"
-        Description    = "Elimina el 'Mostrar mas opciones' y muestra el menu completo a nivel de maquina."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t36')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.extras')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t36')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"
         RegistryKey    = "(Default)"
@@ -424,9 +424,9 @@
         RegistryType   = "String"
     },
     [PSCustomObject]@{
-        Name           = "Desactivar Reinicio Automatico en Pantalla Azul (BSOD)"
-        Category       = "Extras"
-        Description    = "Permite leer el codigo de error de una pantalla azul de la muerte sin que el PC se reinicie inmediatamente."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t37')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.extras')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t37')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\CrashControl"
         RegistryKey    = "AutoReboot"
@@ -435,9 +435,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Aumentar Limite de Ruta Larga (LongPathsEnabled)"
-        Category       = "Extras"
-        Description    = "Permite que Windows maneje rutas de archivos que exceden los clasicos 260 caracteres en todo el sistema."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t38')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.extras')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t38')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem"
         RegistryKey    = "LongPathsEnabled"
@@ -446,9 +446,9 @@
         RegistryType   = "DWord"
     },
     [PSCustomObject]@{
-        Name           = "Deshabilitar Notificaciones y Centro de Accion (Global)"
-        Category       = "Extras"
-        Description    = "Oculta los avisos emergentes y desactiva completamente el centro de notificaciones para todos."
+        Name           = (Get-AIOString 'catalog.tweaks.name.t39')
+        Category       = (Get-AIOString 'catalog.tweaks.cat.extras')
+        Description    = (Get-AIOString 'catalog.tweaks.desc.t39')
         Method         = "Registry"
         RegistryPath   = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows\Explorer"
         RegistryKey    = "DisableNotificationCenter"

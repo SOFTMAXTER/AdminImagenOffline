@@ -5,278 +5,278 @@ $script:ServiceCatalog = @(
     # Categoria: Estandar (Servicios que a menudo se pueden desactivar para liberar recursos)
     [PSCustomObject]@{
         Name               = "Fax"
-        Description        = "Permite enviar y recibir faxes. Innecesario si no se usa un modem de fax."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.Fax')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "PrintSpooler"
-        Description        = "Gestiona los trabajos de impresion. Desactivar si no se utiliza ninguna impresora (fisica o virtual como PDF)."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.PrintSpooler')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Automatic"
     },
     [PSCustomObject]@{
         Name               = "RemoteRegistry"
-        Description        = "Permite a usuarios remotos modificar el registro. Se recomienda desactivarlo por seguridad."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.RemoteRegistry')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "SysMain"
-        Description        = "Mantiene y mejora el rendimiento del sistema (antes Superfetch). Puede causar uso de disco en HDD."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.SysMain')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Automatic"
     },
     [PSCustomObject]@{
         Name               = "TabletInputService"
-        Description        = "Habilita el teclado tactil y el panel de escritura. Innecesario en equipos de escritorio sin pantalla tactil."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.TabletInputService')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
 	},
     [PSCustomObject]@{
         Name               = "WalletService"
-        Description        = "Servicio del sistema para la Cartera de Windows. Innecesario si no se utiliza."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.WalletService')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
     },
 	[PSCustomObject]@{
         Name               = "wisvc"
-        Description        = "Gestiona la participacion en el programa Windows Insider. Innecesario si no se usan compilaciones de prueba."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.wisvc')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
 	},
 	[PSCustomObject]@{
         Name               = "AJRouter"
-        Description        = "Relacionado con la comunicacion de dispositivos IoT (Internet de las Cosas). Innecesario para la mayoria de usuarios."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.AJRouter')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
 	},	
 	[PSCustomObject]@{
         Name               = "MapsBroker"
-        Description        = "Para la aplicacion 'Mapas de Windows'. Si usas otros servicios de mapas (Google/Waze), es innecesario."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.MapsBroker')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Automatic"
 	},
 	[PSCustomObject]@{
         Name               = "icssvc"
-        Description        = "Permite compartir una conexion a internet con otros dispositivos (Hotspot movil). Innecesario si no se usa esta funcion."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.icssvc')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
 	},
     [PSCustomObject]@{
         Name               = "WSearch"
-        Description        = "Proporciona indexacion de contenido y resultados de busqueda para archivos, correo y otro contenido."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.WSearch')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Automatic"
     },
 	[PSCustomObject]@{
         Name               = "fhsvc"
-        Description        = "Servicio de Historial de Archivos. Innecesario si usas otro software de backup o no lo utilizas."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.fhsvc')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "TrkWks"
-        Description        = "Mantiene los accesos directos a archivos que se mueven en unidades NTFS. Bajo impacto, seguro de desactivar."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.TrkWks')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Automatic"
     },
     [PSCustomObject]@{
         Name               = "RetailDemo"
-        Description        = "Ejecuta una demo del sistema operativo para equipos de exhibicion en tiendas. Inutil para usuarios finales."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.RetailDemo')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
     },
 	[PSCustomObject]@{
         Name               = "DPS"
-        Description        = "Servicio de directivas de diagnostico. Si no usas los solucionadores de problemas integrados de Windows, puedes desactivarlo para ahorrar recursos."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.DPS')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Automatic"
     },
     [PSCustomObject]@{
         Name               = "WdiServiceHost"
-        Description        = "Host de servicio de diagnostico. Junto con DPS, es parte de la telemetria de errores y solucion de problemas. Seguro de desactivar si prefieres rendimiento."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.WdiServiceHost')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "WdiSystemHost"
-        Description        = "Host del sistema de diagnostico. Componente hermano de WdiServiceHost. Desactivarlo reduce la actividad de diagnostico en segundo plano."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.WdiSystemHost')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "PcaSvc"
-        Description        = "Asistente para la compatibilidad de programas. Supervisa instalaciones y muestra avisos molestos de '¿Este programa se instalo correctamente?'. Seguro de desactivar."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.PcaSvc')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Automatic"
     },
 	[PSCustomObject]@{
         Name               = "FontCache"
-        Description        = "Optimiza el rendimiento almacenando fuentes en cache. Desactivar ahorra RAM pero puede ralentizar la carga inicial de fuentes."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.FontCache')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Automatic"
     },
     [PSCustomObject]@{
         Name               = "FontCache3.0.0.0"
-        Description        = "Servicio heredado de cache de fuentes de Windows Presentation Foundation (WPF). Generalmente seguro de desactivar."
-        Category           = "Estandar"
+        Description        = (Get-AIOString 'catalog.services.desc.FontCache3_0_0_0')
+        Category           = (Get-AIOString 'catalog.services.cat.std')
         DefaultStartupType = "Manual"
     },
     # Categoria: Avanzado/Opcional (Servicios para funciones especificas)
     [PSCustomObject]@{
         Name               = "TermService"
-        Description        = "Permite a los usuarios conectarse de forma remota al equipo usando Escritorio Remoto."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.TermService')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "WMPNetworkSvc"
-        Description        = "Comparte bibliotecas de Windows Media Player con otros dispositivos de la red."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.WMPNetworkSvc')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Manual"
     },
 	[PSCustomObject]@{
         Name               = "DiagTrack"
-        Description        = "Servicio de telemetria principal (Connected User Experiences and Telemetry). Desactivarlo mejora la privacidad."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.DiagTrack')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Automatic"
 	},
 	[PSCustomObject]@{
         Name               = "lfsvc"
-        Description        = "Permite a las aplicaciones acceder a la ubicacion GPS y de red del equipo. Desactivar por privacidad si no se usa."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.lfsvc')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Manual"
 	},
 	[PSCustomObject]@{
         Name               = "CscService"
-        Description        = "Servicio de Archivos sin conexion, para acceder a archivos de red localmente. Innecesario para usuarios domesticos."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.CscService')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Automatic"
 	},
 	 [PSCustomObject]@{
         Name               = "StiSvc"
-        Description        = "Servicio de Adquisicion de Imagenes de Windows (WIA). Necesario para escaneres y camaras antiguas."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.StiSvc')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "SSDPSRV"
-        Description        = "Descubre dispositivos en la red local (servidores multimedia, impresoras). Innecesario si no se comparte multimedia."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.SSDPSRV')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "upnphost"
-        Description        = "Permite alojar dispositivos UPnP en la red. Similar a SSDPSRV, innecesario si no se comparte en red."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.upnphost')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Manual"
     },
 	[PSCustomObject]@{
         Name               = "WbioSrvc"
-        Description        = "Servicio Biometrico de Windows. Se puede desactivar si no usas huella dactilar o reconocimiento facial (Hello)."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.WbioSrvc')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "WerSvc"
-        Description        = "Servicio de informe de errores. Envia datos a Microsoft cuando una aplicacion falla. Seguro de desactivar."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.WerSvc')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Manual"
     },
 	[PSCustomObject]@{
         Name               = "GraphicsPerfSvc"
-        Description        = "Monitoriza el rendimiento grafico. Rara vez necesario a menos que uses herramientas de diagnostico de GPU especificas."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.GraphicsPerfSvc')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "Wecsvc"
-        Description        = "Recopilador de eventos de Windows. Reune eventos de otros equipos en la red. Innecesario para usuarios domesticos."
-        Category           = "Avanzado"
+        Description        = (Get-AIOString 'catalog.services.desc.Wecsvc')
+        Category           = (Get-AIOString 'catalog.services.cat.adv')
         DefaultStartupType = "Manual"
     },
 	# Red y Conectividad
 	[PSCustomObject]@{
         Name               = "iphlpsvc"
-        Description        = "Aplicacion auxiliar IP. Proporciona conectividad de tunel IPv6 (6to4, ISATAP, Teredo). Innecesario para la gran mayoria de usuarios domesticos que usan IPv4."
-        Category           = "Red y Conectividad"
+        Description        = (Get-AIOString 'catalog.services.desc.iphlpsvc')
+        Category           = (Get-AIOString 'catalog.services.cat.net')
         DefaultStartupType = "Automatic"
     },
     [PSCustomObject]@{
         Name               = "lmhosts"
-        Description        = "Aplicacion auxiliar de NetBIOS sobre TCP/IP. Protocolo de red antiguo para compartir archivos. Innecesario en redes modernas (usa SMB directo)."
-        Category           = "Red y Conectividad"
+        Description        = (Get-AIOString 'catalog.services.desc.lmhosts')
+        Category           = (Get-AIOString 'catalog.services.cat.net')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "TapiSrv"
-        Description        = "Telefonia. Proporciona soporte TAPI para programas antiguos, modems y fax. Totalmente obsoleto para la mayoria de usuarios modernos."
-        Category           = "Legacy/Obsoleto"
+        Description        = (Get-AIOString 'catalog.services.desc.TapiSrv')
+        Category           = (Get-AIOString 'catalog.services.cat.legacy')
         DefaultStartupType = "Manual"
     },
 	# Legacy/Obsoleto
     [PSCustomObject]@{
         Name               = "WPDBusEnum"
-        Description        = "Servicio de enumeracion de dispositivos portatiles. Sincroniza contenido con reproductores MP3/celulares antiguos en Windows Media Player. Rara vez necesario hoy dia."
-        Category           = "Legacy/Obsoleto"
+        Description        = (Get-AIOString 'catalog.services.desc.WPDBusEnum')
+        Category           = (Get-AIOString 'catalog.services.cat.legacy')
         DefaultStartupType = "Manual"
     },
 	# Realidad Mixta
     [PSCustomObject]@{
         Name               = "MixedRealityOpenXRSvc"
-        Description        = "Windows Mixed Reality OpenXR Service. Habilita funciones para cascos de realidad mixta. Si no tienes hardware VR/AR, es bloatware puro."
-        Category           = "Realidad Mixta"
+        Description        = (Get-AIOString 'catalog.services.desc.MixedRealityOpenXRSvc')
+        Category           = (Get-AIOString 'catalog.services.cat.mr')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "spectrum"
-        Description        = "Windows Perception Service. Gestiona la percepcion espacial para realidad virtual y aumentada (HoloLens). Innecesario para uso de escritorio estandar."
-        Category           = "Realidad Mixta"
+        Description        = (Get-AIOString 'catalog.services.desc.spectrum')
+        Category           = (Get-AIOString 'catalog.services.cat.mr')
         DefaultStartupType = "Manual"
     },
 	# Seguridad Corporativa
 	[PSCustomObject]@{
         Name               = "Netlogon"
-        Description        = "Mantiene un canal seguro entre este equipo y el controlador de dominio. Si tu PC es domestico y no pertenece a un dominio empresarial, es totalmente innecesario."
-        Category           = "Seguridad Corporativa"
+        Description        = (Get-AIOString 'catalog.services.desc.Netlogon')
+        Category           = (Get-AIOString 'catalog.services.cat.corp')
         DefaultStartupType = "Manual"
     },
     # Categoria: Opcional
     [PSCustomObject]@{
         Name               = "XblAuthManager"
-        Description        = "Servicio de autenticacion de Xbox Live. Desactivar si no se usan juegos de la Store o la Game Bar."
-        Category           = "Opcional"
+        Description        = (Get-AIOString 'catalog.services.desc.XblAuthManager')
+        Category           = (Get-AIOString 'catalog.services.cat.opt')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "XblGameSave"
-        Description        = "Servicio para guardar partidas de juegos de Xbox Live en la nube. Innecesario si no se usa esta funcion."
-        Category           = "Opcional"
+        Description        = (Get-AIOString 'catalog.services.desc.XblGameSave')
+        Category           = (Get-AIOString 'catalog.services.cat.opt')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "XboxGipSvc"
-        Description        = "Servicio de gestion de accesorios de Xbox. Innecesario si no se conectan perifericos de Xbox al PC."
-        Category           = "Opcional"
+        Description        = (Get-AIOString 'catalog.services.desc.XboxGipSvc')
+        Category           = (Get-AIOString 'catalog.services.cat.opt')
         DefaultStartupType = "Manual"
     },
     [PSCustomObject]@{
         Name               = "XboxNetApiSvc"
-        Description        = "Servicio de red de Xbox Live. Desactivar si no se usan las funciones online de la plataforma Xbox."
-        Category           = "Opcional"
+        Description        = (Get-AIOString 'catalog.services.desc.XboxNetApiSvc')
+        Category           = (Get-AIOString 'catalog.services.cat.opt')
         DefaultStartupType = "Manual"
     },
 	[PSCustomObject]@{
         Name               = "WpcMonSvc"
-        Description        = "Servicio de Control Parental. Innecesario si no se gestionan cuentas de menores en el equipo."
-        Category           = "Opcional"
+        Description        = (Get-AIOString 'catalog.services.desc.WpcMonSvc')
+        Category           = (Get-AIOString 'catalog.services.cat.opt')
         DefaultStartupType = "Manual"
 	},
 	[PSCustomObject]@{
         Name               = "PhoneSvc"
-        Description        = "Servicio de telefono. Gestiona el estado de telefonia en el dispositivo. Generalmente vinculado a la app 'Enlace Movil'. Si no la usas, desactivalo."
-        Category           = "Opcional"
+        Description        = (Get-AIOString 'catalog.services.desc.PhoneSvc')
+        Category           = (Get-AIOString 'catalog.services.cat.opt')
         DefaultStartupType = "Manual"
     }
 )

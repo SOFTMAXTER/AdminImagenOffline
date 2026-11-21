@@ -12,27 +12,27 @@ $script:EditionCatalog = @(
     [PSCustomObject]@{
         EditionID   = "Core"
         Name        = "Windows Home"
-        Description = "Es la versión básica del gigante Microsoft. Está diseñada para la mayoría de los usuarios y ofrece todas las funciones esperadas. Es más económica y no carga módulos empresariales innecesarios. Puedes jugar y hacer todas las tareas domésticas que quieras sin problema."
+        Description = (Get-AIOString 'catalog.editions.Core')
     },
     [PSCustomObject]@{
         EditionID   = "CoreN"
         Name        = "Windows Home N"
-        Description = "Versión básica diseñada para el mercado europeo (Normativa 'N'). Incluye todas las funciones de la edición Home estándar, pero no trae preinstaladas las tecnologías multimedia como Windows Media Player, Skype ni la grabadora de voz."
+        Description = (Get-AIOString 'catalog.editions.CoreN')
     },
     [PSCustomObject]@{
         EditionID   = "CoreK"
         Name        = "Windows Home K / KN"
-        Description = "Versiones diseñadas para el mercado de Corea del Sur (Normativa 'K/KN'). Incluyen enlaces a software multimedia y de mensajería de terceros para cumplir con las regulaciones antimonopolio coreanas."
+        Description = (Get-AIOString 'catalog.editions.CoreK')
     },
     [PSCustomObject]@{
         EditionID   = "CoreSingleLanguage"
         Name        = "Windows Home Single Language"
-        Description = "Diseñada para usuarios domésticos y dispositivos OEM de bajo costo. Como su nombre lo indica, solo admite un idioma de visualización base. Es una opción ideal para quienes no necesitan cambiar el idioma del sistema y buscan una experiencia simplificada."
+        Description = (Get-AIOString 'catalog.editions.CoreSingleLanguage')
     },
     [PSCustomObject]@{
         EditionID   = "CoreCountrySpecific"
         Name        = "Windows Home Country Specific"
-        Description = "Edición restringida geográficamente, distribuida habitualmente en mercados emergentes o específicos (como China). Es funcionalmente idéntica a Home, pero bloqueada a una región específica para combatir la piratería."
+        Description = (Get-AIOString 'catalog.editions.CoreCountrySpecific')
     },
 
     # =========================================================
@@ -41,42 +41,42 @@ $script:EditionCatalog = @(
     [PSCustomObject]@{
         EditionID   = "Professional"
         Name        = "Windows Pro"
-        Description = "Es una edición avanzada de Microsoft. Está diseñada para satisfacer las necesidades de profesionales, empresas y organizaciones. Incluye BitLocker, Hyper-V, Escritorio Remoto y unión a dominios. Ideal para quienes necesitan un sistema robusto para tareas empresariales."
+        Description = (Get-AIOString 'catalog.editions.Professional')
     },
     [PSCustomObject]@{
         EditionID   = "ProfessionalN"
         Name        = "Windows Pro N"
-        Description = "Edición profesional para el mercado europeo. Contiene todas las características de seguridad y administración de Windows Pro (Hyper-V, BitLocker), pero sin las aplicaciones multimedia preinstaladas."
+        Description = (Get-AIOString 'catalog.editions.ProfessionalN')
     },
     [PSCustomObject]@{
         EditionID   = "ProfessionalSingleLanguage"
         Name        = "Windows Pro Single Language"
-        Description = "Variante de la edición Pro licenciada comúnmente para OEM, restringida a un único idioma de visualización, pero conservando las capacidades empresariales."
+        Description = (Get-AIOString 'catalog.editions.ProfessionalSingleLanguage')
     },
     [PSCustomObject]@{
         EditionID   = "ProfessionalCountrySpecific"
         Name        = "Windows Pro Country Specific"
-        Description = "Variante de la edición Pro restringida a una región o país específico por motivos de licenciamiento."
+        Description = (Get-AIOString 'catalog.editions.ProfessionalCountrySpecific')
     },
     [PSCustomObject]@{
         EditionID   = "ProfessionalWorkstation"
         Name        = "Windows Pro for Workstations"
-        Description = "Diseñada para usuarios con necesidades de altísimo rendimiento, como científicos de datos, animadores 3D y diseñadores gráficos. Soporta hardware de grado servidor (procesadores Xeon/Epyc, hasta 6TB de RAM) y el sistema de archivos Resilient File System (ReFS)."
+        Description = (Get-AIOString 'catalog.editions.ProfessionalWorkstation')
     },
     [PSCustomObject]@{
         EditionID   = "ProfessionalWorkstationN"
         Name        = "Windows Pro for Workstations N"
-        Description = "Versión de altísimo rendimiento para estaciones de trabajo en el mercado europeo. Soporte masivo de hardware y ReFS, sin componentes multimedia preinstalados."
+        Description = (Get-AIOString 'catalog.editions.ProfessionalWorkstationN')
     },
     [PSCustomObject]@{
         EditionID   = "ProfessionalEducation"
         Name        = "Windows Pro Education"
-        Description = "Una variante de la edición Pro que se basa en la misma arquitectura, pero proporciona controles predeterminados específicos para la educación. Elimina sugerencias de Cortana y publicidad para evitar distracciones en el aula."
+        Description = (Get-AIOString 'catalog.editions.ProfessionalEducation')
     },
     [PSCustomObject]@{
         EditionID   = "ProfessionalEducationN"
         Name        = "Windows Pro Education N"
-        Description = "Variante educativa de la edición Pro orientada a Europa. Controles específicos para el aula, sin publicidad y sin software multimedia preinstalado."
+        Description = (Get-AIOString 'catalog.editions.ProfessionalEducationN')
     },
 
     # =========================================================
@@ -85,37 +85,37 @@ $script:EditionCatalog = @(
     [PSCustomObject]@{
         EditionID   = "Enterprise"
         Name        = "Windows Enterprise"
-        Description = "Forma parte de Microsoft 365 Enterprise. Proporciona administración avanzada de dispositivos, controles de telemetría profundos y servicios de seguridad como Credential Guard. Es ideal para grandes organizaciones que requieren un control absoluto de su infraestructura IT."
+        Description = (Get-AIOString 'catalog.editions.Enterprise')
     },
     [PSCustomObject]@{
         EditionID   = "EnterpriseN"
         Name        = "Windows Enterprise N"
-        Description = "Edición corporativa para el mercado europeo. Ofrece la misma administración avanzada y telemetría reducida que la edición Enterprise normal, sin los reproductores ni códecs multimedia integrados."
+        Description = (Get-AIOString 'catalog.editions.EnterpriseN')
     },
     [PSCustomObject]@{
         EditionID   = "EnterpriseS"
         Name        = "Windows Enterprise LTSC"
-        Description = "Diseñada para entornos críticos que requieren máxima estabilidad (Long-Term Servicing Channel). Ofrece un ciclo de vida de soporte a largo plazo, actualizaciones de calidad exclusivas, y elimina por completo Cortana, Edge y la Tienda UWP."
+        Description = (Get-AIOString 'catalog.editions.EnterpriseS')
     },
     [PSCustomObject]@{
         EditionID   = "EnterpriseSN"
         Name        = "Windows Enterprise LTSC N"
-        Description = "La versión más limpia y estable posible para Europa. Mantenimiento a largo plazo (LTSC), sin tienda, sin Cortana, sin Edge y sin componentes multimedia."
+        Description = (Get-AIOString 'catalog.editions.EnterpriseSN')
     },
     [PSCustomObject]@{
         EditionID   = "EnterpriseG"
         Name        = "Windows Enterprise G"
-        Description = "Edición gubernamental especializada. Creada originalmente bajo requisitos estrictos de seguridad y soberanía de datos para el gobierno de China (Zhuangongban). Telemetría severamente restringida y cifrado personalizado."
+        Description = (Get-AIOString 'catalog.editions.EnterpriseG')
     },
     [PSCustomObject]@{
         EditionID   = "EnterpriseGN"
         Name        = "Windows Enterprise G (N)"
-        Description = "Variante de la edición gubernamental especializada sin componentes multimedia preinstalados."
+        Description = (Get-AIOString 'catalog.editions.EnterpriseGN')
     },
     [PSCustomObject]@{
         EditionID   = "ServerRdsh"
         Name        = "Windows Enterprise Multi-Session"
-        Description = "Una edición única diseñada específicamente para Azure Virtual Desktop. Permite que múltiples usuarios interactivos inicien sesión simultáneamente en la misma máquina virtual, combinando la experiencia de cliente con la escalabilidad de un servidor."
+        Description = (Get-AIOString 'catalog.editions.ServerRdsh')
     },
 
     # =========================================================
@@ -124,32 +124,32 @@ $script:EditionCatalog = @(
     [PSCustomObject]@{
         EditionID   = "Education"
         Name        = "Windows Education"
-        Description = "Creada para instituciones educativas, basada en la edición Enterprise. Ofrece la misma seguridad y capacidad de gestión corporativa de alto nivel, pero licenciada y optimizada para estudiantes, profesores y personal escolar."
+        Description = (Get-AIOString 'catalog.editions.Education')
     },
     [PSCustomObject]@{
         EditionID   = "EducationN"
         Name        = "Windows Education N"
-        Description = "Edición basada en Enterprise para escuelas en el mercado europeo. Incluye toda la seguridad corporativa escolar, pero carece del ecosistema multimedia nativo de Microsoft."
+        Description = (Get-AIOString 'catalog.editions.EducationN')
     },
     [PSCustomObject]@{
         EditionID   = "Cloud"
         Name        = "Windows 10 S"
-        Description = "Versión orientada a la educación o dispositivos de gama baja. Extremadamente segura y cerrada, solo permite ejecutar software de la Microsoft Store y Edge."
+        Description = (Get-AIOString 'catalog.editions.Cloud')
     },
     [PSCustomObject]@{
         EditionID   = "CloudN"
         Name        = "Windows 10 S (N)"
-        Description = "Variante de Windows 10 S para Europa, desprovista de capacidades multimedia nativas."
+        Description = (Get-AIOString 'catalog.editions.CloudN')
     },
     [PSCustomObject]@{
         EditionID   = "CloudEdition"
         Name        = "Windows 11 SE"
-        Description = "Una versión altamente simplificada y restrictiva, optimizada para rendimiento y seguridad en aulas. Diseñada para dispositivos de bajo coste educativos (K-8) priorizando aplicaciones web."
+        Description = (Get-AIOString 'catalog.editions.CloudEdition')
     },
     [PSCustomObject]@{
         EditionID   = "CloudEditionN"
         Name        = "Windows 11 SE (N)"
-        Description = "Variante europea de Windows 11 SE, sin Windows Media Player ni complementos multimedia integrados."
+        Description = (Get-AIOString 'catalog.editions.CloudEditionN')
     },
 
     # =========================================================
@@ -158,22 +158,22 @@ $script:EditionCatalog = @(
     [PSCustomObject]@{
         EditionID   = "IoTEnterprise"
         Name        = "Windows IoT Enterprise"
-        Description = "Edición empresarial completa diseñada para sistemas embebidos, quioscos, cajeros automáticos (ATM) y puntos de venta (POS). Incluye bloqueos especiales (Assigned Access / Kiosk Mode) para restringir el dispositivo a una sola aplicación comercial."
+        Description = (Get-AIOString 'catalog.editions.IoTEnterprise')
     },
     [PSCustomObject]@{
         EditionID   = "IoTEnterpriseK"
         Name        = "Windows IoT Enterprise K"
-        Description = "Versión de Windows IoT Enterprise destinada al mercado surcoreano, cumpliendo con regulaciones antimonopolio al no incluir o enlazar software multimedia predeterminado, manteniendo el enfoque en cajeros y sistemas embebidos."
+        Description = (Get-AIOString 'catalog.editions.IoTEnterpriseK')
     },
     [PSCustomObject]@{
         EditionID   = "IoTEnterpriseS"
         Name        = "Windows IoT Enterprise LTSC"
-        Description = "La edición definitiva para hardware de misión crítica (equipos médicos, maquinaria industrial, cajeros). Combina los bloqueos de quiosco de la versión IoT con los 10 años de soporte y la nula intervención funcional del canal LTSC."
+        Description = (Get-AIOString 'catalog.editions.IoTEnterpriseS')
     },
     [PSCustomObject]@{
         EditionID   = "IoTEnterpriseSK"
         Name        = "Windows IoT Enterprise LTSC K"
-        Description = "Variante de soporte a largo plazo (LTSC) para Internet de las Cosas, diseñada específicamente para el mercado de Corea del Sur (sin componentes multimedia)."
+        Description = (Get-AIOString 'catalog.editions.IoTEnterpriseSK')
     },
 
     # =========================================================
@@ -182,72 +182,72 @@ $script:EditionCatalog = @(
     [PSCustomObject]@{
         EditionID   = "ServerStandard"
         Name        = "Windows Server Standard"
-        Description = "Edición de Windows Server con Experiencia de Escritorio (GUI). Diseñada para entornos físicos o mínimamente virtualizados. Ideal para pequeñas y medianas empresas."
+        Description = (Get-AIOString 'catalog.editions.ServerStandard')
     },
     [PSCustomObject]@{
         EditionID   = "ServerStandardCore"
         Name        = "Windows Server Standard (Server Core)"
-        Description = "Edición Standard instalada en modo Server Core (sin interfaz gráfica). Reduce drásticamente la superficie de ataque y el uso de recursos del sistema, ideal para administración remota y servicios de infraestructura."
+        Description = (Get-AIOString 'catalog.editions.ServerStandardCore')
     },
     [PSCustomObject]@{
         EditionID   = "ServerDatacenter"
         Name        = "Windows Server Datacenter"
-        Description = "Edición premium de Windows Server con Experiencia de Escritorio. Creada para centros de datos altamente virtualizados y entornos en la nube definidos por software. Incluye Storage Spaces Direct y Shielded VMs."
+        Description = (Get-AIOString 'catalog.editions.ServerDatacenter')
     },
     [PSCustomObject]@{
         EditionID   = "ServerDatacenterCore"
         Name        = "Windows Server Datacenter (Server Core)"
-        Description = "Edición Datacenter en modo Server Core. Máxima seguridad y eficiencia para hipervisores masivos y centros de datos definidos por software, sin la carga de la interfaz gráfica."
+        Description = (Get-AIOString 'catalog.editions.ServerDatacenterCore')
     },
     [PSCustomObject]@{
         EditionID   = "ServerAzureCor"
         Name        = "Windows Server Datacenter: Azure Edition (Core)"
-        Description = "Edición exclusiva para la nube de Azure y Azure Stack HCI. Soporta Hotpatching (aplicación de actualizaciones de seguridad sin reiniciar la máquina) y protocolo SMB sobre QUIC."
+        Description = (Get-AIOString 'catalog.editions.ServerAzureCor')
     },
     [PSCustomObject]@{
         EditionID   = "ServerTurbine"
         Name        = "Windows Server Datacenter: Azure Edition"
-        Description = "Edición con Experiencia de Escritorio exclusiva para Azure y Azure Local (Azure Stack HCI), con soporte para SMB sobre QUIC y redes virtuales avanzadas."
+        Description = (Get-AIOString 'catalog.editions.ServerTurbine')
     },
     [PSCustomObject]@{
         EditionID   = "ServerTurbineCor"
         Name        = "Windows Server Datacenter: Azure Edition (Core)"
-        Description = "Variante Server Core de Windows Server Datacenter: Azure Edition optimizada para cargas de trabajo en la nube y Hotpatching."
+        Description = (Get-AIOString 'catalog.editions.ServerTurbineCor')
     },
     [PSCustomObject]@{
         EditionID   = "ServerStandardACor"
         Name        = "Windows Server Standard (Server Core)"
-        Description = "Canal de servicio anual/ACor de Windows Server Standard en instalación Server Core."
+        Description = (Get-AIOString 'catalog.editions.ServerStandardACor')
     },
     [PSCustomObject]@{
         EditionID   = "ServerDatacenterACor"
         Name        = "Windows Server Datacenter (Server Core)"
-        Description = "Canal de servicio anual/ACor de Windows Server Datacenter en instalación Server Core."
+        Description = (Get-AIOString 'catalog.editions.ServerDatacenterACor')
     },
     [PSCustomObject]@{
         EditionID   = "ServerStandardEval"
         Name        = "Windows Server Standard Evaluation"
-        Description = "Edición de evaluación de Windows Server Standard con Experiencia de Escritorio (180 días)."
+        Description = (Get-AIOString 'catalog.editions.ServerStandardEval')
     },
     [PSCustomObject]@{
         EditionID   = "ServerStandardCoreEval"
         Name        = "Windows Server Standard (Server Core) Evaluation"
-        Description = "Edición de evaluación de Windows Server Standard en modo Server Core (180 días)."
+        Description = (Get-AIOString 'catalog.editions.ServerStandardCoreEval')
     },
     [PSCustomObject]@{
         EditionID   = "ServerDatacenterEval"
         Name        = "Windows Server Datacenter Evaluation"
-        Description = "Edición de evaluación de Windows Server Datacenter con Experiencia de Escritorio (180 días)."
+        Description = (Get-AIOString 'catalog.editions.ServerDatacenterEval')
     },
     [PSCustomObject]@{
         EditionID   = "ServerDatacenterCoreEval"
         Name        = "Windows Server Datacenter (Server Core) Evaluation"
-        Description = "Edición de evaluación de Windows Server Datacenter en modo Server Core (180 días)."
+        Description = (Get-AIOString 'catalog.editions.ServerDatacenterCoreEval')
     },
     [PSCustomObject]@{
         EditionID   = "ServerSolution"
         Name        = "Windows Server Essentials"
-        Description = "Edición orientada a pequeñas empresas con hasta 25 usuarios y 50 dispositivos."
+        Description = (Get-AIOString 'catalog.editions.ServerSolution')
     },
 
     # =========================================================
@@ -256,47 +256,47 @@ $script:EditionCatalog = @(
     [PSCustomObject]@{
         EditionID   = "EnterpriseEval"
         Name        = "Windows Enterprise Evaluation"
-        Description = "Versión de evaluación corporativa de Windows Enterprise (90 días) destinada a pruebas de compatibilidad y despliegue empresarial."
+        Description = (Get-AIOString 'catalog.editions.EnterpriseEval')
     },
     [PSCustomObject]@{
         EditionID   = "EnterpriseNEval"
         Name        = "Windows Enterprise N Evaluation"
-        Description = "Versión de evaluación de Windows Enterprise N para el mercado europeo (sin tecnologías multimedia preinstaladas)."
+        Description = (Get-AIOString 'catalog.editions.EnterpriseNEval')
     },
     [PSCustomObject]@{
         EditionID   = "EnterpriseSEval"
         Name        = "Windows Enterprise LTSC Evaluation"
-        Description = "Versión de evaluación del canal de mantenimiento a largo plazo (LTSC) de Windows Enterprise."
+        Description = (Get-AIOString 'catalog.editions.EnterpriseSEval')
     },
     [PSCustomObject]@{
         EditionID   = "EnterpriseSNEval"
         Name        = "Windows Enterprise LTSC N Evaluation"
-        Description = "Versión de evaluación europea del canal de mantenimiento a largo plazo (LTSC N) sin componentes multimedia."
+        Description = (Get-AIOString 'catalog.editions.EnterpriseSNEval')
     },
     [PSCustomObject]@{
         EditionID   = "IoTEnterpriseSEval"
         Name        = "Windows IoT Enterprise LTSC Evaluation"
-        Description = "Versión de evaluación de Windows IoT Enterprise LTSC para validación de dispositivos embebidos y sistemas industriales."
+        Description = (Get-AIOString 'catalog.editions.IoTEnterpriseSEval')
     },
     [PSCustomObject]@{
         EditionID   = "PPIPro"
         Name        = "Windows Team"
-        Description = "Edición especializada de Windows diseñada para dispositivos colaborativos Surface Hub y salas de reuniones."
+        Description = (Get-AIOString 'catalog.editions.PPIPro')
     },
     [PSCustomObject]@{
         EditionID   = "WNC"
         Name        = "Windows Cloud PC"
-        Description = "Edición optimizada para entornos de escritorio en la nube Windows 365 / Cloud PC."
+        Description = (Get-AIOString 'catalog.editions.WNC')
     },
     [PSCustomObject]@{
         EditionID   = "Starter"
         Name        = "Windows Starter"
-        Description = "Edición básica de entrada con requerimientos mínimos de sistema."
+        Description = (Get-AIOString 'catalog.editions.Starter')
     },
     [PSCustomObject]@{
         EditionID   = "StarterN"
         Name        = "Windows Starter N"
-        Description = "Edición básica de entrada para el mercado europeo sin componentes multimedia preinstalados."
+        Description = (Get-AIOString 'catalog.editions.StarterN')
     }
 )
 
@@ -327,7 +327,7 @@ function Get-WindowsEditionMetadata {
         return [PSCustomObject]@{
             EditionID   = $QueryString
             Name        = "Windows $QueryString"
-            Description = "Imagen de Windows personalizada ($QueryString). Creada/Capturada a través de AdminImagenOffline."
+            Description = (Get-AIOString 'catalog.editions.fallback' $QueryString)
         }
     }
 }
