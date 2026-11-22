@@ -17,13 +17,12 @@ AdminImagenOffline detecta automáticamente el idioma del sistema anfitrión (`[
      "code": "pt",
      "name": "Portuguese",
      "nativeName": "Português",
-     "version": "1.5.15",
      "author": "Tu Nombre"
    }
    ```
 3. Traduce solo los **valores** (a la derecha de `:`). No modifiques los nombres de las claves ni los marcadores `{0}`, `{1}` que insertan rutas, números o versiones.
 4. Guarda el archivo en **UTF-8**.
-5. Abre AdminImagenOffline: el nuevo idioma aparecerá automáticamente en **[R] Configuración → [3] Idioma de la Interfaz** y se activará solo en sistemas Windows con ese idioma.
+5. Abre AdminImagenOffline: el nuevo idioma aparecerá automáticamente en **[C] Configuración → [3] Idioma de la Interfaz** y se activará solo en sistemas Windows con ese idioma.
 
 ## Uso en nuevos módulos PowerShell
 
