@@ -599,6 +599,29 @@ function Show-Addons-GUI {
         $btnRemoveItem.FlatStyle = "Flat"
         $form.Controls.Add($btnRemoveItem)
 
+        $script:AddonCancelRequested = $false
+
+        $btnCancel = New-Object System.Windows.Forms.Button
+        $btnCancel.Text = Get-AIOString 'addons.btn_cancel'
+        $btnCancel.Location = "420, 520"
+        $btnCancel.Size = "205, 40"
+        $btnCancel.BackColor = [System.Drawing.Color]::DarkOrange
+        $btnCancel.ForeColor = [System.Drawing.Color]::Black
+        $btnCancel.FlatStyle = "Flat"
+        $btnCancel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5, [System.Drawing.FontStyle]::Bold)
+        $btnCancel.Enabled = $false
+        $form.Controls.Add($btnCancel)
+
+        $btnCancel.Add_Click({
+            if (-not $script:AddonBusy) { return }
+            $script:AddonCancelRequested = $true
+            $btnCancel.Enabled = $false
+            $lblStatus.ForeColor = [System.Drawing.Color]::Gold
+            $lblStatus.Text = Get-AIOString 'addons.status_cancelling'
+            Write-Log -LogLevel WARN -Message "AddonInjector: Cancelacion solicitada por el usuario tras finalizar el paquete actual."
+            $form.Refresh()
+        })
+
         $btnInstall = New-Object System.Windows.Forms.Button
         $btnInstall.Text = Get-AIOString 'addons.btn_install'
         $btnInstall.Location = "640, 520"
@@ -646,7 +669,7 @@ function Show-Addons-GUI {
 
                         $displayName = if ($dpManifest.outputs.wimFile) { $dpManifest.outputs.wimFile } else { "$($dpManifest.package.fullName).wim" }
 
-                        $item = New-Object System.Windows.Forms.ListViewItem("EN ESPERA")
+                        $item = New-Object System.Windows.Forms.ListViewItem((Get-AIOString 'addons.state_pending')); $item.Name = 'PENDING'
                         $item.SubItems.Add($displayName) | Out-Null
                         $item.SubItems.Add("DELTAPACK") | Out-Null
                         $item.SubItems.Add($packageFolder) | Out-Null
@@ -657,7 +680,7 @@ function Show-Addons-GUI {
                     }
 
                     # --- Addon suelto (.wim / .tpk / .bpk / .reg) ---
-                    $item = New-Object System.Windows.Forms.ListViewItem("EN ESPERA")
+                    $item = New-Object System.Windows.Forms.ListViewItem((Get-AIOString 'addons.state_pending')); $item.Name = 'PENDING'
                     $item.SubItems.Add([System.IO.Path]::GetFileName($file)) | Out-Null
                     $item.SubItems.Add([System.IO.Path]::GetExtension($file).ToUpper()) | Out-Null
                     $item.SubItems.Add($file) | Out-Null
@@ -689,11 +712,15 @@ function Show-Addons-GUI {
 
             Write-Log -LogLevel ACTION -Message "AddonInjector: Iniciando motor de inyeccion inteligente de Addons."
 
-            $script:AddonBusy      = $true
-            $btnInstall.Enabled    = $false
-            $btnRemoveItem.Enabled = $false
-            $btnAddFiles.Enabled   = $false
-            $form.Cursor           = [System.Windows.Forms.Cursors]::WaitCursor
+            $script:AddonBusy            = $true
+            $script:AddonCancelRequested = $false
+            $cancelled                   = $false
+            $btnInstall.Enabled          = $false
+            $btnRemoveItem.Enabled       = $false
+            $btnAddFiles.Enabled         = $false
+            $btnCancel.Enabled           = $true
+            $lblStatus.ForeColor         = [System.Drawing.Color]::Cyan
+            $form.Cursor                 = [System.Windows.Forms.Cursors]::WaitCursor
             $errors = 0; $success = 0; $skipped = 0; $withOmissions = 0; $totalBlockedSections = 0
 
             try {
@@ -705,7 +732,7 @@ function Show-Addons-GUI {
                 # --- 1. EXTRAER ELEMENTOS PENDIENTES ---
                 $pendingItems = @()
                 foreach ($item in $lv.Items) {
-                    if ($item.Text -eq "EN ESPERA") {
+                    if ($item.Name -eq "PENDING") {
                         $pendingItems += $item
                     }
                 }
@@ -742,8 +769,13 @@ function Show-Addons-GUI {
 
                 # --- 3. PROCESAMIENTO E INYECCION ---
                 foreach ($item in $sortedItems) {
+                    [System.Windows.Forms.Application]::DoEvents()
+                    if ($script:AddonCancelRequested) {
+                        $cancelled = $true
+                        Write-Log -LogLevel WARN -Message "AddonInjector: Lote detenido de forma segura antes del siguiente paquete."
+                        break
+                    }
                     try {
-                        [System.Windows.Forms.Application]::DoEvents()
 
                         $fileName = $item.SubItems[1].Text.ToLower()
 
@@ -755,17 +787,17 @@ function Show-Addons-GUI {
                         $archMismatch = $false
                         $archReason   = ""
                         switch ($targetArch) {
-                            "x86"   { if ($is64BitFile)  { $archMismatch = $true; $archReason = "Solo x64" }
-                                      elseif ($isArm64File) { $archMismatch = $true; $archReason = "Solo ARM64" } }
-                            "x64"   { if ($is32BitFile)  { $archMismatch = $true; $archReason = "Solo x86" }
-                                      elseif ($isArm64File) { $archMismatch = $true; $archReason = "Solo ARM64" } }
-                            "ARM64" { if ($is32BitFile)  { $archMismatch = $true; $archReason = "Solo x86" }
-                                      elseif ($is64BitFile) { $archMismatch = $true; $archReason = "Solo x64" } }
+                            "x86"   { if ($is64BitFile)  { $archMismatch = $true; $archReason = Get-AIOString 'addons.arch_only_x64' }
+                                      elseif ($isArm64File) { $archMismatch = $true; $archReason = Get-AIOString 'addons.arch_only_arm64' } }
+                            "x64"   { if ($is32BitFile)  { $archMismatch = $true; $archReason = Get-AIOString 'addons.arch_only_x86' }
+                                      elseif ($isArm64File) { $archMismatch = $true; $archReason = Get-AIOString 'addons.arch_only_arm64' } }
+                            "ARM64" { if ($is32BitFile)  { $archMismatch = $true; $archReason = Get-AIOString 'addons.arch_only_x86' }
+                                      elseif ($is64BitFile) { $archMismatch = $true; $archReason = Get-AIOString 'addons.arch_only_x64' } }
                         }
 
                         if ($archMismatch) {
-                            $item.Text = "OMITIDO (Arch)"
-                            $item.SubItems[2].Text = "Ignorado ($archReason)"
+                            $item.Name = "SKIPPED"; $item.Text = Get-AIOString 'addons.state_skipped_arch'
+                            $item.SubItems[2].Text = Get-AIOString 'addons.detail_ignored_arch' $archReason
                             $item.ForeColor = $ColorOmitido
                             $skipped++
                             Write-Log -LogLevel INFO -Message "AddonInjector: Omitiendo [$fileName] ($archReason, imagen destino $targetArch)."
@@ -774,7 +806,7 @@ function Show-Addons-GUI {
 
                         # --- CONDICION 2: INYECCION EN ORDEN ---
                         $lblStatus.Text = Get-AIOString 'addons.status_injecting' $item.SubItems[1].Text
-                        $item.Text = "PROCESANDO..."
+                        $item.Name = "PROCESSING"; $item.Text = Get-AIOString 'addons.state_processing'
                         $item.ForeColor = $ColorProcesando
 
                         # Hacemos auto-scroll en la UI para ver por donde va
@@ -793,19 +825,19 @@ function Show-Addons-GUI {
 
                             $item.SubItems[2].Text = $resultado.Message
                             if ($resultado.Status -eq 'CompletedWithOmissions') {
-                                $item.Text = "COMPLETADO CON OMISIONES"
+                                $item.Name = "COMPLETED_OMISSIONS"; $item.Text = Get-AIOString 'addons.state_completed_omissions'
                                 $item.ForeColor = $ColorOmitido
                                 $withOmissions++
                                 $totalBlockedSections += $resultado.BlockedSections
                                 Write-Log -LogLevel WARN -Message "AddonInjector: Completado con omisiones. $($resultado.Message)"
                             } else {
-                                $item.Text = "COMPLETADO"
+                                $item.Name = "COMPLETED"; $item.Text = Get-AIOString 'addons.state_completed'
                                 $item.ForeColor = $ColorCompletado
                                 $success++
                                 Write-Log -LogLevel INFO -Message "AddonInjector: Completado. $($resultado.Message)"
                             }
                         } catch {
-                            $item.Text = "ERROR"
+                            $item.Name = "ERROR"; $item.Text = Get-AIOString 'addons.state_error'
                             $item.SubItems[2].Text = $_.Exception.Message
                             $item.ForeColor = $ColorError
                             $errors++
@@ -828,19 +860,27 @@ function Show-Addons-GUI {
                     Write-Log -LogLevel WARN -Message "AddonInjector: Fallo al restaurar SDDL tras la inyeccion - $($_.Exception.Message)"
                 }
 
-                $reportIcon = if ($errors -gt 0) { 'Error' } elseif ($withOmissions -gt 0) { 'Warning' } else { 'Information' }
-                [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'addons.report_body' $success $withOmissions $totalBlockedSections $errors $skipped), (Get-AIOString 'addons.report_title'), 'OK', $reportIcon)
+                if ($cancelled) {
+                    $remaining = [Math]::Max(0, $sortedItems.Count - $count)
+                    [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'addons.report_cancelled_body' $success $withOmissions $totalBlockedSections $errors $skipped $remaining), (Get-AIOString 'addons.report_title'), 'OK', 'Warning') | Out-Null
+                } else {
+                    $reportIcon = if ($errors -gt 0) { 'Error' } elseif ($withOmissions -gt 0) { 'Warning' } else { 'Information' }
+                    [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'addons.report_body' $success $withOmissions $totalBlockedSections $errors $skipped), (Get-AIOString 'addons.report_title'), 'OK', $reportIcon) | Out-Null
+                }
             } catch {
                 Write-Log -LogLevel ERROR -Message "AddonInjector: Error inesperado durante el ciclo de inyeccion - $($_.Exception.Message)"
                 [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'addons.err_unexpected' $_.Exception.Message), (Get-AIOString 'common.error_title'), 'OK', 'Error') | Out-Null
             } finally {
-                $progressBar.Visible   = $false
-                $form.Cursor           = [System.Windows.Forms.Cursors]::Default
-                $btnInstall.Enabled    = $true
-                $btnRemoveItem.Enabled = $true
-                $btnAddFiles.Enabled   = $true
-                $lblStatus.Text        = Get-AIOString 'addons.status_done'
-                $script:AddonBusy      = $false
+                $progressBar.Visible         = $false
+                $form.Cursor                 = [System.Windows.Forms.Cursors]::Default
+                $btnInstall.Enabled          = $true
+                $btnRemoveItem.Enabled       = $true
+                $btnAddFiles.Enabled         = $true
+                $btnCancel.Enabled           = $false
+                $lblStatus.ForeColor         = if ($cancelled) { [System.Drawing.Color]::Gold } else { [System.Drawing.Color]::Cyan }
+                $lblStatus.Text              = if ($cancelled) { Get-AIOString 'addons.status_cancelled' } else { Get-AIOString 'addons.status_done' }
+                $script:AddonCancelRequested = $false
+                $script:AddonBusy            = $false
             }
         })
 

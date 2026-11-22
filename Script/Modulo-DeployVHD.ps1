@@ -1295,7 +1295,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                         }
                     }
                 } catch {
-                    [void]$cleanupWarnings.Add("No se pudo retirar el acceso ${letter}: $($_.Exception.Message)")
+                    [void]$cleanupWarnings.Add((Get-AIOString 'deployvhd.cleanup_letter_failed' $letter $_.Exception.Message))
                 }
                 [System.Windows.Forms.Application]::DoEvents()
             }
@@ -1369,23 +1369,23 @@ public sealed class AIODeployNativeReader : IDisposable {
     $toolTip.ShowAlways   = $true
     $toolTip.IsBalloon    = $false
 
-    $toolTip.SetToolTip($btnBrowseWim,    "Selecciona WIM, ESD o la primera parte SWM (ej. install.swm).`nPara SWM, todas las partes deben estar juntas en la misma carpeta.")
-    $toolTip.SetToolTip($cmbIndex,        "Selecciona la edicion de Windows a instalar.")
-    $toolTip.SetToolTip($btnBrowseVhd,    "Define donde se guardara el nuevo archivo de disco virtual (.vhdx o .vhd).")
-    $toolTip.SetToolTip($btnRefreshDisks, "Actualiza la lista de discos fisicos extraibles detectados.")
-    $toolTip.SetToolTip($numSize,         "Size maximo que podra tener el disco virtual (en Gigabytes).")
-    $toolTip.SetToolTip($chkDynamic,      "Marcado: El archivo crece segun guardes datos.`nDesmarcado: Ocupa todo el Size inmediatamente.")
-    $toolTip.SetToolTip($chkUEFI,         "Marcado (GPT): Para PCs modernos con UEFI.`nDesmarcado (MBR): Para PCs antiguos con BIOS Legacy.")
-    $toolTip.SetToolTip($chkCompactOS,    "Instala Windows 10/11 con sus archivos del sistema comprimidos para ahorrar espacio.`nPuede aumentar el tiempo de despliegue y el uso de CPU. Disponible para VHD/VHDX y disco fisico.")
-    $toolTip.SetToolTip($numEfiSize,      "Size de la particion de arranque (EFI o System Reserved).")
-    $toolTip.SetToolTip($numMsrSize,      "Size de la particion MSR. Solo aplica en GPT/UEFI.")
-    $toolTip.SetToolTip($numRecSize,      "Size de la particion de Recuperacion (WinRE). Se recomienda 1024 MB.")
-    $toolTip.SetToolTip($btnDeploy,       "ADVERTENCIA: Iniciara el proceso de creacion/formateo y aplicacion de imagen.")
-    $toolTip.SetToolTip($btnCancel,       "Solicita cancelar. Espera a que termine la operacion activa (incluido DISM) y despues limpia el destino. Los cambios ya realizados en un disco fisico no se revierten.")
-    $toolTip.SetToolTip($progressDeploy,  "Cuenta las etapas terminadas. El porcentaje no representa el tiempo restante.")
-    $toolTip.SetToolTip($progressDeployFill, "Avanza inmediatamente al terminar cada etapa; permanece fijo durante la etapa en curso.")
-    $toolTip.SetToolTip($progressImage,   "Muestra el avance informado al aplicar la imagen. Solo llega a 100% cuando la aplicacion termina correctamente.")
-    $toolTip.SetToolTip($lblDeployProgress, "Porcentaje de etapas completadas y tiempo transcurrido (horas:minutos:segundos). El reloj se reinicia en cada ejecucion y se detiene al finalizar, cancelar o fallar.")
+    $toolTip.SetToolTip($btnBrowseWim,    (Get-AIOString 'tips.deploy.btnBrowseWim'))
+    $toolTip.SetToolTip($cmbIndex,        (Get-AIOString 'tips.deploy.cmbIndex'))
+    $toolTip.SetToolTip($btnBrowseVhd,    (Get-AIOString 'tips.deploy.btnBrowseVhd'))
+    $toolTip.SetToolTip($btnRefreshDisks, (Get-AIOString 'tips.deploy.btnRefreshDisks'))
+    $toolTip.SetToolTip($numSize,         (Get-AIOString 'tips.deploy.numSize'))
+    $toolTip.SetToolTip($chkDynamic,      (Get-AIOString 'tips.deploy.chkDynamic'))
+    $toolTip.SetToolTip($chkUEFI,         (Get-AIOString 'tips.deploy.chkUEFI'))
+    $toolTip.SetToolTip($chkCompactOS,    (Get-AIOString 'tips.deploy.chkCompactOS'))
+    $toolTip.SetToolTip($numEfiSize,      (Get-AIOString 'tips.deploy.numEfiSize'))
+    $toolTip.SetToolTip($numMsrSize,      (Get-AIOString 'tips.deploy.numMsrSize'))
+    $toolTip.SetToolTip($numRecSize,      (Get-AIOString 'tips.deploy.numRecSize'))
+    $toolTip.SetToolTip($btnDeploy,       (Get-AIOString 'tips.deploy.btnDeploy'))
+    $toolTip.SetToolTip($btnCancel,       (Get-AIOString 'tips.deploy.btnCancel'))
+    $toolTip.SetToolTip($progressDeploy,  (Get-AIOString 'tips.deploy.progressDeploy'))
+    $toolTip.SetToolTip($progressDeployFill, (Get-AIOString 'tips.deploy.progressDeployFill'))
+    $toolTip.SetToolTip($progressImage,   (Get-AIOString 'tips.deploy.progressImage'))
+    $toolTip.SetToolTip($lblDeployProgress, (Get-AIOString 'tips.deploy.lblDeployProgress'))
 
     $form.Add_FormClosing({
         if ($script:isDeploying -or $_.Cancel) { return }

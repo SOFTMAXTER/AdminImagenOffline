@@ -4075,7 +4075,7 @@ function Show-AIOLangRestoreMenu {
     Write-Host '=======================================================' -ForegroundColor Cyan
     Write-Host ''
 
-    $selected = Select-AIOLangFolder -Title 'Selecciona directamente la carpeta Preflight'
+    $selected = Select-AIOLangFolder -Title (Get-AIOString 'pickers.lang_preflight_folder')
     if (-not $selected) { return }
 
     try {
@@ -4083,7 +4083,7 @@ function Show-AIOLangRestoreMenu {
         $manifest = $validated.Manifest
         $target = [string]$manifest.MediaRoot
         if (-not (Test-Path -LiteralPath $target -PathType Container)) {
-            $target = Select-AIOLangFolder -Title 'Selecciona el medio de Windows que deseas restaurar'
+            $target = Select-AIOLangFolder -Title (Get-AIOString 'pickers.lang_restore_media')
             if (-not $target) { return }
         }
 
@@ -6473,7 +6473,7 @@ function Start-AIOLangIntegrationWizard {
         $adkInfo = Initialize-AIOLangServicingEnvironment
         Assert-AIOLangNoMountedImages
 
-        $mediaRoot = Select-AIOLangFolder -Title 'Selecciona la carpeta raiz del medio de Windows extraido'
+        $mediaRoot = Select-AIOLangFolder -Title (Get-AIOString 'pickers.lang_media_root')
         if (-not $mediaRoot) { return }
         $mediaRoot = (Resolve-Path -LiteralPath $mediaRoot -ErrorAction Stop).Path
         $script:AIOLangLastTerminalState.MediaRoot = $mediaRoot
@@ -6488,7 +6488,7 @@ function Start-AIOLangIntegrationWizard {
             if (Read-AIOLangYesNo -Prompt 'Usar este repositorio' -Default $true) { $repositoryRoot = $defaultRepository }
         }
         if (-not $repositoryRoot) {
-            $repositoryRoot = Select-AIOLangFolder -Title 'Selecciona el repositorio de paquetes de idioma'
+            $repositoryRoot = Select-AIOLangFolder -Title (Get-AIOString 'pickers.lang_repo')
             if (-not $repositoryRoot) { return }
         }
         $repositoryRoot = (Resolve-Path -LiteralPath $repositoryRoot -ErrorAction Stop).Path

@@ -1029,7 +1029,7 @@ function Unmount-Image {
             Write-Log -LogLevel INFO -Message "UnmountManager: Desmontaje de VHD exitoso. Entorno virtualizado cerrado."
         } catch {
             Write-Log -LogLevel ERROR -Message "UnmountManager: Fallo al desmontar VHD - $($_.Exception.Message)"
-            Write-Error "Fallo al desmontar VHD: $_"
+            Write-Error (Get-AIOString 'montaje.vhd_unmount_err' $_)
             Write-Warning (Get-AIOString 'montaje.unmount_vhd_close_warn')
         }
         Pause; return

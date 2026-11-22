@@ -123,7 +123,7 @@ function Show-Features-GUI {
     $btnNetFx3.ForeColor = [System.Drawing.Color]::White
     $btnNetFx3.FlatStyle = "Flat"
     $btnNetFx3.Enabled   = $false
-    $toolTip.SetToolTip($btnNetFx3, "Instala .NET Framework 3.5 buscando la carpeta 'sxs' localmente.")
+    $toolTip.SetToolTip($btnNetFx3, (Get-AIOString 'tips.features.btnNetFx3'))
     $form.Controls.Add($btnNetFx3)
 
     # Boton aplicar cambios

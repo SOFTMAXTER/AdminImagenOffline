@@ -876,7 +876,7 @@ function Manage-BootWim-Menu {
 
         } else {
             Write-Log -LogLevel ERROR -Message "BootWimManager: Fallo critico al montar el boot.wim. Codigo DISM: $LASTEXITCODE"
-            Write-Error "Fallo al montar el boot.wim."
+            Write-Error (Get-AIOString 'environments.boot_mount_err')
             $Script:IMAGE_MOUNTED = 0
             $Script:WIM_FILE_PATH = $null
             $Script:MOUNTED_INDEX = $null
@@ -885,7 +885,7 @@ function Manage-BootWim-Menu {
 
     } catch {
         Write-Log -LogLevel ERROR -Message "BootWimManager: Excepcion no controlada en el gestor de arranque - $($_.Exception.Message)"
-        Write-Error "Error critico en el gestor de arranque: $_"
+        Write-Error (Get-AIOString 'environments.boot_crit_err' $_)
         # No perder el seguimiento de un montaje real si falla una operacion.
         if (-not $bootMountActive) {
             $Script:IMAGE_MOUNTED = 0

@@ -376,49 +376,78 @@ public static class AIOAppxIdentityNative {
         $script:appCache = $cache
     }
 
-    function Get-AppxQueueAction($Data) {
-        if ($script:appxBatchBlocked) { return 'BLOQUEADO' }
-        if ($Data.CompatCode -eq 'BUNDLE') { return 'BUNDLE INCOMPLETO' }
-        if ($Data.CompatCode -eq 'OS')     { return 'INCOMPATIBLE (OS)' }
-        $pfn = $Data.PackageFamilyName
-        if (-not $pfn) { return 'ERROR IDENTIDAD' }
-        if (-not $script:appCache.ContainsKey($pfn)) { return 'INSTALAR' }
-        $deprovisioned = $script:appxDeprovisionedFamilies.ContainsKey($pfn)
-        if ($Data.Version -gt $script:appCache[$pfn]) {
-            if ($chkUpdateAppx.Checked) { return 'ACTUALIZAR' }
-            if ($deprovisioned) { return 'REPARAR' }
-            return 'OMITIR (Actualizar desactivado)'
+    function Get-AppxActionLabel([string]$Code, [string]$Extra = '') {
+        switch ($Code) {
+            'BLOCKED'           { return (Get-AIOString 'appx.state_blocked') }
+            'BUNDLE_INCOMPLETE' { return (Get-AIOString 'appx.state_bundle_incomplete') }
+            'INCOMPATIBLE_OS'   { return (Get-AIOString 'appx.state_incompatible_os') }
+            'IDENTITY_ERROR'    { return (Get-AIOString 'appx.state_identity_error') }
+            'INSTALL'           { return (Get-AIOString 'appx.state_install') }
+            'UPDATE'            { return (Get-AIOString 'appx.state_update') }
+            'REPAIR'            { return (Get-AIOString 'appx.state_repair') }
+            'SKIP_UPDATE_OFF'   { return (Get-AIOString 'appx.state_skip_update_off') }
+            'SKIP_EXISTS'       { return (Get-AIOString 'appx.state_skip_exists') }
+            'REPAIRING'         { return (Get-AIOString 'appx.state_repairing') }
+            'REPAIRED'          { return (Get-AIOString 'appx.state_repaired') }
+            'ERROR_REPAIR'      { return (Get-AIOString 'appx.state_repair_error') }
+            'PROCESSING'        { return (Get-AIOString 'appx.state_processing') }
+            'INSTALLED'         { return (Get-AIOString 'appx.state_installed') }
+            'INSTALLED_REBOOT'  { return (Get-AIOString 'appx.state_installed_reboot') }
+            'ERROR_HEX'         { return (Get-AIOString 'appx.state_error_hex' $Extra) }
+            'ERROR_CRITICAL'    { return (Get-AIOString 'appx.state_critical_error') }
+            default             { return $Code }
         }
-        if ($deprovisioned) { return 'REPARAR' }
-        return 'OMITIR (Ya existe)'
     }
 
-    function Get-AppxActionColor([string]$Action) {
-        switch -Regex ($Action) {
-            '^INSTALAR' { return [Drawing.Color]::Yellow }
-            '^ACTUALIZAR' { return [Drawing.Color]::Cyan }
-            '^REPARAR' { return [Drawing.Color]::Orange }
-            '^(ERROR|BLOQUEADO|INCOMPATIBLE|BUNDLE INCOMPLETO)' { return [Drawing.Color]::Salmon }
+    function Set-AppxItemState($Item, [string]$Code, [string]$Extra = '') {
+        $Item.Name = $Code
+        $Item.Text = Get-AppxActionLabel $Code $Extra
+    }
+
+    function Get-AppxQueueAction($Data) {
+        if ($script:appxBatchBlocked) { return 'BLOCKED' }
+        if ($Data.CompatCode -eq 'BUNDLE') { return 'BUNDLE_INCOMPLETE' }
+        if ($Data.CompatCode -eq 'OS')     { return 'INCOMPATIBLE_OS' }
+        $pfn = $Data.PackageFamilyName
+        if (-not $pfn) { return 'IDENTITY_ERROR' }
+        if (-not $script:appCache.ContainsKey($pfn)) { return 'INSTALL' }
+        $deprovisioned = $script:appxDeprovisionedFamilies.ContainsKey($pfn)
+        if ($Data.Version -gt $script:appCache[$pfn]) {
+            if ($chkUpdateAppx.Checked) { return 'UPDATE' }
+            if ($deprovisioned) { return 'REPAIR' }
+            return 'SKIP_UPDATE_OFF'
+        }
+        if ($deprovisioned) { return 'REPAIR' }
+        return 'SKIP_EXISTS'
+    }
+
+    function Get-AppxActionColor([string]$Code) {
+        switch -Regex ($Code) {
+            '^INSTALL$' { return [Drawing.Color]::Yellow }
+            '^UPDATE$' { return [Drawing.Color]::Cyan }
+            '^REPAIR$' { return [Drawing.Color]::Orange }
+            '^(ERROR|IDENTITY_ERROR|BLOCKED|INCOMPATIBLE_OS|BUNDLE_INCOMPLETE)' { return [Drawing.Color]::Salmon }
             default { return [Drawing.Color]::Gray }
         }
     }
 
     function Update-AppxQueueActions {
         foreach ($item in $lvAppQueue.Items) {
-            if ($item.Text -notmatch '^(INSTALAR|ACTUALIZAR|REPARAR|REPARACION PENDIENTE|OMITIR)') { continue }
-            $item.Text = Get-AppxQueueAction $item.Tag
-            $item.ForeColor = Get-AppxActionColor $item.Text
+            if ($item.Name -notmatch '^(INSTALL|UPDATE|REPAIR|SKIP_)') { continue }
+            $newCode = Get-AppxQueueAction $item.Tag
+            Set-AppxItemState $item $newCode
+            $item.ForeColor = Get-AppxActionColor $newCode
         }
         $btnApply.Enabled = -not $script:appxBatchBlocked -and -not $script:isAppxPreparing -and -not $script:isAppxDeploying -and
-            @($lvAppQueue.Items | Where-Object { $_.Text -in @('INSTALAR','ACTUALIZAR','REPARAR','REPARACION PENDIENTE') }).Count -gt 0
+            @($lvAppQueue.Items | Where-Object { $_.Name -in @('INSTALL','UPDATE','REPAIR') }).Count -gt 0
     }
 
     function Block-AppxBatch([string]$Message) {
         $script:appxBatchBlocked = $true
         $script:appxBlockReason = $Message
         foreach ($item in $lvAppQueue.Items) {
-            if ($item.Text -match '^(OMITIR|INSTALADO|REPARADO|ERROR|BLOQUEADO)') { continue }
-            $item.Text = 'BLOQUEADO'; $item.ToolTipText = $Message
+            if ($item.Name -match '^(SKIP_|INSTALLED|REPAIRED|ERROR|IDENTITY_ERROR|BLOCKED)') { continue }
+            Set-AppxItemState $item 'BLOCKED'; $item.ToolTipText = $Message
             $item.ForeColor = [Drawing.Color]::Salmon
         }
         $btnApply.Enabled = $false
@@ -898,16 +927,17 @@ public static class AIOAppxIdentityNative {
             Type         = $Meta.Type
         }
 
-        $newItem           = New-Object System.Windows.Forms.ListViewItem($action)
+        $newItem           = New-Object System.Windows.Forms.ListViewItem((Get-AppxActionLabel $action))
+        $newItem.Name      = $action
         $newItem.ForeColor = $color
-        $newItem.SubItems.Add($Meta.Type)                             | Out-Null
+        $newItem.SubItems.Add($(if ($Meta.Type -eq 'LIBRERIA') { Get-AIOString 'appx.type_library' } else { Get-AIOString 'appx.type_application' })) | Out-Null
         $newItem.SubItems.Add($Meta.Family)                           | Out-Null
         $newItem.SubItems.Add($Meta.VersionStr)                       | Out-Null
         $newItem.SubItems.Add($Meta.Arch)                             | Out-Null
         $newItem.SubItems.Add($appData.Dependencies.Count.ToString()) | Out-Null
         $newItem.SubItems.Add($MainPkg.FullName)                      | Out-Null
         $newItem.Tag = $appData
-        if ($action -eq 'ERROR IDENTIDAD') { $newItem.ToolTipText = $Meta.IdentityError }
+        if ($action -eq 'IDENTITY_ERROR') { $newItem.ToolTipText = $Meta.IdentityError }
         elseif ($CompatError) {
             $newItem.ToolTipText = $CompatError
             Write-Log -LogLevel WARN -Message "AppxInjector: [$action] $($MainPkg.Name) -> $CompatError"
@@ -1211,8 +1241,8 @@ public static class AIOAppxIdentityNative {
                 }
                 $rawName = if ($null -ne $dashMeta.Name) { ([string]$dashMeta.Name).Trim() } else { '' }
                 $rawDisp = if ($null -ne $dashMeta.DisplayVersion) { ([string]$dashMeta.DisplayVersion).Trim() } else { '' }
-                if ($rawName -and $rawName -notmatch '(?i)no disponible') {
-                    if ($rawDisp -and $rawDisp -notmatch '(?i)no disponible|no aplica' -and $rawName -notlike "*$rawDisp*") {
+                if ($rawName -and -not (Test-AIODashboardValueUnavailable $rawName)) {
+                    if ($rawDisp -and -not (Test-AIODashboardValueUnavailable $rawDisp) -and $rawName -notlike "*$rawDisp*") {
                         $dashOsLabel = "$rawName ($rawDisp)"
                     } else {
                         $dashOsLabel = $rawName
@@ -1367,7 +1397,7 @@ public static class AIOAppxIdentityNative {
             foreach ($control in @($btnAddApp,$btnAddFolder,$btnRemoveApp,$btnClear,$chkUpdateAppx)) { $control.Enabled = -not $script:appxBatchBlocked }
             Update-AppxQueueActions
         }
-        $pendingItems = @($lvAppQueue.Items | Where-Object { $_.Text -in @('INSTALAR','ACTUALIZAR','REPARAR','REPARACION PENDIENTE') })
+        $pendingItems = @($lvAppQueue.Items | Where-Object { $_.Name -in @('INSTALL','UPDATE','REPAIR') })
 
         if ($pendingItems.Count -eq 0) {
             [System.Windows.Forms.MessageBox]::Show(
@@ -1397,7 +1427,7 @@ public static class AIOAppxIdentityNative {
         $successFamilies = @()
         $failedDismLogs = @()
         
-        $skipped = ($lvAppQueue.Items | Where-Object { $_.Text -match "OMITIR" }).Count
+        $skipped = ($lvAppQueue.Items | Where-Object { $_.Name -match "^SKIP_" }).Count
 
         try {
             # 1. Asegurar hives montadas para Sideloading
@@ -1436,8 +1466,8 @@ public static class AIOAppxIdentityNative {
             Invoke-AppxSafeUnmount -Reason "antes de DISM"
 
             # 4. Ordenar cola: LIBRERIAS primero para evitar errores de dependencia
-            $orderedQueue = @($pendingItems | Where-Object { $_.SubItems[1].Text -eq "LIBRERIA" }) +
-                            @($pendingItems | Where-Object { $_.SubItems[1].Text -ne "LIBRERIA" })
+            $orderedQueue = @($pendingItems | Where-Object { $_.Tag.Type -eq "LIBRERIA" }) +
+                            @($pendingItems | Where-Object { $_.Tag.Type -ne "LIBRERIA" })
 
             # 5. Bucle de inyeccion
             $progressBar.Value   = 0
@@ -1457,8 +1487,8 @@ public static class AIOAppxIdentityNative {
                 $appData    = $item.Tag
                 $familyName = $item.SubItems[2].Text
 
-                if ($item.Text -in @("REPARAR", "REPARACION PENDIENTE")) {
-                    $item.Text      = "REPARANDO..."
+                if ($item.Name -eq "REPAIR") {
+                    Set-AppxItemState $item "REPAIRING"
                     $item.ForeColor = [System.Drawing.Color]::Orange
                     $item.EnsureVisible()
                     $lblStatus.Text = Get-AIOString 'appx.status_repairing' ($count + 1) $total $familyName
@@ -1466,13 +1496,13 @@ public static class AIOAppxIdentityNative {
                     try {
                         # Completar la reparacion de este objeto antes de avanzar al siguiente.
                         $cleanedRepair = Remove-AppxDeprovisionedMarks -FamilyNames @($appData.PackageFamilyName) -StopOnFailure
-                        $item.Text      = "REPARADO"
+                        Set-AppxItemState $item "REPAIRED"
                         $item.ForeColor = [System.Drawing.Color]::LightGreen
                         $success++
                         Write-Log -LogLevel INFO -Message "AppxInjector: Reparacion completada [$familyName]; marcas limpiadas: $cleanedRepair"
                     } catch {
                         if ($script:appxBatchBlocked) { throw }
-                        $item.Text      = "ERROR REPARACION"
+                        Set-AppxItemState $item "ERROR_REPAIR"
                         $item.ForeColor = [System.Drawing.Color]::Red
                         $errors++
                         Write-Log -LogLevel ERROR -Message "AppxInjector: Fallo reparando [$familyName] - $($_.Exception.Message)"
@@ -1486,7 +1516,7 @@ public static class AIOAppxIdentityNative {
                     continue
                 }
 
-                $item.Text      = "PROCESANDO..."
+                Set-AppxItemState $item "PROCESSING"
                 $item.ForeColor = [System.Drawing.Color]::Cyan
                 $item.EnsureVisible()
                 $lblStatus.Text = "[$($count + 1)/$total] $familyName..."
@@ -1542,7 +1572,7 @@ public static class AIOAppxIdentityNative {
 
                     $exitCode = $script:currentDismProcess.ExitCode
                     if ($exitCode -eq 0 -or $exitCode -eq 3010) {
-                        $item.Text      = if ($exitCode -eq 3010) { "INSTALADO (Reinicio)" } else { "INSTALADO" }
+                        if ($exitCode -eq 3010) { Set-AppxItemState $item "INSTALLED_REBOOT" } else { Set-AppxItemState $item "INSTALLED" }
                         $item.ForeColor = [System.Drawing.Color]::LightGreen
                         $success++
                         $dismSucceeded = $true
@@ -1550,7 +1580,7 @@ public static class AIOAppxIdentityNative {
                         Write-Log -LogLevel INFO -Message "AppxInjector: OK [$familyName] (ExitCode: $exitCode)"
                     } else {
                         $hexCode = [Convert]::ToString([int32]$exitCode, 16).ToUpper().PadLeft(8, '0')
-                        $item.Text      = "ERROR (0x$hexCode)"
+                        Set-AppxItemState $item "ERROR_HEX" $hexCode
                         $item.ForeColor = [System.Drawing.Color]::Red
                         $errors++
                         Write-Log -LogLevel ERROR -Message "AppxInjector: FALLO [$familyName] ExitCode: 0x$hexCode"
@@ -1565,7 +1595,7 @@ public static class AIOAppxIdentityNative {
 
                 } catch {
                     if ($script:appxBatchBlocked) { throw }
-                    $item.Text      = "ERROR CRITICO"
+                    Set-AppxItemState $item "ERROR_CRITICAL"
                     $item.ForeColor = [System.Drawing.Color]::Red
                     $errors++
                     Write-Log -LogLevel ERROR -Message "AppxInjector: Excepcion desplegando [$familyName] - $($_.Exception.Message)"

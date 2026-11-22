@@ -2114,18 +2114,18 @@ $script:IsoMaker_TestIsoImage = {
     $tip.InitialDelay     = 400
     $tip.ReshowDelay      = 200
     $tip.ShowAlways       = $true
-    $tip.SetToolTip($txtSrc,      "Carpeta raiz de la fuente de instalacion de Windows (debe contener boot\, efi\, sources\).")
-    $tip.SetToolTip($btnSrc,      "Abrir explorador para seleccionar la carpeta origen.")
-    $tip.SetToolTip($txtDst,      "Ruta completa del archivo ISO que se generara (p. ej. C:\Output\Windows11.iso).")
-    $tip.SetToolTip($btnDst,      "Elegir ruta y nombre del archivo ISO de salida.")
-    $tip.SetToolTip($txtLabel,    "Maximo 32 caracteres. Solo A-Z, 0-9, guion y guion_bajo. Se genera con arquitectura e idioma predeterminado detectados.")
-    $tip.SetToolTip($lblValLang,  "Prioridad: DefaultLanguage/Language de DISM, lang.ini y, como respaldo, el primer idioma instalado.")
-    $tip.SetToolTip($txtUnattend, "Archivo XML de respuesta desatendida. Se copiara como autounattend.xml en la raiz de la ISO.")
-    $tip.SetToolTip($btnUnattend, "Seleccionar archivo autounattend.xml.")
-    $tip.SetToolTip($lnkWeb,      "Abre schneegans.de — generador online de archivos autounattend.xml para automatizacion OOBE.")
-    $tip.SetToolTip($btnExportLog,"Guarda el log completo de la ultima compilacion como archivo .txt.")
-    $tip.SetToolTip($btnMake,     "Inicia la compilacion de la imagen ISO booteable con los parametros configurados.")
-    $tip.SetToolTip($btnCancel,   "Interrumpe la compilacion en curso, elimina la salida parcial y restaura la ISO anterior si existia.")
+    $tip.SetToolTip($txtSrc,      (Get-AIOString 'tips.iso.txtSrc'))
+    $tip.SetToolTip($btnSrc,      (Get-AIOString 'tips.iso.btnSrc'))
+    $tip.SetToolTip($txtDst,      (Get-AIOString 'tips.iso.txtDst'))
+    $tip.SetToolTip($btnDst,      (Get-AIOString 'tips.iso.btnDst'))
+    $tip.SetToolTip($txtLabel,    (Get-AIOString 'tips.iso.txtLabel'))
+    $tip.SetToolTip($lblValLang,  (Get-AIOString 'tips.iso.lblValLang'))
+    $tip.SetToolTip($txtUnattend, (Get-AIOString 'tips.iso.txtUnattend'))
+    $tip.SetToolTip($btnUnattend, (Get-AIOString 'tips.iso.btnUnattend'))
+    $tip.SetToolTip($lnkWeb,      (Get-AIOString 'tips.iso.lnkWeb'))
+    $tip.SetToolTip($btnExportLog,(Get-AIOString 'tips.iso.btnExportLog'))
+    $tip.SetToolTip($btnMake,     (Get-AIOString 'tips.iso.btnMake'))
+    $tip.SetToolTip($btnCancel,   (Get-AIOString 'tips.iso.btnCancel'))
 
     # ------------------------------------------------------------------
     # [F1] Boton Cancelar

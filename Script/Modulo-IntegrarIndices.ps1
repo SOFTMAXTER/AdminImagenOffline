@@ -729,7 +729,7 @@ function Show-AIOIndexIntegrator {
             $progressFill.Width = [Math]::Min($width, [Math]::Max(30, [int]($width / 5)))
             $travel = [Math]::Max(1, $width - $progressFill.Width)
             $progressFill.Left = [int](($ui.Animation * 15) % $travel)
-            $progress.AccessibleDescription = 'Lectura de imagen en curso'
+            $progress.AccessibleDescription = Get-AIOString 'integrar.access_reading'
         } else {
             $progressFill.Left = 0
             $progressFill.Width = [int]($width * [Math]::Min(100, [Math]::Max(0, $ui.ProgressValue)) / 100)
@@ -756,7 +756,7 @@ function Show-AIOIndexIntegrator {
             $nativeFill.Width = [Math]::Min($width, [Math]::Max(30, [int]($width / 5)))
             $travel = [Math]::Max(1, $width - $nativeFill.Width)
             $nativeFill.Left = [int](($ui.Animation * 15) % $travel)
-            $nativeProgress.AccessibleDescription = 'Esperando porcentaje del motor'
+            $nativeProgress.AccessibleDescription = Get-AIOString 'integrar.access_waiting_pct'
         } else {
             $nativeFill.Left = 0
             # Como DeployVHD: el 100% informado no confirma exito hasta comprobar ExitCode.
@@ -771,13 +771,13 @@ function Show-AIOIndexIntegrator {
     $statusBox.Controls.Add($nativeStatus, 0, 2); $statusBox.Controls.Add($nativeProgress, 0, 3)
     $root.Controls.Add($statusBox, 0, 6)
     $tips = New-Object Windows.Forms.ToolTip
-    $tips.SetToolTip($planGrid, 'Doble clic en una celda de texto (o Enter/F2) para editar metadatos. Los separadores delimitan grupos de arquitectura. Subir/Bajar solo mueve dentro del mismo grupo. WinPE se marca con un clic; dejalo sin marcar para install.wim.')
-    $tips.SetToolTip($addSource, 'Selecciona varios .wim o .esd con Ctrl. Para ISO: extrae primero sources\install.wim o install.esd. Para SWM: convierte primero a WIM.')
-    $tips.SetToolTip($up, 'Sube una posicion dentro de la misma arquitectura. Alt + Flecha arriba.')
-    $tips.SetToolTip($down, 'Baja una posicion dentro de la misma arquitectura. Alt + Flecha abajo.')
-    $tips.SetToolTip($progress, 'Avance general por indices y verificacion final. Solo termina cuando el WIM esta verificado y publicado.')
-    $tips.SetToolTip($nativeProgress, 'Porcentaje real de la fase actual. Se reinicia al pasar de comprobar integridad a exportar datos o a otra fase.')
-    $tips.SetToolTip($clearSources, 'Vacia la lista de fuentes disponibles. El orden final conserva sus referencias.')
+    $tips.SetToolTip($planGrid, (Get-AIOString 'tips.integrar.planGrid'))
+    $tips.SetToolTip($addSource, (Get-AIOString 'tips.integrar.addSource'))
+    $tips.SetToolTip($up, (Get-AIOString 'tips.integrar.up'))
+    $tips.SetToolTip($down, (Get-AIOString 'tips.integrar.down'))
+    $tips.SetToolTip($progress, (Get-AIOString 'tips.integrar.progress'))
+    $tips.SetToolTip($nativeProgress, (Get-AIOString 'tips.integrar.nativeProgress'))
+    $tips.SetToolTip($clearSources, (Get-AIOString 'tips.integrar.clearSources'))
     $editableControls = @($addSource, $clearSources, $sourceGrid, $planGrid, $addSelected, $addAll, $up, $down, $remove, $clearPlan, $destination, $browse, $compression, $build)
 
     $updateMoveButtons = {

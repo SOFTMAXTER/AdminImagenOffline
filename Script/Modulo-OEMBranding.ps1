@@ -120,17 +120,17 @@ function Show-OEMBranding-GUI {
                 $fromDashboard = $true
             }
             $rawEd = if ($null -ne $dash.Edition) { ([string]$dash.Edition).Trim() } else { '' }
-            if ($rawEd -and $rawEd -notmatch '(?i)no disponible') {
+            if ($rawEd -and -not (Test-AIODashboardValueUnavailable $rawEd)) {
                 $edition = $rawEd
                 $fromDashboard = $true
             }
             $rawDisp = if ($null -ne $dash.DisplayVersion) { ([string]$dash.DisplayVersion).Trim() } else { '' }
-            if ($rawDisp -and $rawDisp -notmatch '(?i)no disponible|no aplica') {
+            if ($rawDisp -and -not (Test-AIODashboardValueUnavailable $rawDisp)) {
                 $dispVer = $rawDisp
                 $fromDashboard = $true
             }
             $rawName = if ($null -ne $dash.Name) { ([string]$dash.Name).Trim() } else { '' }
-            if ($rawName -and $rawName -notmatch '(?i)no disponible') {
+            if ($rawName -and -not (Test-AIODashboardValueUnavailable $rawName)) {
                 if ($dispVer -and $rawName -notlike "*$dispVer*") {
                     $osName = "$rawName ($dispVer)"
                 } else {

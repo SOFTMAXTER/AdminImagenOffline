@@ -811,7 +811,7 @@ $wpeSetupBlock
     $btnWiOS.Add_Click({
         try {
             if (-not (Test-Path -LiteralPath $wiosGeneratorPath -PathType Leaf)) {
-                throw "No se encontró el generador en '$wiosGeneratorPath'."
+                throw (Get-AIOString 'unattend.wios_not_found' $wiosGeneratorPath)
             }
             Start-Process -FilePath $wiosGeneratorPath -ErrorAction Stop
         } catch {

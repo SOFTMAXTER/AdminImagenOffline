@@ -148,7 +148,9 @@ function Save-Changes {
         # =========================================================
         Write-Host (Get-AIOString 'save.reading_os_meta') -ForegroundColor Yellow
         $defaultName = "Custom Image"
-        $defaultDesc = "Imagen personalizada creada con AdminImagenOffline el $(Get-Date -Format 'yyyy-MM-dd')"
+        # La descripcion se escribe dentro del WIM: se toma siempre en el idioma base para que
+        # no cambie segun el idioma de la interfaz.
+        $defaultDesc = Invoke-AIOWithBaseLanguage { Get-AIOString 'save.default_desc_fmt' (Get-Date -Format 'yyyy-MM-dd') }
         # Reutiliza los metadatos del Dashboard (nombre efectivo segun build y edicion,
         # ya normalizado para Windows 10/11, Cloud, Server y WinPE). Una cache valida
         # evita otra lectura de SOFTWARE; ForceMenuRefresh solicita actualizarla.
@@ -158,7 +160,7 @@ function Save-Changes {
                 $dashMeta = Get-AIOCachedDashboardMetadata -MountState $Script:IMAGE_MOUNTED -MountPath $Script:MOUNT_DIR `
                     -ImagePath $Script:WIM_FILE_PATH -Index $Script:MOUNTED_INDEX -ForceRefresh:$Script:ForceMenuRefresh
                 $dashName = if ($null -ne $dashMeta) { ([string]$dashMeta.Name).Trim() } else { '' }
-                if ($dashName -and $dashName -notmatch '^No disponible$|nombre no disponible|edicion no disponible') {
+                if ($dashName -and -not (Test-AIODashboardValueUnavailable $dashName)) {
                     $defaultName = $dashName
                 }
             }
@@ -171,10 +173,11 @@ function Save-Changes {
         # Cargar aqui el catalogo no requiere haber abierto Cambio-Edicion-Menu.
         try {
             $effectiveEdition = if ($null -ne $dashMeta) { ([string]$dashMeta.Edition).Trim() } else { '' }
-            if ($effectiveEdition -and $effectiveEdition -ne 'No disponible') {
+            if ($effectiveEdition -and -not (Test-AIODashboardValueUnavailable $effectiveEdition)) {
                 $catalogPath = Join-Path $PSScriptRoot 'Catalogos\Ediciones.ps1'
                 if (Test-Path -LiteralPath $catalogPath -PathType Leaf) {
-                    . $catalogPath
+                    # Descripcion del catalogo en idioma base (se guarda dentro del WIM).
+                    Invoke-AIOWithBaseLanguage { . $catalogPath } | Out-Null
                     $catalogEntry = $script:EditionCatalog | Where-Object {
                         $_.EditionID -ieq $effectiveEdition
                     } | Select-Object -First 1

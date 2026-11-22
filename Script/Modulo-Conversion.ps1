@@ -47,7 +47,7 @@
 # =============================================
 function Convert-VHD {
     Clear-Host
-    Write-AIOConversionSection -Title 'CONVERSION | VHD / VHDX -> WIM' -Color Yellow
+    Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_vhd_title') -Color Yellow
     Write-Host (Get-AIOString 'conversion.vhd_intro') -ForegroundColor Gray
     
     Write-Log -LogLevel INFO -Message "ConvertVHD: Iniciando modulo de conversion inteligente de VHD/VHDX a WIM."
@@ -55,7 +55,7 @@ function Convert-VHD {
     # 1. Verificar modulo Hyper-V
     if (-not (Get-Command "Mount-Vhd" -ErrorAction SilentlyContinue)) {
         Write-Log -LogLevel ERROR -Message "ConvertVHD: Faltan dependencias. El cmdlet 'Mount-Vhd' no esta disponible."
-        Write-AIOConversionSection -Title 'DEPENDENCIA NO DISPONIBLE' -Color Red
+        Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_dependency_missing') -Color Red
         Write-Host (Get-AIOString 'conversion.vhd_no_cmdlet') -ForegroundColor Red
         Write-Host (Get-AIOString 'conversion.vhd_need_hyperv') -ForegroundColor Gray
         Write-Host ""
@@ -66,7 +66,7 @@ function Convert-VHD {
     }
 
     # 2. Seleccion de Archivo
-    Write-AIOConversionSection -Title 'ORIGEN Y DESTINO' -Step 1
+    Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_source_dest') -Step 1
     Write-Host (Get-AIOString 'conversion.vhd_select_hint') -ForegroundColor Gray
     $path = Select-PathDialog -DialogType File -Title (Get-AIOString 'conversion.vhd_dialog_src') -Filter (Get-AIOString 'conversion.vhd_filter')
     if (-not $path) { 
@@ -92,7 +92,7 @@ function Convert-VHD {
     Write-AIOConversionField -Label 'Compresion' -Value 'Maxima (LZX / Compress:Max)'
 
     # 4. Proceso de Montaje y Captura
-    Write-AIOConversionSection -Title 'WINDOWS Y RECUPERACION' -Step 2
+    Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_windows_recovery') -Step 2
     Write-Host (Get-AIOString 'conversion.vhd_mounting') -ForegroundColor Gray
     Write-Log -LogLevel ACTION -Message "ConvertVHD: Iniciando proceso de montaje y analisis de particiones."
 
@@ -255,7 +255,7 @@ function Convert-VHD {
         # =========================================================
         #  Auto-Detección de Edición y Petición de Metadatos (ACTUALIZADO CON CATÁLOGO)
         # =========================================================
-        Write-AIOConversionSection -Title 'DATOS DE LA IMAGEN' -Step 3
+        Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_image_data') -Step 3
         Write-Host (Get-AIOString 'conversion.vhd_detecting_edition') -ForegroundColor Gray
         $defaultName = "Captured VHD"
         $defaultDesc = "Imagen capturada desde VHD el $(Get-Date -Format 'yyyy-MM-dd')"
@@ -308,7 +308,7 @@ function Convert-VHD {
 
         Write-Log -LogLevel INFO -Message "ConvertVHD: Metadatos -> Nombre: [$IMAGE_NAME] | Desc: [$IMAGE_DESC]"
 
-        Write-AIOConversionSection -Title 'CAPTURA DE WINDOWS' -Step 4
+        Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_windows_capture') -Step 4
         Write-AIOConversionField -Label 'Volumen' -Value "$DRIVE_LETTER`:\"
         Write-AIOConversionField -Label 'Destino' -Value $DEST_WIM_PATH
         Write-AIOConversionField -Label 'Nombre' -Value $IMAGE_NAME
@@ -328,7 +328,7 @@ function Convert-VHD {
 
         if ($LASTEXITCODE -ne 0) { throw "Fallo DISM durante la captura (Codigo: $LASTEXITCODE)." }
 
-        Write-AIOConversionSection -Title 'WINRE Y FINALIZACION' -Step 5
+        Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_winre_finish') -Step 5
         if ($winreSource) {
             if ($injectWinRE) {
                 Write-Host (Get-AIOString 'conversion.vhd_adding_winre') -ForegroundColor Cyan
@@ -360,7 +360,7 @@ function Convert-VHD {
         Write-Log -LogLevel INFO -Message "ConvertVHD: WIM publicado -> $DEST_WIM_PATH"
 
     } catch {
-        Write-AIOConversionSection -Title 'CONVERSION NO COMPLETADA' -Color Red
+        Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_not_completed') -Color Red
         Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
         Write-Log -LogLevel ERROR -Message "ConvertVHD: Excepcion critica durante la conversion - $($_.Exception.Message)"
     } finally {
@@ -392,9 +392,9 @@ function Convert-VHD {
         if ($timer) { $timer.Stop() }
         if ($conversionCompleted) {
             if ($cleanupSafe) {
-                Write-AIOConversionSection -Title 'CONVERSION COMPLETADA' -Color Green
+                Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_completed') -Color Green
             } else {
-                Write-AIOConversionSection -Title 'WIM CREADO; REVISAR LIMPIEZA' -Color Yellow
+                Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_wim_review_cleanup') -Color Yellow
             }
             Write-AIOConversionField -Label 'Archivo WIM' -Value $DEST_WIM_PATH
             Write-AIOConversionField -Label 'Nombre' -Value $IMAGE_NAME
@@ -733,7 +733,7 @@ function Convert-ImageFormat {
         'WIMToESD' { 'Exporta las ediciones seleccionadas con compresion ESD.' }
         'ESDToWIM' { 'Exporta las ediciones seleccionadas a un nuevo WIM.' }
     }
-    Write-AIOConversionSection -Title 'CONVERSION DE IMAGENES'
+    Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_images_title')
     Write-Host ('  ' + $title) -ForegroundColor White
     Write-Host ('  ' + $description) -ForegroundColor Gray
     $timer = $null
@@ -741,7 +741,7 @@ function Convert-ImageFormat {
     $scratch = $null
     $success = $false
     try {
-        Write-AIOConversionSection -Title 'IMAGEN DE ORIGEN' -Step 1
+        Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_source_image') -Step 1
         Write-Host (Get-AIOString 'conversion.select_file_hint') -ForegroundColor Gray
         $filter = switch ($Mode) { 'ToSWM' { Get-AIOString 'conversion.filter_wim_esd' }; 'WIMToESD' { Get-AIOString 'integrar.wim_filter_short' }; 'ESDToWIM' { Get-AIOString 'conversion.filter_esd' }; default { Get-AIOString 'conversion.filter_swm' } }
         $sourceTitle = switch ($Mode) { 'WIMToESD' { Get-AIOString 'conversion.title_wim_to_esd' }; 'ESDToWIM' { Get-AIOString 'conversion.title_esd_to_wim' }; default { Get-AIOString 'conversion.title_src_default' } }
@@ -767,7 +767,7 @@ function Convert-ImageFormat {
         $images = @(Get-WindowsImage -ImagePath $source -ErrorAction Stop)
         if ($images.Count -eq 0) { throw 'No se encontraron indices de imagen.' }
         Write-AIOConversionField -Label 'Ediciones' -Value ([string]$images.Count)
-        Write-AIOConversionSection -Title 'EDICIONES A CONVERTIR' -Step 2
+        Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_editions') -Step 2
         $indices = @(Read-AIOConversionIndices -Images $images)
         if ($indices.Count -eq 0) { Write-Host (Get-AIOString 'conversion.cancelled_indented') -ForegroundColor Yellow; return }
         $expected = @($indices | ForEach-Object { $n = $_; $images | Where-Object ImageIndex -eq $n })
@@ -775,7 +775,7 @@ function Convert-ImageFormat {
         for ($i = 0; $i -lt $indices.Count; $i++) {
             if ($indices[$i] -eq $sourceInfo.BootIndex) { $expectedBoot = $i + 1 }
         }
-        Write-AIOConversionSection -Title 'DESTINO Y OPCIONES' -Step 3
+        Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_dest_options') -Step 3
         $extension = switch ($Mode) { 'ToSWM' { '.swm' }; 'ToWIM' { '.wim' }; 'ToESD' { '.esd' }; 'WIMToESD' { '.esd' }; 'ESDToWIM' { '.wim' } }
         $defaultPath = Join-Path $sourceFile.DirectoryName ($sourceFile.BaseName + $extension)
         $destination = Select-SavePathDialog -Title (Get-AIOString 'conversion.save_dialog_title') -Filter "Imagen $extension|*$extension" -DefaultFileName $defaultPath
@@ -817,7 +817,7 @@ function Convert-ImageFormat {
         Write-AIOConversionField -Label 'Seleccion' -Value (([string]$indices.Count) + ' edicion(es): ' + ($indices -join ', '))
         Write-AIOConversionField -Label 'Compresion' -Value $compressionLabel
         if ($Mode -eq 'ToSWM') { Write-AIOConversionField -Label 'Tamano/parte' -Value ("{0} MB (objetivo)" -f $sizeMB) }
-        Write-AIOConversionSection -Title 'CONVERSION EN CURSO' -Step 4
+        Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_in_progress') -Step 4
         Write-Host (Get-AIOString 'conversion.dism_percent_note') -ForegroundColor Gray
         $timer = [Diagnostics.Stopwatch]::StartNew()
         $workRoot = Join-Path $destinationDirectory ('AIOConversion_' + [guid]::NewGuid().ToString('N'))
@@ -841,7 +841,7 @@ function Convert-ImageFormat {
             Write-Host ''
             Write-Host (Get-AIOString 'conversion.swm_splitting') -ForegroundColor Cyan
             Invoke-AIOSwmDism -Arguments @('/Split-Image', "/ImageFile:$splitSource", "/SWMFile:$stagedOutput", "/FileSize:$sizeMB", '/CheckIntegrity', "/ScratchDir:$scratch")
-            Write-AIOConversionSection -Title 'VERIFICACION Y GUARDADO' -Step 5
+            Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_verify_save') -Step 5
             Write-Host (Get-AIOString 'conversion.swm_checking') -ForegroundColor Gray
             $resultSet = Get-AIOSwmSet -FirstPart $stagedOutput
             if ($sizeMB -le 4095 -and @($resultSet.Files | Where-Object Length -gt 4294967295).Count) {
@@ -852,7 +852,7 @@ function Convert-ImageFormat {
         } else {
             $compression = if ($Mode -in @('ToESD', 'WIMToESD')) { 'recovery' } else { 'max' }
             Export-AIOConversionIndices -Source $source -Destination $stagedOutput -Indices $indices -Compression $compression -SwmPattern $swmPattern -BootIndex $sourceInfo.BootIndex -Scratch $scratch
-            Write-AIOConversionSection -Title 'VERIFICACION Y GUARDADO' -Step 5
+            Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_verify_save') -Step 5
             Write-Host (Get-AIOString 'conversion.checking_output') -ForegroundColor Gray
             Assert-AIOConversionImages -Path $stagedOutput -Expected $expected -BootIndex $expectedBoot
             $filesToPublish = @(Get-Item -LiteralPath $stagedOutput -ErrorAction Stop)
@@ -863,7 +863,7 @@ function Convert-ImageFormat {
         Publish-AIOConversionFiles -Files $filesToPublish -DestinationDirectory $destinationDirectory -Journal (Join-Path $workRoot 'publicacion.json') -FirstSwmName $firstSwmName
         $success = $true
         $timer.Stop()
-        Write-AIOConversionSection -Title 'CONVERSION COMPLETADA' -Color Green
+        Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_completed') -Color Green
         Write-AIOConversionField -Label 'Destino' -Value $destination
         Write-AIOConversionField -Label 'Ediciones' -Value ([string]$indices.Count)
         Write-AIOConversionField -Label 'Archivos' -Value ([string]$filesToPublish.Count)
@@ -879,7 +879,7 @@ function Convert-ImageFormat {
         } elseif ($Script:IMAGE_MOUNTED -eq 0) { $Script:WIM_FILE_PATH = $destination }
         Write-Log -LogLevel INFO -Message "ConvertSWM: $Mode completado; $($filesToPublish.Count) archivo(s) verificados."
     } catch {
-        Write-AIOConversionSection -Title 'NO SE COMPLETO LA CONVERSION' -Color Red
+        Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_not_finished') -Color Red
         Write-Host (Get-AIOString 'conversion.reason_prefix' $_.Exception.Message) -ForegroundColor Red
         Write-Log -LogLevel ERROR -Message "ConvertSWM: $($_.Exception.Message)"
     } finally {

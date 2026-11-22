@@ -49,9 +49,43 @@ Add-Type -AssemblyName System.Drawing
 # Cargar motor de idiomas (i18n) antes de mensajes de arranque y updater
 $script:I18nBaseDir = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
 $script:I18nModulePath = Join-Path -Path $script:I18nBaseDir -ChildPath 'I18n.ps1'
+$script:EarlyPreferredLanguage = 'auto'
+try {
+    $earlyRoot = Split-Path -Path $script:I18nBaseDir -Parent
+    if ($earlyRoot) {
+        $earlyCfgPath = Join-Path -Path $earlyRoot -ChildPath 'config.json'
+        if (Test-Path -LiteralPath $earlyCfgPath -PathType Leaf) {
+            $earlyCfg = [System.IO.File]::ReadAllText($earlyCfgPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($null -ne $earlyCfg.PSObject.Properties['Language'] -and -not [string]::IsNullOrWhiteSpace([string]$earlyCfg.Language)) {
+                $script:EarlyPreferredLanguage = [string]$earlyCfg.Language
+            }
+        }
+    }
+} catch {}
+
 if (Test-Path -LiteralPath $script:I18nModulePath -PathType Leaf) {
     . $script:I18nModulePath
-    [void](Initialize-AIOI18n)
+    [void](Initialize-AIOI18n -PreferredLanguage $script:EarlyPreferredLanguage)
+}
+
+if (-not (Get-Command -Name Get-AIOString -ErrorAction SilentlyContinue)) {
+    function Get-AIOString {
+        param([Parameter(Mandatory = $true, Position = 0)][string]$Key, [Parameter(ValueFromRemainingArguments = $true)][object[]]$FormatArgs)
+        if ($FormatArgs -and $FormatArgs.Count -gt 0) {
+            return ("[$Key] " + ($FormatArgs -join ' '))
+        }
+        return "[$Key]"
+    }
+    Set-Alias -Name T -Value Get-AIOString -Scope Script
+    function Test-AIOYesResponse { param([string]$InputText) return ([string]$InputText).Trim().ToUpperInvariant() -in @('S','SI','SÍ','Y','YES') }
+    function Test-AIONoResponse { param([string]$InputText) return ([string]$InputText).Trim().ToUpperInvariant() -in @('N','NO') }
+    function Get-AIOLanguageDisplaySummary { return 'es (fallback)' }
+    function Show-AIOLanguageSelector { return $false }
+}
+
+# Respaldo si I18n.ps1 es una version anterior sin Invoke-AIOWithBaseLanguage.
+if (-not (Get-Command -Name Invoke-AIOWithBaseLanguage -ErrorAction SilentlyContinue)) {
+    function Invoke-AIOWithBaseLanguage { param([Parameter(Mandatory = $true)][scriptblock]$ScriptBlock) return (& $ScriptBlock) }
 }
 
 function Write-Log {
@@ -1078,6 +1112,10 @@ function Show-ConfigMenu {
             "3" {
                 if (Show-AIOLanguageSelector) {
                     Save-Config
+                    $Script:AIODashboardCache = $null
+                    $script:AIODashboardEditionCatalog = $null
+                    $script:EditionCatalog = $null
+                    $Script:ForceMenuRefresh = $true
                     Start-Sleep -Seconds 1
                 }
             }
@@ -1410,12 +1448,12 @@ function Cambio-Edicion-Menu {
     } else { $null }
 
     if ($null -ne $dashMeta) {
-        if ($dashMeta.Edition -and $dashMeta.Edition -ne 'No disponible') {
+        if ($dashMeta.Edition -and -not (Test-AIODashboardValueUnavailable ([string]$dashMeta.Edition))) {
             $CURRENT_EDITION_DETECTED = [string]$dashMeta.Edition
         }
         if ($dashMeta.Name -match '^(Windows (?:11|10|8\.1|8|7|Server(?:\s+\d{4}(?:\s+R2)?)?))\b') {
             $WIN_VERSION_FRIENDLY = $matches[1]
-        } elseif ($dashMeta.Name -and $dashMeta.Name -ne 'No disponible') {
+        } elseif ($dashMeta.Name -and -not (Test-AIODashboardValueUnavailable ([string]$dashMeta.Name))) {
             $WIN_VERSION_FRIENDLY = [string]$dashMeta.Name
         }
     }
@@ -3056,12 +3094,12 @@ function Mount-Hives {
         Write-Host (Get-AIOString 'hives.loading_system') -NoNewline
         $p1 = Start-Process reg.exe -ArgumentList "load HKLM\OfflineSystem `"$sysHive`"" -Wait -PassThru -NoNewWindow
         $ec1 = $p1.ExitCode; $p1.Dispose()
-        if ($ec1 -ne 0) { throw "Fallo SYSTEM" } else { Write-Host "OK" -ForegroundColor Green; $resumenMount.Cargadas++ }
+        if ($ec1 -ne 0) { throw (Get-AIOString 'hives.fail_system') } else { Write-Host "OK" -ForegroundColor Green; $resumenMount.Cargadas++ }
 
         Write-Host (Get-AIOString 'hives.loading_software') -NoNewline
         $p2 = Start-Process reg.exe -ArgumentList "load HKLM\OfflineSoftware `"$softHive`"" -Wait -PassThru -NoNewWindow
         $ec2 = $p2.ExitCode; $p2.Dispose()
-        if ($ec2 -ne 0) { throw "Fallo SOFTWARE" } else { Write-Host "OK" -ForegroundColor Green; $resumenMount.Cargadas++ }
+        if ($ec2 -ne 0) { throw (Get-AIOString 'hives.fail_software') } else { Write-Host "OK" -ForegroundColor Green; $resumenMount.Cargadas++ }
 
         # --- Carga del Perfil Default (.DEFAULT) ---
         if (Test-Path $defaultHive) {

@@ -364,15 +364,17 @@ function Get-AIODashboardEditionLabel {
 }
 
 function ConvertTo-AIODashboardMetadata {
-    param([AllowNull()]$RegistryData, [version]$KernelVersion, [string]$Architecture = 'No disponible', [string]$CurrentEdition, [AllowNull()]$Environment)
+    param([AllowNull()]$RegistryData, [version]$KernelVersion, [string]$Architecture = '', [string]$CurrentEdition, [AllowNull()]$Environment)
+    $naVal = Get-AIOString 'dashboard.val_na'
+    if ([string]::IsNullOrWhiteSpace($Architecture)) { $Architecture = $naVal }
     $issues = New-Object 'System.Collections.Generic.List[string]'
     $rawProductName = if ($null -ne $RegistryData -and $null -ne $RegistryData.ProductName) { [string]$RegistryData.ProductName } else { '' }
     $rawEditionId = if ($null -ne $RegistryData -and $null -ne $RegistryData.EditionID) { ([string]$RegistryData.EditionID).Trim() } else { '' }
     $name = $rawProductName
     $edition = $rawEditionId
-    $editionSource = if ($edition) { 'Registro SOFTWARE offline' } else { 'No disponible' }
+    $editionSource = if ($edition) { Get-AIOString 'dashboard.src_reg_software' } else { $naVal }
     if (-not [string]::IsNullOrWhiteSpace($CurrentEdition)) {
-        $edition = $CurrentEdition.Trim(); $editionSource = 'DISM /Get-CurrentEdition offline'
+        $edition = $CurrentEdition.Trim(); $editionSource = Get-AIOString 'dashboard.src_dism_edition'
     }
     $installationType = if ($null -ne $RegistryData -and $null -ne $RegistryData.InstallationType) { [string]$RegistryData.InstallationType } else { '' }
     $displayVersion = if ($null -ne $RegistryData -and $null -ne $RegistryData.DisplayVersion) { [string]$RegistryData.DisplayVersion } else { '' }
@@ -385,7 +387,7 @@ function ConvertTo-AIODashboardMetadata {
         $buildText = [string]$RegistryData.CurrentBuild
     }
     $hasBuild = [int]::TryParse($buildText, [ref]$build) -and $build -gt 0
-    $versionText = 'No disponible'; $versionSource = 'No disponible'
+    $versionText = $naVal; $versionSource = $naVal
     if ($hasBuild) {
         $major = 0; $minor = 0
         $majorRaw = if ($null -ne $RegistryData) { [string]$RegistryData.CurrentMajorVersionNumber } else { '' }
@@ -404,7 +406,7 @@ function ConvertTo-AIODashboardMetadata {
         $hasUbr = $null -ne $RegistryData -and $null -ne $RegistryData.UBR -and [int]::TryParse([string]$RegistryData.UBR, [ref]$ubr) -and $ubr -ge 0
         if ($hasUbr) { $versionText += ".$ubr" }
         else { [void]$issues.Add('UBR no disponible; no se invento ni se mezclo una revision del kernel.') }
-        $versionSource = 'Registro SOFTWARE offline'
+        $versionSource = Get-AIOString 'dashboard.src_reg_software'
     } elseif ($null -ne $KernelVersion) {
         $versionText = $KernelVersion.ToString(); $versionSource = 'Archivo del kernel (respaldo)'
         $build = $KernelVersion.Build
@@ -425,7 +427,7 @@ function ConvertTo-AIODashboardMetadata {
         $installationType = 'WindowsPE'
         # DisplayVersion/ReleaseId pueden venir heredados de la base de Windows.
         # PE/RE conservan su build real, sin atribuirles una version comercial.
-        $displayVersion = 'No aplica (WinPE)'
+        $displayVersion = Get-AIOString 'dashboard.val_na_winpe'
         if ($edition -notmatch '^(?i:Windows\s*PE|WinPE)$') {
             $edition = 'WindowsPE'
             $editionSource = $Environment.Source
@@ -449,11 +451,11 @@ function ConvertTo-AIODashboardMetadata {
         $name = "$family $label"
     }
     $nameAdjusted = $name -cne $rawProductName
-    if (-not $name) { $name = 'Windows (nombre no disponible)'; [void]$issues.Add('ProductName no disponible.') }
-    if (-not $edition) { $edition = 'No disponible'; [void]$issues.Add('Edicion no disponible.') }
-    if (-not $displayVersion) { $displayVersion = 'No disponible' }
-    if (-not $installationType) { $installationType = 'No disponible' }
-    if (-not $Architecture -or $Architecture -eq 'No disponible') { $Architecture = 'No disponible'; [void]$issues.Add('Arquitectura no disponible.') }
+    if (-not $name) { $name = Get-AIOString 'dashboard.val_name_unavailable'; [void]$issues.Add('ProductName no disponible.') }
+    if (-not $edition) { $edition = $naVal; [void]$issues.Add('Edicion no disponible.') }
+    if (-not $displayVersion) { $displayVersion = $naVal }
+    if (-not $installationType) { $installationType = $naVal }
+    if (-not $Architecture -or $Architecture -eq $naVal -or $Architecture -eq 'No disponible') { $Architecture = $naVal; [void]$issues.Add('Arquitectura no disponible.') }
     [pscustomobject]@{
         Name = $name; RawProductName = $rawProductName; NameAdjusted = $nameAdjusted
         Edition = $edition; RawEditionID = $rawEditionId; EditionSource = $editionSource
@@ -517,13 +519,13 @@ function Get-AIODashboardEnvironment {
         $registryWindows = ([string]$RegistryData.InstallationType).Trim() -match '^(Client|Server(?:\s.*)?)$'
     }
     $result = [pscustomobject]@{
-        Kind = 'Unknown'; IsWinPE = $false; Name = ''; Role = ''; Source = 'No disponible'
-        Confidence = 'No determinada'; Issues = @()
+        Kind = 'Unknown'; IsWinPE = $false; Name = ''; Role = ''; Source = (Get-AIOString 'dashboard.val_na')
+        Confidence = (Get-AIOString 'dashboard.conf_unknown'); ConfidenceCode = 'Unknown'; Issues = @()
     }
     # Un Windows completo puede contener winre.wim, ReAgent.xml y utilidades de
     # recuperacion. No son prueba de que el indice ACTIVO sea WinRE.
     if ($registryWindows -and -not $registryPE) {
-        $result.Kind = 'Windows'; $result.Source = 'Registro SOFTWARE offline'; $result.Confidence = 'Alta'
+        $result.Kind = 'Windows'; $result.Source = Get-AIOString 'dashboard.src_reg_software'; $result.Confidence = Get-AIOString 'dashboard.conf_high'; $result.ConfidenceCode = 'High'
         return $result
     }
 
@@ -546,7 +548,7 @@ function Get-AIODashboardEnvironment {
         $imageText = @($ImageInfo.ImageName, $ImageInfo.ImageDescription) -join ' '
     }
     if ($imageWindows -and -not $registryPE -and -not $filesPE) {
-        $result.Kind = 'Windows'; $result.Source = 'Tipo del indice WIM'; $result.Confidence = 'Media'
+        $result.Kind = 'Windows'; $result.Source = Get-AIOString 'dashboard.src_wim_type'; $result.Confidence = Get-AIOString 'dashboard.conf_medium'; $result.ConfidenceCode = 'Medium'
         return $result
     }
     $rePattern = '\bWinRE\b|\bWindows\s+RE\b|\bWindows Recovery Environment\b|\bEntorno de recuperaci[oó]n(?: de Windows)?\b'
@@ -558,9 +560,9 @@ function Get-AIODashboardEnvironment {
     # Los nombres editables son respaldo, nunca sustituyen un tipo Client/Server.
     $result.IsWinPE = $registryPE -or $filesPE -or $imagePE -or $nameRE -or $nameSetup -or $namePE
     if (-not $result.IsWinPE) { return $result }
-    $result.Kind = 'WinPE'; $result.Name = 'Entorno de preinstalacion de Windows (WinPE)'; $result.Role = 'Windows PE'
-    $result.Source = if ($registryPE) { 'Registro SOFTWARE offline' } elseif ($filesPE) { 'Archivos WinPE montados' } else { 'Metadatos del indice WIM' }
-    $result.Confidence = if ($registryPE -or $filesPE) { 'Alta' } else { 'Media' }
+    $result.Kind = 'WinPE'; $result.Name = Get-AIOString 'dashboard.env_winpe_name'; $result.Role = 'Windows PE'
+    $result.Source = if ($registryPE) { Get-AIOString 'dashboard.src_reg_software' } elseif ($filesPE) { Get-AIOString 'dashboard.src_winpe_files' } else { Get-AIOString 'dashboard.src_wim_meta' }
+    $result.ConfidenceCode = if ($registryPE -or $filesPE) { 'High' } else { 'Medium' }; $result.Confidence = if ($result.ConfidenceCode -eq 'High') { Get-AIOString 'dashboard.conf_high' } else { Get-AIOString 'dashboard.conf_medium' }
 
     $hasRE = $files['sources\recovery\recenv.exe'] -or $files['Windows\System32\recenv.exe'] -or $files['WinRE\recenv.exe']
     $hasSetup = $files['sources\setup.exe'] -or $files['setup.exe']
@@ -573,30 +575,30 @@ function Get-AIODashboardEnvironment {
     $kind = ''
     if ($launchRE -xor $launchSetup) {
         $kind = if ($launchRE) { 'WinRE' } else { 'WindowsSetup' }
-        $result.Source = 'winpeshl.ini y ejecutables montados'; $result.Confidence = 'Alta'
+        $result.Source = Get-AIOString 'dashboard.src_winpeshl_exe'; $result.Confidence = Get-AIOString 'dashboard.conf_high'; $result.ConfidenceCode = 'High'
     } elseif ($launchRE -and $launchSetup) {
         $issues += 'El inicio declara recuperacion y Setup; no se atribuye un rol unico.'
     } elseif ($hasRE -xor $hasSetup) {
         $kind = if ($hasRE) { 'WinRE' } else { 'WindowsSetup' }
-        $result.Source = 'Ejecutables del entorno montado'; $result.Confidence = 'Alta'
+        $result.Source = Get-AIOString 'dashboard.src_mounted_exe'; $result.Confidence = Get-AIOString 'dashboard.conf_high'; $result.ConfidenceCode = 'High'
     } elseif ($nameRE -xor $nameSetup) {
         $kind = if ($nameRE) { 'WinRE' } else { 'WindowsSetup' }
-        $result.Source = 'Nombre/descripcion del indice WIM'; $result.Confidence = 'Media'
+        $result.Source = Get-AIOString 'dashboard.src_wim_name_desc'; $result.Confidence = Get-AIOString 'dashboard.conf_medium'; $result.ConfidenceCode = 'Medium'
     } elseif (($hasRE -and $hasSetup) -or ($nameRE -and $nameSetup)) {
         $issues += 'Hay indicios de recuperacion y Setup; el rol del indice no es concluyente.'
     } elseif ([IO.Path]::GetFileName($ImagePath) -match '^winre(?:[._ -].*)?\.wim$') {
         # Pista debil, solo tras comprobar que es PE. Incluye las copias de trabajo
         # winre_editado.wim / winre_final.wim del gestor de entornos.
-        $kind = 'WinRE'; $result.Source = 'Entorno PE + nombre del archivo (probable)'; $result.Confidence = 'Baja'
+        $kind = 'WinRE'; $result.Source = Get-AIOString 'dashboard.src_pe_filename'; $result.Confidence = Get-AIOString 'dashboard.conf_low'; $result.ConfidenceCode = 'Low'
         $issues += 'WinRE probable por el nombre del archivo; faltan marcadores que confirmen el rol.'
     }
     if ($kind -eq 'WinRE') {
-        $result.Kind = 'WinRE'; $result.Name = 'Entorno de recuperacion de Windows (WinRE)'; $result.Role = 'Recuperacion de Windows (WinRE)'
-        if ($result.Confidence -eq 'Baja') { $result.Name += ' probable'; $result.Role += ' probable' }
+        $result.Kind = 'WinRE'; $result.Name = Get-AIOString 'dashboard.env_winre_name'; $result.Role = Get-AIOString 'dashboard.env_winre_role'
+        if ($result.ConfidenceCode -eq 'Low') { $prob = Get-AIOString 'dashboard.env_probable_suffix'; $result.Name += $prob; $result.Role += $prob }
     } elseif ($kind -eq 'WindowsSetup') {
-        $result.Kind = 'WindowsSetup'; $result.Name = 'Instalador de Windows (Windows Setup)'; $result.Role = 'Instalador de Windows (Setup)'
+        $result.Kind = 'WindowsSetup'; $result.Name = Get-AIOString 'dashboard.env_setup_name'; $result.Role = Get-AIOString 'dashboard.env_setup_role'
     } elseif (($hasRE -and $hasSetup) -or ($nameRE -and $nameSetup)) {
-        $result.Role = 'WinPE con recuperacion y Setup (rol no determinado)'; $result.Confidence = 'No determinada'
+        $result.Role = Get-AIOString 'dashboard.env_mixed_role'; $result.Confidence = Get-AIOString 'dashboard.conf_unknown'; $result.ConfidenceCode = 'Unknown'
     }
     if (($kind -eq 'WinRE' -and $nameSetup) -or ($kind -eq 'WindowsSetup' -and $nameRE)) {
         $issues += 'El contenido montado y el nombre/descripcion WIM discrepan; se priorizo el contenido.'
@@ -612,7 +614,7 @@ function Test-AIODashboardIsWinPE {
 
 function Read-AIODashboardMetadata {
     param([Parameter(Mandatory = $true)][string]$MountPath, [string]$ImagePath, $Index)
-    $issues = @(); $registry = $null; $kernelVersion = $null; $arch = 'No disponible'; $currentEdition = $null
+    $issues = @(); $registry = $null; $kernelVersion = $null; $arch = Get-AIOString 'dashboard.val_na'; $currentEdition = $null
     $kernel = Join-Path $MountPath 'Windows\System32\ntoskrnl.exe'
     try { $registry = Get-AIODashboardRegistryData -MountPath $MountPath }
     catch { $issues += $_.Exception.Message }
@@ -720,6 +722,18 @@ function Get-AIOCachedDashboardMetadata {
     return $script:AIODashboardCache.Data
 }
 
+function Test-AIODashboardValueUnavailable {
+    param([AllowNull()][string]$Value)
+    # Los valores del Dashboard se muestran en el idioma activo; para decidir si un dato
+    # esta disponible se compara con la traduccion actual y con los textos base/ingles.
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $true }
+    $text = $Value.Trim()
+    foreach ($key in @('dashboard.val_na', 'dashboard.val_na_winpe', 'dashboard.val_name_unavailable')) {
+        if ([string]::Equals($text, (Get-AIOString $key), [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return ($text -match '(?i)no disponible|no aplica|not available|not applicable|unavailable')
+}
+
 function Write-AIODashboardMetadata {
     param($Metadata, [string]$MountPath, [int]$Width = 80)
     if ($null -eq $Metadata) { return }
@@ -738,7 +752,8 @@ function Write-AIODashboardMetadata {
         $value = ([string]$item[1] -replace '[\x00-\x1F\x7F]', ' ').Trim()
         $available = [Math]::Max(4, $Width - $prefix.Length - 1)
         if ($value.Length -gt $available) { $value = $value.Substring(0, $available - 3) + '...' }
-        Write-Host ($prefix + $value) -ForegroundColor Cyan
+        Write-Host $prefix -NoNewline -ForegroundColor Cyan
+        Write-Host $value -ForegroundColor White
     }
     if (@($Metadata.Issues).Count -gt 0) {
         Write-Host (Get-AIOString 'dashboard.partial_read_warn') -ForegroundColor Yellow

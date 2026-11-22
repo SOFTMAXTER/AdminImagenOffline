@@ -14,6 +14,7 @@ $Script:AIOI18nHostCulture = 'es'
 $Script:AIOI18nFallbackStrings = @{}
 $Script:AIOI18nStrings = @{}
 $Script:AIOI18nInitialized = $false
+$Script:AIOI18nUseBaseOnly = $false
 
 function Get-AIOHostUICultureName {
     try {
@@ -277,7 +278,9 @@ function Get-AIOString {
     )
 
     $template = $null
-    if ($null -ne $Script:AIOI18nStrings -and $Script:AIOI18nStrings.ContainsKey($Key)) {
+    if ($Script:AIOI18nUseBaseOnly -and $null -ne $Script:AIOI18nFallbackStrings -and $Script:AIOI18nFallbackStrings.ContainsKey($Key)) {
+        $template = $Script:AIOI18nFallbackStrings[$Key]
+    } elseif ($null -ne $Script:AIOI18nStrings -and $Script:AIOI18nStrings.ContainsKey($Key)) {
         $template = $Script:AIOI18nStrings[$Key]
     } elseif ($null -ne $Script:AIOI18nFallbackStrings -and $Script:AIOI18nFallbackStrings.ContainsKey($Key)) {
         $template = $Script:AIOI18nFallbackStrings[$Key]
@@ -297,6 +300,21 @@ function Get-AIOString {
 }
 
 Set-Alias -Name T -Value Get-AIOString -Scope Script -Force
+
+function Invoke-AIOWithBaseLanguage {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][scriptblock]$ScriptBlock)
+
+    # Ejecuta el bloque resolviendo los textos siempre en el idioma base (es),
+    # para que los metadatos escritos en un WIM no dependan del idioma de la interfaz.
+    $previous = $Script:AIOI18nUseBaseOnly
+    $Script:AIOI18nUseBaseOnly = $true
+    try {
+        return (& $ScriptBlock)
+    } finally {
+        $Script:AIOI18nUseBaseOnly = $previous
+    }
+}
 
 function Test-AIOYesResponse {
     param(

@@ -160,7 +160,7 @@ function Show-Drivers-GUI {
         param($fileObj)
         $classType   = "Desconocido"
         $localVersion = "---"
-        $statusText  = "Nuevo"
+        $statusText  = (Get-AIOString 'drivers.state_new')
         $isInstalled = $false
 
         try {
@@ -176,7 +176,7 @@ function Show-Drivers-GUI {
 
         $foundByName = $script:cachedInstalledDrivers | Where-Object { [System.IO.Path]::GetFileName($_.OriginalFileName) -eq $fileObj.Name }
         if ($foundByName) {
-            $isInstalled = $true; $statusText = "INSTALADO"
+            $isInstalled = $true; $statusText = (Get-AIOString 'drivers.state_installed')
         } elseif ($localVersion -ne "---") {
             $foundByVer = $script:cachedInstalledDrivers | Where-Object {
                 $match = $false
@@ -186,7 +186,7 @@ function Show-Drivers-GUI {
                 }
                 $match
             }
-            if ($foundByVer) { $isInstalled = $true; $statusText = "INSTALADO" }
+            if ($foundByVer) { $isInstalled = $true; $statusText = (Get-AIOString 'drivers.state_installed') }
         }
 
         $item = New-Object System.Windows.Forms.ListViewItem($statusText)

@@ -167,11 +167,11 @@ function Show-RegPreview-GUI {
                     $item.SubItems.Add($keyRaw) | Out-Null
                     
                     if ($isDelete) {
-                        $item.SubItems.Add("EXISTE") | Out-Null
+                        $item.SubItems.Add((Get-AIOString 'tweaks.state_exists')) | Out-Null
                         $item.SubItems.Add((Get-AIOString 'tweaks.preview_delete')) | Out-Null
                         $item.ForeColor = [System.Drawing.Color]::Salmon
                     } else {
-                        $item.SubItems.Add( $(if($exists){"EXISTE"}else{"NUEVA"}) ) | Out-Null
+                        $item.SubItems.Add( $(if($exists){Get-AIOString 'tweaks.state_exists'}else{Get-AIOString 'tweaks.state_new'}) ) | Out-Null
                         $item.SubItems.Add("-") | Out-Null
                         $item.ForeColor = [System.Drawing.Color]::Yellow
                     }
@@ -387,7 +387,7 @@ function Show-RegQueue-GUI {
                 }
                 
                 if (-not $exists) {
-                    $newItem = New-Object System.Windows.Forms.ListViewItem("EN ESPERA")
+                    $newItem = New-Object System.Windows.Forms.ListViewItem((Get-AIOString 'tweaks.state_pending')); $newItem.Name = 'PENDING'
                     $newItem.SubItems.Add([System.IO.Path]::GetFileName($file)) | Out-Null
                     $newItem.SubItems.Add($file) | Out-Null
                     $newItem.ForeColor = [System.Drawing.Color]::Yellow
@@ -468,7 +468,7 @@ function Show-RegQueue-GUI {
                     }
                     
                     if (-not $exists) {
-                        $newItem = New-Object System.Windows.Forms.ListViewItem("EN ESPERA")
+                        $newItem = New-Object System.Windows.Forms.ListViewItem((Get-AIOString 'tweaks.state_pending')); $newItem.Name = 'PENDING'
                         $newItem.SubItems.Add([System.IO.Path]::GetFileName($ruta)) | Out-Null
                         $newItem.SubItems.Add($ruta) | Out-Null
                         $newItem.ForeColor = [System.Drawing.Color]::Yellow
@@ -491,7 +491,7 @@ function Show-RegQueue-GUI {
 
     # --- EVENTO MAESTRO ---
     $btnProcess.Add_Click({
-        $pendingItems = @($lvQ.Items | Where-Object { $_.Text -eq "EN ESPERA" -or $_.Text -eq "ERROR LECTURA" })
+        $pendingItems = @($lvQ.Items | Where-Object { $_.Name -in @("PENDING", "READ_ERROR") })
         if ($pendingItems.Count -eq 0) {
             [System.Windows.Forms.MessageBox]::Show((Get-AIOString 'tweaks.reg_none_pending'), (Get-AIOString 'addons.none_pending_title'), 'OK', 'Information') | Out-Null
             return
@@ -518,7 +518,7 @@ function Show-RegQueue-GUI {
         try {
             foreach ($item in $pendingItems) {
                 
-                $item.Text = "PROCESANDO"
+                $item.Name = "PROCESSING"; $item.Text = Get-AIOString 'tweaks.state_processing'
                 $item.ForeColor = [System.Drawing.Color]::Cyan
                 $item.EnsureVisible()
                 $frmQ.Refresh()
@@ -527,11 +527,11 @@ function Show-RegQueue-GUI {
                 try {
                     Import-OfflineReg -FilePath $item.Tag
                     
-                    $item.Text = "COMPLETADO"
+                    $item.Name = "COMPLETED"; $item.Text = Get-AIOString 'tweaks.state_completed'
                     $item.ForeColor = [System.Drawing.Color]::LightGreen
                     $success++
                 } catch {
-                    $item.Text = "ERROR"
+                    $item.Name = "ERROR"; $item.Text = Get-AIOString 'tweaks.state_error'
                     $item.ForeColor = [System.Drawing.Color]::Red
                     $errors++
                     Write-Log -LogLevel ERROR -Message "RegBatch: Fallo la inyeccion de $($item.Tag) - $($_.Exception.Message)"
@@ -655,7 +655,7 @@ function Show-Tweaks-Offline-GUI {
                 if (-not $keyOffline.StartsWith("HKLM:\")) { $keyOffline = $keyOffline -replace "^HKLM\\", "HKLM:\" }
                 $currentKeyOffline = $keyOffline
 
-                $existStr = if (Test-Path -LiteralPath $currentKeyOffline) { "(EXISTE)" } else { "(NUEVA)" }
+                $existStr = if (Test-Path -LiteralPath $currentKeyOffline) { '(' + (Get-AIOString 'tweaks.state_exists') + ')' } else { '(' + (Get-AIOString 'tweaks.state_new') + ')' }
                 $report += "`n[CLAVE] $keyRaw $existStr`n"
             }
             elseif ($currentKeyOffline -and $line -match '^"(.+?)"=(.*)') {
@@ -805,26 +805,28 @@ function Show-Tweaks-Offline-GUI {
                     if ($pathRaw) {
                         $item = New-Object System.Windows.Forms.ListViewItem($tw.Name)
                         $psPath = $pathRaw -replace "^HKLM\\", "HKLM:\"
-                        $state = "INACTIVO"
+                        $stateCode = "INACTIVE"
                         
                         try {
                             if ($tw.Method -eq "RegistryPayload") {
                                 if ($null -eq $tw.PrimaryValue -or $tw.PrimaryValue -eq "") {
-                                    if (Test-Path -LiteralPath $psPath) { $state = "ACTIVO" }
+                                    if (Test-Path -LiteralPath $psPath) { $stateCode = "ACTIVE" }
                                 } else {
                                     $val = (Get-ItemProperty -LiteralPath $psPath -Name $tw.PrimaryValue -ErrorAction SilentlyContinue).($tw.PrimaryValue)
-                                    if ("$val" -eq "$($tw.ExpectedData)") { $state = "ACTIVO" }
+                                    if ("$val" -eq "$($tw.ExpectedData)") { $stateCode = "ACTIVE" }
                                 }
                             } else {
                                 $val = (Get-ItemProperty -LiteralPath $psPath -Name $tw.RegistryKey -ErrorAction SilentlyContinue).($tw.RegistryKey)
-                                if ("$val" -eq "$($tw.EnabledValue)") { $state = "ACTIVO" }
+                                if ("$val" -eq "$($tw.EnabledValue)") { $stateCode = "ACTIVE" }
                             }
                         } catch {}
 
-                        $item.SubItems.Add($state) | Out-Null
+                        $stateText = if ($stateCode -eq "ACTIVE") { Get-AIOString 'tweaks.state_active' } else { Get-AIOString 'tweaks.state_inactive' }
+                        $subState = $item.SubItems.Add($stateText)
+                        $subState.Tag = $stateCode
                         $item.SubItems.Add($tw.Method) | Out-Null
                         $item.Tag = $tw 
-                        if ($state -eq "ACTIVO") { $item.ForeColor = [System.Drawing.Color]::Cyan }
+                        if ($stateCode -eq "ACTIVE") { $item.ForeColor = [System.Drawing.Color]::Cyan }
                         
                         $lv.Items.Add($item) | Out-Null
                     }
@@ -860,7 +862,7 @@ function Show-Tweaks-Offline-GUI {
             
             $lv.BeginUpdate()
             foreach ($item in $lv.Items) {
-                if ($item.SubItems[1].Text -ne "ACTIVO") {
+                if ($item.SubItems[1].Tag -ne "ACTIVE") {
                     $item.Checked = $true
                 }
             }
@@ -937,7 +939,7 @@ function Show-Tweaks-Offline-GUI {
                                     Import-OfflineReg -FilePath $tempReg
                                     Remove-Item $tempReg -Force -ErrorAction SilentlyContinue
 
-                                    $it.SubItems[1].Text = "ACTIVO"
+                                    $it.SubItems[1].Tag = "ACTIVE"; $it.SubItems[1].Text = Get-AIOString 'tweaks.state_active'
                                     $it.ForeColor = [System.Drawing.Color]::Cyan
                                 } 
                                 else {
@@ -971,7 +973,7 @@ function Show-Tweaks-Offline-GUI {
                                         Write-Log -LogLevel INFO -Message "Tweak_Engine: Payload revertido vía inyección .reg -> $subPathNet"
                                     }
 
-                                    $it.SubItems[1].Text = "RESTAURADO"
+                                    $it.SubItems[1].Tag = "RESTORED"; $it.SubItems[1].Text = Get-AIOString 'tweaks.state_restored'
                                     $it.ForeColor = [System.Drawing.Color]::Silver
                                 }
                                 $it.Checked = $false 
@@ -979,7 +981,7 @@ function Show-Tweaks-Offline-GUI {
                                 [System.Windows.Forms.Application]::DoEvents()
                             } catch {
                                 $errors++
-                                $it.SubItems[1].Text = "ERROR"
+                                $it.SubItems[1].Tag = "ERROR"; $it.SubItems[1].Text = Get-AIOString 'tweaks.state_error'
                                 $it.ForeColor = [System.Drawing.Color]::Red
                                 Write-Log -LogLevel ERROR -Message "Tweak_Engine: Falla procesando Payload $($t.Name) - $($_.Exception.Message)"
                             }
@@ -1016,14 +1018,14 @@ function Show-Tweaks-Offline-GUI {
                                         Write-Log -LogLevel INFO -Message "Tweak_Engine: Arbol borrado nativamente -> $subPathNet"
                                     }
                                 }
-                                $it.SubItems[1].Text = "RESTAURADO"
+                                $it.SubItems[1].Tag = "RESTORED"; $it.SubItems[1].Text = Get-AIOString 'tweaks.state_restored'
                                 $it.ForeColor = [System.Drawing.Color]::Silver
                                 $it.Checked = $false
                                 $success++
                                 [System.Windows.Forms.Application]::DoEvents()
                             } catch {
                                 $errors++
-                                $it.SubItems[1].Text = "ERROR"
+                                $it.SubItems[1].Tag = "ERROR"; $it.SubItems[1].Text = Get-AIOString 'tweaks.state_error'
                                 $it.ForeColor = [System.Drawing.Color]::Red
                                 Write-Log -LogLevel ERROR -Message "Tweak_Engine: Falla borrando clave $($t.Name) - $($_.Exception.Message)"
                             } finally {
@@ -1091,10 +1093,10 @@ function Show-Tweaks-Offline-GUI {
                             }
 
                             if ($Mode -eq 'Apply') {
-                                $it.SubItems[1].Text = "ACTIVO"
+                                $it.SubItems[1].Tag = "ACTIVE"; $it.SubItems[1].Text = Get-AIOString 'tweaks.state_active'
                                 $it.ForeColor = [System.Drawing.Color]::Cyan
                             } else {
-                                $it.SubItems[1].Text = "RESTAURADO"
+                                $it.SubItems[1].Tag = "RESTORED"; $it.SubItems[1].Text = Get-AIOString 'tweaks.state_restored'
                                 $it.ForeColor = [System.Drawing.Color]::LightGray
                             }
                             $it.Checked = $false
@@ -1103,7 +1105,7 @@ function Show-Tweaks-Offline-GUI {
 
                         } catch {
                             $errors++
-                            $it.SubItems[1].Text = "ERROR"
+                            $it.SubItems[1].Tag = "ERROR"; $it.SubItems[1].Text = Get-AIOString 'tweaks.state_error'
                             $it.ForeColor = [System.Drawing.Color]::Red
                             Write-Log -LogLevel ERROR -Message "Tweak_Engine: Falla critica procesando $($t.Name) ($Mode) - $($_.Exception.Message)"
                         } finally {

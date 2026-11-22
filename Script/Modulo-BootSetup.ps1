@@ -1929,7 +1929,7 @@ function Show-BootSetup-GUI {
         $page.AutoScroll = $true
         $tabs.TabPages.Add($page)
     }
-    $tips.SetToolTip($tabs,'Configura el inicio y los requisitos, o abre la pestana Fondo de instalacion.')
+    $tips.SetToolTip($tabs,(Get-AIOString 'tips.bootsetup.tabs'))
     if (Get-Command Set-AIOTabControlStyle -ErrorAction SilentlyContinue) { Set-AIOTabControlStyle -TabControl $tabs }
 
     $legacyGroup = New-SetupGroup $pageSetup (Get-AIOString 'bootsetup.grp_legacy') 10 10 488 130
@@ -1963,7 +1963,7 @@ function Show-BootSetup-GUI {
     $imagePath.BackColor = [Drawing.Color]::FromArgb(45,45,48)
     $imagePath.ForeColor = $form.ForeColor
     $pageBackground.Controls.Add($imagePath)
-    $tips.SetToolTip($imagePath,'Ruta de la imagen elegida. Seleccionarla solo actualiza la vista previa; pulsa Preparar fondo para aplicarla al montaje.')
+    $tips.SetToolTip($imagePath,(Get-AIOString 'tips.bootsetup.imagePath'))
     $btnBrowse = New-SetupButton $pageBackground (Get-AIOString 'bootsetup.btn_browse_img') 14 204 200 (Get-AIOString 'bootsetup.tip_browse_img')
     $btnBackground = New-SetupButton $pageBackground (Get-AIOString 'bootsetup.btn_prepare_bg') 14 254 230 (Get-AIOString 'bootsetup.tip_prepare_bg') -Primary
     $btnRestoreBackground = New-SetupButton $pageBackground (Get-AIOString 'bootsetup.btn_restore_bg') 258 254 236 (Get-AIOString 'bootsetup.tip_restore_bg')
@@ -1980,7 +1980,7 @@ function Show-BootSetup-GUI {
     $preview.BorderStyle = 'FixedSingle'
     $preview.SizeMode = 'Zoom'
     $previewGroup.Controls.Add($preview)
-    $tips.SetToolTip($preview,'Vista orientativa en 4:3. El aspecto final depende de la version de Setup, la resolucion y los recursos del medio.')
+    $tips.SetToolTip($preview,(Get-AIOString 'tips.bootsetup.preview'))
     $chkWizard = New-Object Windows.Forms.CheckBox
     $chkWizard.Text = Get-AIOString 'bootsetup.chk_wizard'
     $chkWizard.Location = New-Object Drawing.Point(14,407)
@@ -1988,7 +1988,7 @@ function Show-BootSetup-GUI {
     $chkWizard.Anchor = 'Bottom,Left,Right'
     $chkWizard.Checked = $true
     $previewGroup.Controls.Add($chkWizard)
-    $tips.SetToolTip($chkWizard,'Superpone una silueta dibujada del asistente para valorar el fondo. Se puede ocultar y nunca se guarda dentro de la imagen.')
+    $tips.SetToolTip($chkWizard,(Get-AIOString 'tips.bootsetup.chkWizard'))
     $previewCaption = New-SetupLabel $previewGroup '' 14 441 480 36
     $previewCaption.Anchor = 'Bottom,Left,Right'
     $previewCaption.ForeColor = [Drawing.Color]::Silver
@@ -2001,7 +2001,7 @@ function Show-BootSetup-GUI {
     $summary.BackColor = [Drawing.Color]::FromArgb(40,40,43)
     $summary.ForeColor = [Drawing.Color]::LightBlue
     $form.Controls.Add($summary)
-    $tips.SetToolTip($summary,'Cambios pendientes, omisiones y errores. Un error de operacion bloquea guardar hasta corregirlo o descartar el montaje.')
+    $tips.SetToolTip($summary,(Get-AIOString 'tips.bootsetup.summary'))
     $saveHint = New-SetupLabel $form (Get-AIOString 'bootsetup.save_hint') 18 685 655 22
     $saveHint.Anchor = 'Bottom,Left,Right'
     $btnRefresh = New-SetupButton $form (Get-AIOString 'bootsetup.btn_refresh') 702 677 158 (Get-AIOString 'bootsetup.tip_refresh')
@@ -2014,7 +2014,7 @@ function Show-BootSetup-GUI {
         $legacyStatus.Text = $state.Label
         $legacyStatus.ForeColor = if ($state.Color -eq 'Green') { [Drawing.Color]::LightGreen } else { [Drawing.Color]::Silver }
         $btnOriginal.Enabled = Test-Path -LiteralPath (Join-Path $Session.MountPath 'Windows\System32\AdminImagenOffline.SetupLegacy.json')
-        $tips.SetToolTip($legacyStatus,'Indica si winpeshl.ini inicia Setup con /legacy o conserva otro lanzador.')
+        $tips.SetToolTip($legacyStatus,(Get-AIOString 'tips.bootsetup.legacyStatus'))
         $internal = Get-AIOBootWin10Status -SourcesPath (Join-Path $Session.MountPath 'sources')
         $external = Get-AIOBootWin10Status -SourcesPath $Session.MediaSources -Media
         $win10Status.Text = Get-AIOString 'bootsetup.win10_status_fmt' $internal $external
@@ -2035,7 +2035,7 @@ function Show-BootSetup-GUI {
             $hasBackground = $hasBackground -or (Test-Path -LiteralPath (Join-Path $Session.MediaSources 'AdminImagenOffline.SetupMediaBackground.json'))
         } else { $mediaStatus.Text = Get-AIOString 'bootsetup.bg_isolated' }
         $tips.SetToolTip($mediaStatus,$mediaStatus.Text)
-        $tips.SetToolTip($backgroundStatus,'Estado verificado de los fondos internos. PARCIAL indica DLL conservadas sin recurso 517 compatible.')
+        $tips.SetToolTip($backgroundStatus,(Get-AIOString 'tips.bootsetup.backgroundStatus'))
         $btnRestoreBackground.Enabled = $hasBackground
         $btnBackground.Enabled = -not [string]::IsNullOrWhiteSpace($Session.SelectedImagePath)
         $imagePath.Text = $Session.SelectedImagePath

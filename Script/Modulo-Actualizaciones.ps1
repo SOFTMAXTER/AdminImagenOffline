@@ -10174,14 +10174,14 @@ function Show-AIOUpdatePreflightRestoreMenu {
     Write-Host '=======================================================' -ForegroundColor Cyan
     Write-Host ''
 
-    $selected = Select-AIOUpdateFolder -Title 'Selecciona directamente la carpeta Preflight del respaldo actual'
+    $selected = Select-AIOUpdateFolder -Title (Get-AIOString 'pickers.update_preflight_folder')
     if (-not $selected) { return }
 
     $context = Read-AIOUpdatePreflightManifest -PreflightRoot $selected
     $manifest = $context.Manifest
     $target = [string]$manifest.MediaRoot
     if (-not (Test-Path -LiteralPath $target -PathType Container)) {
-        $target = Select-AIOUpdateFolder -Title 'Selecciona el medio de Windows que deseas restaurar'
+        $target = Select-AIOUpdateFolder -Title (Get-AIOString 'pickers.update_restore_media')
         if (-not $target) { return }
     }
 
@@ -10296,7 +10296,7 @@ function Show-UpdatesIntegrator-Menu {
 
         Assert-AIOUpdateNoMountedImages
 
-        $mediaRoot = Select-AIOUpdateFolder -Title 'Selecciona la carpeta RAIZ del medio de Windows extraido'
+        $mediaRoot = Select-AIOUpdateFolder -Title (Get-AIOString 'pickers.update_media_root')
         if (-not $mediaRoot) { return }
         $mediaRoot = (Resolve-Path -LiteralPath $mediaRoot -ErrorAction Stop).Path
         $script:AIOUpdateLastTerminalState.MediaRoot = $mediaRoot
@@ -10326,7 +10326,7 @@ function Show-UpdatesIntegrator-Menu {
         }
 
         if (-not $repositoryRoot) {
-            $repositoryRoot = Select-AIOUpdateFolder -Title 'Selecciona la carpeta de actualizaciones CAB/MSU'
+            $repositoryRoot = Select-AIOUpdateFolder -Title (Get-AIOString 'pickers.update_repo')
             if (-not $repositoryRoot) { return }
             $repositoryRoot = (Resolve-Path -LiteralPath $repositoryRoot -ErrorAction Stop).Path
         }
