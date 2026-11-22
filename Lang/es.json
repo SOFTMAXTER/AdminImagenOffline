@@ -265,7 +265,30 @@
     "row_wim_index": "Índice WIM",
     "row_directory": "Directorio",
     "partial_read_warn": "  Lectura parcial. Se mantiene hasta el próximo montaje/cambio de edición.",
-    "edition_unavailable": "(edición no disponible)"
+    "edition_unavailable": "(edición no disponible)",
+    "val_na": "No disponible",
+    "val_na_winpe": "No aplica (WinPE)",
+    "val_name_unavailable": "Windows (nombre no disponible)",
+    "src_reg_software": "Registro SOFTWARE offline",
+    "src_dism_edition": "DISM /Get-CurrentEdition offline",
+    "src_wim_type": "Tipo del índice WIM",
+    "src_winpe_files": "Archivos WinPE montados",
+    "src_wim_meta": "Metadatos del índice WIM",
+    "src_winpeshl_exe": "winpeshl.ini y ejecutables montados",
+    "src_mounted_exe": "Ejecutables del entorno montado",
+    "src_wim_name_desc": "Nombre/descripción del índice WIM",
+    "src_pe_filename": "Entorno PE + nombre del archivo (probable)",
+    "conf_high": "Alta",
+    "conf_medium": "Media",
+    "conf_low": "Baja",
+    "conf_unknown": "No determinada",
+    "env_winpe_name": "Entorno de preinstalación de Windows (WinPE)",
+    "env_winre_name": "Entorno de recuperación de Windows (WinRE)",
+    "env_winre_role": "Recuperación de Windows (WinRE)",
+    "env_setup_name": "Instalador de Windows (Windows Setup)",
+    "env_setup_role": "Instalador de Windows (Setup)",
+    "env_mixed_role": "WinPE con recuperación y Setup (rol no determinado)",
+    "env_probable_suffix": " probable"
   },
   "save": {
     "no_image_mounted": "No hay imagen montada para guardar.",
@@ -294,7 +317,8 @@
     "capture_wait": "    > Por favor espera. DISM está preparando la compresión máxima (puede tardar unos minutos en iniciar)...",
     "capture_ok": "[OK] Copia verificada y guardada en {0}",
     "saved_ok": "[OK] Cambios guardados.",
-    "save_failed": "[ERROR] Fallo al guardar cambios (Código: {0})."
+    "save_failed": "[ERROR] Fallo al guardar cambios (Código: {0}).",
+    "default_desc_fmt": "Imagen personalizada creada con AdminImagenOffline el {0}"
   },
   "editindex": {
     "select_index_prompt": "Selecciona un índice de la lista",
@@ -451,7 +475,8 @@
     "mode_commit": "Commit (Guardar y Desmontar)",
     "mode_discard": "Discard (Descartar Cambios)",
     "action_commit": "Guardando y Desmontando (Commit)",
-    "action_discard": "Desmontando (Discard)"
+    "action_discard": "Desmontando (Discard)",
+    "vhd_unmount_err": "Fallo al desmontar VHD: {0}"
   },
   "conversion": {
     "vhd_intro": "  Captura Windows e incluye WinRE cuando está disponible en el VHD.",
@@ -518,7 +543,24 @@
     "filter_swm": "Primera parte SWM|*.swm",
     "title_wim_to_esd": "Selecciona el WIM que se convertirá a ESD",
     "title_esd_to_wim": "Selecciona el ESD que se convertirá a WIM",
-    "title_src_default": "Selecciona la imagen de origen (SWM: primera parte)"
+    "title_src_default": "Selecciona la imagen de origen (SWM: primera parte)",
+    "sec_vhd_title": "CONVERSIÓN | VHD / VHDX -> WIM",
+    "sec_dependency_missing": "DEPENDENCIA NO DISPONIBLE",
+    "sec_source_dest": "ORIGEN Y DESTINO",
+    "sec_windows_recovery": "WINDOWS Y RECUPERACIÓN",
+    "sec_image_data": "DATOS DE LA IMAGEN",
+    "sec_windows_capture": "CAPTURA DE WINDOWS",
+    "sec_winre_finish": "WINRE Y FINALIZACIÓN",
+    "sec_not_completed": "CONVERSIÓN NO COMPLETADA",
+    "sec_completed": "CONVERSIÓN COMPLETADA",
+    "sec_wim_review_cleanup": "WIM CREADO; REVISAR LIMPIEZA",
+    "sec_images_title": "CONVERSIÓN DE IMÁGENES",
+    "sec_source_image": "IMAGEN DE ORIGEN",
+    "sec_editions": "EDICIONES A CONVERTIR",
+    "sec_dest_options": "DESTINO Y OPCIONES",
+    "sec_in_progress": "CONVERSIÓN EN CURSO",
+    "sec_verify_save": "VERIFICACIÓN Y GUARDADO",
+    "sec_not_finished": "NO SE COMPLETÓ LA CONVERSIÓN"
   },
   "drivers": {
     "mount_first": "Primero debes montar una imagen.",
@@ -574,7 +616,9 @@
     "status_remove_done": "Proceso finalizado. Errores: {0}",
     "inf_filter": "Archivos INF (*.inf)|*.inf",
     "cancelled_by_user": "\nCancelado por el usuario.",
-    "critical_warn_body": "ADVERTENCIA: La selección incluye clases críticas de hardware ({0}).\n\nEliminar controladores de disco, USB o Sistema dejará la imagen inservible (Pantalla Azul de la Muerte).\n\n¿Seguro que deseas eliminarlos permanentemente?"
+    "critical_warn_body": "ADVERTENCIA: La selección incluye clases críticas de hardware ({0}).\n\nEliminar controladores de disco, USB o Sistema dejará la imagen inservible (Pantalla Azul de la Muerte).\n\n¿Seguro que deseas eliminarlos permanentemente?",
+    "state_installed": "INSTALADO",
+    "state_new": "Nuevo"
   },
   "bloatware": {
     "form_title": "Gestor de Aplicaciones (Bloatware) - {0}",
@@ -710,7 +754,21 @@
     "tag_registry": "[Registro] ",
     "help_body": "INSTRUCCIONES DE NOMENCLATURA PARA ADDONS\n\nPara que el motor inteligente proteja tu imagen WIM de colapsos, los archivos deben indicar su arquitectura en el nombre ANTES de la extensión.\n\nEjemplos Correctos:\n  >  MiPaqueteIdioma_x64_es-mx.tpk\n  >  Herramienta_arm64_main.tpk\n  >  Herramienta_main.bpk\n\n¿Por qué es importante?\nSi agregas una carpeta entera de Addons, el script leerá estos sufijos y OMITIRÁ automáticamente los paquetes/Registro de una arquitectura distinta a la seleccionada (x86, x64 o ARM64), evitando pantallas azules y corrupción en la instalación.\n\nPaquetes DeltaPack Dual-Engine:\nSelecciona el archivo 'manifest_*.json' dentro de la carpeta del paquete para agregarlo como una unidad completa (WIM + REG + Eliminaciones + Acciones, en el orden que declare el manifest).",
     "filter_addons": "Addons Windows (*.tpk;*.bpk;*.reg)|*.tpk;*.bpk;*.reg|Paquetes DeltaPack Dual-Engine (manifest_*.json)|manifest_*.json|Todos los archivos (*.*)|*.*",
-    "reg_processed_fmt": "Registro procesado: {0} claves, {1} valores."
+    "reg_processed_fmt": "Registro procesado: {0} claves, {1} valores.",
+    "state_pending": "EN ESPERA",
+    "state_skipped_arch": "OMITIDO (Arch)",
+    "detail_ignored_arch": "Ignorado ({0})",
+    "arch_only_x86": "Solo x86",
+    "arch_only_x64": "Solo x64",
+    "arch_only_arm64": "Solo ARM64",
+    "state_processing": "PROCESANDO...",
+    "state_completed_omissions": "COMPLETADO CON OMISIONES",
+    "state_completed": "COMPLETADO",
+    "state_error": "ERROR",
+    "btn_cancel": "Cancelar tras actual",
+    "status_cancelling": "Cancelación solicitada... esperando a que termine el paquete actual.",
+    "status_cancelled": "Proceso cancelado por el usuario.",
+    "report_cancelled_body": "Inyección cancelada por el usuario tras completar el paquete en curso.\n\nÉxitos sin omisiones: {0}\nCompletados con omisiones: {1} (secciones bloqueadas: {2})\nErrores: {3}\nOmitidos (Arquitectura): {4}\nPendientes sin procesar: {5}"
   },
   "appx": {
     "form_title": "Inyector y Actualizador de Apps Modernas - {0}",
@@ -761,7 +819,26 @@
     "cancelled_by_user": " | Cancelado por usuario",
     "report_body": "Despliegue finalizado.\n\nÉxitos:    {0}\nErrores:   {1}\nOmitidos:  {2}",
     "report_cancelled": "\nCancelado: sí",
-    "report_dism_logs": "\n\nLos logs DISM con error se conservaron en Scratch para diagnóstico."
+    "report_dism_logs": "\n\nLos logs DISM con error se conservaron en Scratch para diagnóstico.",
+    "state_blocked": "BLOQUEADO",
+    "state_bundle_incomplete": "BUNDLE INCOMPLETO",
+    "state_incompatible_os": "INCOMPATIBLE (OS)",
+    "state_identity_error": "ERROR IDENTIDAD",
+    "state_install": "INSTALAR",
+    "state_update": "ACTUALIZAR",
+    "state_repair": "REPARAR",
+    "state_skip_update_off": "OMITIR (Actualizar desactivado)",
+    "state_skip_exists": "OMITIR (Ya existe)",
+    "state_repairing": "REPARANDO...",
+    "state_repaired": "REPARADO",
+    "state_repair_error": "ERROR REPARACIÓN",
+    "state_processing": "PROCESANDO...",
+    "state_installed": "INSTALADO",
+    "state_installed_reboot": "INSTALADO (Reinicio)",
+    "state_error_hex": "ERROR (0x{0})",
+    "state_critical_error": "ERROR CRÍTICO",
+    "type_library": "LIBRERÍA",
+    "type_application": "APLICACIÓN"
   },
   "tweaks": {
     "preview_title": "Vista Previa Rápida - {0}",
@@ -822,7 +899,16 @@
     "preview_delete": ">>> ELIMINAR <<<",
     "preview_value": "   Valor",
     "title_apply": "Aplicar Cambios",
-    "title_restore": "Restaurar Cambios"
+    "title_restore": "Restaurar Cambios",
+    "state_pending": "EN ESPERA",
+    "state_processing": "PROCESANDO",
+    "state_completed": "COMPLETADO",
+    "state_error": "ERROR",
+    "state_active": "ACTIVO",
+    "state_inactive": "INACTIVO",
+    "state_restored": "RESTAURADO",
+    "state_exists": "EXISTE",
+    "state_new": "NUEVA"
   },
   "unattend": {
     "mount_error_title": "Error Montaje",
@@ -873,7 +959,8 @@
     "xml_valid": "XML Válido detectado.",
     "xml_invalid": "Archivo inválido.",
     "inject_ok_body": "El archivo se inyectó en el WIM (Windows\\Panther\\unattend.xml) para la fase OOBE.\n\nPara que funcionen la Selección de Idioma inicial y los Bypasses de TPM, DEBES colocar una copia en la RAÍZ de tu USB/ISO con el nombre 'autounattend.xml'.\n\n¿Deseas guardar una copia en tu PC ahora mismo?",
-    "xml_filter": "Archivo Autounattend (*.xml)|*.xml"
+    "xml_filter": "Archivo Autounattend (*.xml)|*.xml",
+    "wios_not_found": "No se encontró el generador en '{0}'."
   },
   "oem": {
     "form_title": "OEM Branding - Arquitectura Zero-GPO y Active Setup",
@@ -972,7 +1059,9 @@
     "filter_wim_esd": "Imágenes WIM y ESD|*.wim;*.esd",
     "warn_mixed_arch": "Arquitecturas distintas: los índices se mantienen en grupos separados y solo se pueden ordenar dentro de su arquitectura. El WIM integrado no prepara el arranque ni Windows Setup para cada arquitectura.",
     "warn_x86_win11": "x86 + Windows 11: Windows 11 no tiene edición x86 y WinPE x86 no sirve para desplegarlo. Prepara una ruta de arranque, boot.wim (WinPE) y Setup x86 para las imágenes x86, y otra compatible con Windows 11 x64 o ARM64. Si una imagen se identifica como Windows 11 x86, revisa su origen.",
-    "warn_arm64": "ARM64: prepara el cargador UEFI ARM64 (EFI\\BOOT\\BOOTAA64.EFI), boot.wim con WinPE ARM64, Windows Setup compatible y los controladores ARM64 del equipo. Incluir un índice ARM64 en install.wim no adapta un medio de instalación x64/x86."
+    "warn_arm64": "ARM64: prepara el cargador UEFI ARM64 (EFI\\BOOT\\BOOTAA64.EFI), boot.wim con WinPE ARM64, Windows Setup compatible y los controladores ARM64 del equipo. Incluir un índice ARM64 en install.wim no adapta un medio de instalación x64/x86.",
+    "access_reading": "Lectura de imagen en curso",
+    "access_waiting_pct": "Esperando porcentaje del motor"
   },
   "deployvhd": {
     "form_title": "Despliegue WIM/ESD/SWM a VHD/VHDX o Disco Físico",
@@ -1042,7 +1131,8 @@
     "filter_wim_esd_swm": "Imágenes WIM/ESD/SWM|*.wim;*.esd;*.swm|WIM (*.wim)|*.wim|ESD (*.esd)|*.esd|SWM (primera parte)|*.swm",
     "cap_cancelling": "Cancelando",
     "cap_cancelled": "Cancelado",
-    "cap_stopped": "Detenido"
+    "cap_stopped": "Detenido",
+    "cleanup_letter_failed": "No se pudo retirar el acceso {0}: {1}"
   },
   "isomaker": {
     "adk_missing_title": "Requisito Faltante: Windows ADK",
@@ -1289,7 +1379,9 @@
     "role_winpe": "Windows PE (Rescate/Live)",
     "role_generic": "Genérico",
     "disk_part_windows": "Disco {0}, partición {1} (Windows)",
-    "disk_part_recovery": "Disco {0}, partición {1} (Recovery)"
+    "disk_part_recovery": "Disco {0}, partición {1} (Recovery)",
+    "boot_mount_err": "Fallo al montar el boot.wim.",
+    "boot_crit_err": "Error crítico en el gestor de arranque: {0}"
   },
   "actualizaciones": {
     "tools_header": " Herramientas de mantenimiento:",
@@ -1712,7 +1804,9 @@
     "unloading": "Guardando y descargando Hives...",
     "waiting_handles": "Esperando a que el sistema libere los manejadores de archivos...",
     "corruption_danger_title": "Peligro de Corrupción",
-    "process_done": " [Proceso Finalizado]"
+    "process_done": " [Proceso Finalizado]",
+    "fail_system": "Fallo al cargar colmena SYSTEM",
+    "fail_software": "Fallo al cargar colmena SOFTWARE"
   },
   "mounts_repair": {
     "checking_wim": "Verificando consistencia del entorno WIM...",
@@ -1956,5 +2050,71 @@
     "help_text": "Los cambios se aplicarán al crear el WIM de salida.\r\nArquitectura: {0} | Build: {1}\r\nCambiar el ID de edición solo edita metadatos; no convierte ni activa Windows.",
     "btn_apply_plan": "Aplicar al plan",
     "tpl_placeholder": "-- Plantilla de edición (opcional) --"
+  },
+  "tips": {
+    "deploy": {
+      "btnBrowseWim": "Selecciona WIM, ESD o la primera parte SWM (ej. install.swm).\nPara SWM, todas las partes deben estar juntas en la misma carpeta.",
+      "cmbIndex": "Selecciona la edición de Windows a instalar.",
+      "btnBrowseVhd": "Define dónde se guardará el nuevo archivo de disco virtual (.vhdx o .vhd).",
+      "btnRefreshDisks": "Actualiza la lista de discos físicos extraíbles detectados.",
+      "numSize": "Tamaño máximo que podrá tener el disco virtual (en gigabytes).",
+      "chkDynamic": "Marcado: el archivo crece según guardes datos.\nDesmarcado: ocupa todo el tamaño inmediatamente.",
+      "chkUEFI": "Marcado (GPT): para PC modernos con UEFI.\nDesmarcado (MBR): para PC antiguos con BIOS Legacy.",
+      "chkCompactOS": "Instala Windows 10/11 con sus archivos del sistema comprimidos para ahorrar espacio.\nPuede aumentar el tiempo de despliegue y el uso de CPU. Disponible para VHD/VHDX y disco físico.",
+      "numEfiSize": "Tamaño de la partición de arranque (EFI o System Reserved).",
+      "numMsrSize": "Tamaño de la partición MSR. Solo aplica en GPT/UEFI.",
+      "numRecSize": "Tamaño de la partición de recuperación (WinRE). Se recomienda 1024 MB.",
+      "btnDeploy": "ADVERTENCIA: iniciará el proceso de creación/formateo y aplicación de la imagen.",
+      "btnCancel": "Solicita cancelar. Espera a que termine la operación activa (incluido DISM) y después limpia el destino. Los cambios ya realizados en un disco físico no se revierten.",
+      "progressDeploy": "Cuenta las etapas terminadas. El porcentaje no representa el tiempo restante.",
+      "progressDeployFill": "Avanza inmediatamente al terminar cada etapa; permanece fijo durante la etapa en curso.",
+      "progressImage": "Muestra el avance informado al aplicar la imagen. Solo llega a 100% cuando la aplicación termina correctamente.",
+      "lblDeployProgress": "Porcentaje de etapas completadas y tiempo transcurrido (horas:minutos:segundos). El reloj se reinicia en cada ejecución y se detiene al finalizar, cancelar o fallar."
+    },
+    "iso": {
+      "txtSrc": "Carpeta raíz de la fuente de instalación de Windows (debe contener boot\\, efi\\, sources\\).",
+      "btnSrc": "Abrir el explorador para seleccionar la carpeta de origen.",
+      "txtDst": "Ruta completa del archivo ISO que se generará (p. ej. C:\\Output\\Windows11.iso).",
+      "btnDst": "Elegir ruta y nombre del archivo ISO de salida.",
+      "txtLabel": "Máximo 32 caracteres. Solo A-Z, 0-9, guion y guion bajo. Se genera con la arquitectura y el idioma predeterminado detectados.",
+      "lblValLang": "Prioridad: DefaultLanguage/Language de DISM, lang.ini y, como respaldo, el primer idioma instalado.",
+      "txtUnattend": "Archivo XML de respuesta desatendida. Se copiará como autounattend.xml en la raíz de la ISO.",
+      "btnUnattend": "Seleccionar el archivo autounattend.xml.",
+      "lnkWeb": "Abre schneegans.de — generador en línea de archivos autounattend.xml para la automatización de OOBE.",
+      "btnExportLog": "Guarda el log completo de la última compilación como archivo .txt.",
+      "btnMake": "Inicia la compilación de la imagen ISO de arranque con los parámetros configurados.",
+      "btnCancel": "Interrumpe la compilación en curso, elimina la salida parcial y restaura la ISO anterior si existía."
+    },
+    "bootsetup": {
+      "tabs": "Configura el inicio y los requisitos, o abre la pestaña Fondo de instalación.",
+      "imagePath": "Ruta de la imagen elegida. Seleccionarla solo actualiza la vista previa; pulsa Preparar fondo para aplicarla al montaje.",
+      "preview": "Vista orientativa en 4:3. El aspecto final depende de la versión de Setup, la resolución y los recursos del medio.",
+      "chkWizard": "Superpone una silueta dibujada del asistente para valorar el fondo. Se puede ocultar y nunca se guarda dentro de la imagen.",
+      "summary": "Cambios pendientes, omisiones y errores. Un error de operación bloquea guardar hasta corregirlo o descartar el montaje.",
+      "legacyStatus": "Indica si winpeshl.ini inicia Setup con /legacy o conserva otro lanzador.",
+      "backgroundStatus": "Estado verificado de los fondos internos. PARCIAL indica DLL conservadas sin recurso 517 compatible."
+    },
+    "features": {
+      "btnNetFx3": "Instala .NET Framework 3.5 buscando la carpeta 'sxs' localmente."
+    },
+    "integrar": {
+      "planGrid": "Doble clic en una celda de texto (o Enter/F2) para editar metadatos. Los separadores delimitan grupos de arquitectura. Subir/Bajar solo mueve dentro del mismo grupo. WinPE se marca con un clic; déjalo sin marcar para install.wim.",
+      "addSource": "Selecciona varios .wim o .esd con Ctrl. Para ISO: extrae primero sources\\install.wim o install.esd. Para SWM: convierte primero a WIM.",
+      "up": "Sube una posición dentro de la misma arquitectura. Alt + Flecha arriba.",
+      "down": "Baja una posición dentro de la misma arquitectura. Alt + Flecha abajo.",
+      "progress": "Avance general por índices y verificación final. Solo termina cuando el WIM está verificado y publicado.",
+      "nativeProgress": "Porcentaje real de la fase actual. Se reinicia al pasar de comprobar integridad a exportar datos o a otra fase.",
+      "clearSources": "Vacía la lista de fuentes disponibles. El orden final conserva sus referencias."
+    }
+  },
+  "pickers": {
+    "update_preflight_folder": "Selecciona directamente la carpeta Preflight del respaldo actual",
+    "update_restore_media": "Selecciona el medio de Windows que deseas restaurar",
+    "update_media_root": "Selecciona la carpeta RAÍZ del medio de Windows extraído",
+    "update_repo": "Selecciona la carpeta de actualizaciones CAB/MSU",
+    "lang_preflight_folder": "Selecciona directamente la carpeta Preflight",
+    "lang_restore_media": "Selecciona el medio de Windows que deseas restaurar",
+    "lang_media_root": "Selecciona la carpeta raíz del medio de Windows extraído",
+    "lang_repo": "Selecciona el repositorio de paquetes de idioma"
   }
 }

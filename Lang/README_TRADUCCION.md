@@ -4,9 +4,10 @@ AdminImagenOffline detecta automáticamente el idioma del sistema anfitrión (`[
 
 ## Cómo funciona la detección
 
-1. **Preferencia guardada (`config.json`):** Si `"Language"` está en `"auto"` (predeterminado), se usa el idioma de Windows. También puedes elegir un idioma manualmente desde **[R] Configuración → [3] Idioma de la Interfaz**.
+1. **Preferencia guardada (`config.json`):** Si `"Language"` está en `"auto"` (predeterminado), se usa el idioma de Windows. La preferencia se lee de forma temprana al arrancar (incluso antes de los avisos de administrador, instancia única y rutas largas) y puede cambiarse en caliente desde **[C] Configuración → [3] Idioma de la Interfaz**, invalidando automáticamente la caché del Dashboard y del catálogo de ediciones.
 2. **Resolución en cascada:** Si Windows está en `pt-BR`, primero busca `Lang\pt-BR.json`; si no existe, busca `Lang\pt.json`; si tampoco existe, usa `Lang\es.json`.
-3. **Respaldo por clave:** Si a una traducción le falta alguna clave nueva, se muestra automáticamente el texto de `Lang\es.json` en lugar de dejarla vacía.
+3. **Respaldo por clave y tolerancia a fallos:** Si a una traducción le falta alguna clave nueva, se muestra automáticamente el texto de `Lang\es.json`. Si faltara el archivo `Script\I18n.ps1`, el orquestador activa funciones de respaldo para mostrar `[clave]` sin generar errores en cadena.
+4. **Registros técnicos:** Los logs forenses (`Logs\Registro.log` y registros internos de `IsoMaker`, `Actualizaciones` y `Lenguajes`) y el parseo de `DISM /English` permanecen en su idioma técnico original por diseño para facilitar el soporte y la depuración.
 
 ## Cómo crear una traducción nueva (ejemplo: portugués `pt.json`)
 
