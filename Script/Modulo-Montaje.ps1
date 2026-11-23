@@ -68,7 +68,7 @@ function Invoke-AIOMountDismQuery {
     $dismExe = Get-AIOMountNativeDismPath
     $lines = @(& $dismExe @Arguments /English 2>&1 | ForEach-Object { $_.ToString() })
     $exitCode = $global:LASTEXITCODE
-    if ($null -eq $exitCode) { throw 'No se pudo ejecutar dism.exe.' }
+    if ($null -eq $exitCode) { throw (Get-AIOString 'errors.e487') }
     [pscustomobject]@{ ExitCode = [int]$exitCode; Lines = $lines }
 }
 
@@ -104,7 +104,7 @@ function ConvertFrom-AIOMountedImageInfo {
 function Get-AIOMountedImages {
     $query = Invoke-AIOMountDismQuery -Arguments @('/Get-MountedImageInfo')
     if ($query.ExitCode -ne 0) {
-        throw "No se pudo consultar los montajes de DISM (codigo $($query.ExitCode)).`n$($query.Lines -join [Environment]::NewLine)"
+        throw (Get-AIOString 'errors.e480' -FormatArgs @(($query.ExitCode), ($query.Lines -join [Environment]::NewLine)))
     }
     ConvertFrom-AIOMountedImageInfo -Lines $query.Lines
 }
@@ -114,21 +114,21 @@ function Get-AIOMountForPath {
     $target = ConvertTo-AIOMountPath -Path $Path
     if (-not $target) { return }
     $found = @($Mounts | Where-Object { (ConvertTo-AIOMountPath -Path $_.MountDir) -eq $target })
-    if ($found.Count -gt 1) { throw "DISM devolvio varios registros para '$Path'. Revisa el estado antes de continuar." }
+    if ($found.Count -gt 1) { throw (Get-AIOString 'errors.e033' -FormatArgs @($Path)) }
     if ($found.Count -eq 1) { return $found[0] }
 }
 
 function Get-AIOWimIndexes {
     param([Parameter(Mandatory = $true)][string]$ImagePath)
-    if (-not (Test-Path -LiteralPath $ImagePath -PathType Leaf)) { throw "No existe el archivo WIM: $ImagePath" }
+    if (-not (Test-Path -LiteralPath $ImagePath -PathType Leaf)) { throw (Get-AIOString 'errors.e393' -FormatArgs @($ImagePath)) }
     $query = Invoke-AIOMountDismQuery -Arguments @('/Get-WimInfo', "/WimFile:$ImagePath")
     # La lista es salida de pantalla, nunca el valor de retorno del menu.
     $query.Lines | Out-Host
-    if ($query.ExitCode -ne 0) { throw "DISM no pudo leer el WIM (codigo $($query.ExitCode)). Revisa el detalle mostrado arriba y dism.log." }
+    if ($query.ExitCode -ne 0) { throw (Get-AIOString 'errors.e051' -FormatArgs @(($query.ExitCode))) }
     $indexes = @($query.Lines | ForEach-Object {
         if ($_ -match '^\s*Index\s*:\s*(\d+)\s*$') { [int]$matches[1] }
     } | Sort-Object -Unique)
-    if ($indexes.Count -eq 0) { throw 'DISM no devolvio indices del WIM. No se solicitara un indice ni se intentara montar.' }
+    if ($indexes.Count -eq 0) { throw (Get-AIOString 'errors.e043') }
     return $indexes
 }
 
@@ -136,20 +136,20 @@ function Assert-AIOMountDirectoryAvailable {
     param([Parameter(Mandatory = $true)][string]$MountPath)
     $fullPath = [IO.Path]::GetFullPath($MountPath)
     if ((ConvertTo-AIOMountPath $fullPath) -eq (ConvertTo-AIOMountPath ([IO.Path]::GetPathRoot($fullPath)))) {
-        throw 'La raiz de una unidad no puede usarse como carpeta de montaje.'
+        throw (Get-AIOString 'errors.e348')
     }
     # Si falla la consulta, no se asume que la carpeta esta libre.
     $mounts = @(Get-AIOMountedImages)
     $registered = Get-AIOMountForPath -Mounts $mounts -Path $fullPath
-    if ($null -ne $registered) { throw "La carpeta ya esta registrada en DISM (estado: $($registered.Status)). Recupera o desmonta esa sesion antes de montar otra imagen." }
+    if ($null -ne $registered) { throw (Get-AIOString 'errors.e305' -FormatArgs @(($registered.Status))) }
 
     if (Test-Path -LiteralPath $fullPath) {
         $directory = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
         if (-not $directory.PSIsContainer -or ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            throw 'El punto de montaje debe ser una carpeta real, no un archivo ni un enlace.'
+            throw (Get-AIOString 'errors.e185')
         }
         if ($null -ne (Get-ChildItem -LiteralPath $fullPath -Force -ErrorAction Stop | Select-Object -First 1)) {
-            throw "El directorio de montaje no esta vacio: $fullPath. Selecciona una carpeta vacia en Configuracion de Rutas. No se eliminaron archivos."
+            throw (Get-AIOString 'errors.e121' -FormatArgs @($fullPath))
         }
     } else {
         New-Item -Path $fullPath -ItemType Directory -ErrorAction Stop | Out-Null
@@ -177,7 +177,7 @@ function ConvertFrom-AIOSkippedMountLog {
 function Get-AIOMountSnapshot {
     param([Parameter(Mandatory = $true)][string]$LogPath)
     $query = Invoke-AIOMountDismQuery -Arguments @('/Get-MountedImageInfo', "/LogPath:$LogPath")
-    if ($query.ExitCode -ne 0) { throw "Fallo el inventario DISM (codigo $($query.ExitCode)): $($query.Lines -join ' ')" }
+    if ($query.ExitCode -ne 0) { throw (Get-AIOString 'errors.e238' -FormatArgs @(($query.ExitCode), ($query.Lines -join ' '))) }
     $entries = @(ConvertFrom-AIOMountedImageInfo -Lines $query.Lines)
     $logRead = $false; $logComplete = $false
     if (Test-Path -LiteralPath $LogPath -PathType Leaf) {
@@ -243,8 +243,8 @@ function Repair-InvalidMounts {
         }
         $report.CleanupExitCode = $global:LASTEXITCODE
         $cleanupOutput | Set-Content -LiteralPath (Join-Path $reportDir 'Salida_Limpieza.txt') -Encoding UTF8 -ErrorAction Stop
-        if ($null -eq $report.CleanupExitCode) { throw 'No se pudo ejecutar dism.exe. No se dispone de un codigo de salida.' }
-        if ($report.CleanupExitCode -ne 0) { throw "La limpieza fallo (codigo $($report.CleanupExitCode)). Se conserva el estado de la sesion." }
+        if ($null -eq $report.CleanupExitCode) { throw (Get-AIOString 'errors.e488') }
+        if ($report.CleanupExitCode -ne 0) { throw (Get-AIOString 'errors.e344' -FormatArgs @(($report.CleanupExitCode))) }
 
         Write-Host (Get-AIOString 'montaje.repair_step3') -ForegroundColor Yellow
         $report.Status = 'VerificacionPendiente'
@@ -360,7 +360,7 @@ function Get-AIOOutputSnapshot {
     if (Test-Path -LiteralPath $Destination -ErrorAction Stop) {
         $item = Get-Item -LiteralPath $Destination -Force -ErrorAction Stop
         if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            throw "El destino debe ser un archivo ordinario: $Destination"
+            throw (Get-AIOString 'errors.e112' -FormatArgs @($Destination))
         }
         return [pscustomobject]@{Id=(Get-AIOFileIdentity $Destination).Id; Size=$item.Length; Written=$item.LastWriteTimeUtc.Ticks}
     }
@@ -374,7 +374,7 @@ function Publish-AIOVerifiedFile {
     }
     $current = Get-AIOOutputSnapshot $Destination
     if (-not $current -or $current.Id -ne $Previous.Id -or $current.Size -ne $Previous.Size -or $current.Written -ne $Previous.Written) {
-        throw "El destino ha cambiado desde la confirmacion: $Destination"
+        throw (Get-AIOString 'errors.e115' -FormatArgs @($Destination))
     }
     # Todos los archivos estan en el mismo volumen. Conservar el respaldo hasta completar Replace.
     $backup = "$Pending.anterior"
@@ -386,13 +386,13 @@ function Publish-AIOVerifiedFile {
 function Get-AIOVerifiedVhdDisk {
     param([string]$Path)
     $vhd = Get-VHD -Path $Path -ErrorAction Stop
-    if (-not $vhd.Attached -or $null -eq $vhd.DiskNumber -or [int]$vhd.DiskNumber -lt 0) { throw 'El archivo VHD no esta adjunto a un disco identificable.' }
+    if (-not $vhd.Attached -or $null -eq $vhd.DiskNumber -or [int]$vhd.DiskNumber -lt 0) { throw (Get-AIOString 'errors.e095') }
     $disk = Get-Disk -Number $vhd.DiskNumber -ErrorAction Stop
     $backing = Get-VHD -DiskNumber $disk.Number -ErrorAction Stop
     $hostPartition = Get-Partition -DriveLetter $env:SystemDrive[0] -ErrorAction Stop
     if ($null -eq $hostPartition.DiskNumber -or $disk.IsBoot -ne $false -or $disk.IsSystem -ne $false -or $disk.Number -eq $hostPartition.DiskNumber -or
         -not $disk.UniqueId -or (Get-AIOFileIdentity $backing.Path).Id -ne (Get-AIOFileIdentity $Path).Id) {
-        throw 'No se puede asociar el VHD a un disco offline distinto del Windows activo.'
+        throw (Get-AIOString 'errors.e517')
     }
     return $disk
 }
@@ -400,10 +400,10 @@ function Get-AIOVerifiedVhdDisk {
 function Get-AIOVerifiedVhdPartition {
     param($Disk,[int]$Number)
     $part = Get-Partition -DiskNumber $Disk.Number -PartitionNumber $Number -ErrorAction Stop
-    if (-not $part.DriveLetter -or $part.IsBoot -or $part.IsSystem) { throw 'Particion sin letra o protegida.' }
+    if (-not $part.DriveLetter -or $part.IsBoot -or $part.IsSystem) { throw (Get-AIOString 'errors.e538') }
     $byLetter = Get-Partition -DriveLetter $part.DriveLetter -ErrorAction Stop
     if ($byLetter.DiskNumber -ne $Disk.Number -or $byLetter.PartitionNumber -ne $Number -or "$($part.DriveLetter):" -ieq $env:SystemDrive) {
-        throw 'La letra ya no corresponde a la particion seleccionada.'
+        throw (Get-AIOString 'errors.e343')
     }
     return $part
 }
@@ -417,7 +417,7 @@ function Restore-AIOVhdSession {
         $part = Get-AIOVerifiedVhdPartition $disk $saved.Partition
         if ($saved.FileId -ne (Get-AIOFileIdentity $saved.Path).Id -or $saved.DiskId -ne $disk.UniqueId -or
             [string]$saved.Offset -ne [string]$part.Offset -or $saved.VolumeId -ne (Get-AIOFileIdentity "$($part.DriveLetter):\").Id) {
-            throw 'La identidad guardada no coincide.'
+            throw (Get-AIOString 'errors.e336')
         }
         $Script:WIM_FILE_PATH = $saved.Path
         $Script:MOUNTED_INDEX = $part.PartitionNumber
@@ -487,7 +487,7 @@ function Expand-AIOSelectedIso {
         $isoId = Get-AIOFileIdentity $IsoPath
         $rootId = Get-AIOFileIdentity ([IO.Path]::GetPathRoot($base))
         if ($baseId.Id -eq $rootId.Id -or (Test-AIOPathWithin $toolId.Path $baseId.Path) -or (Test-AIOPathWithin $isoId.Path $baseId.Path)) {
-            throw 'Elige una carpeta de extraccion distinta de la raiz y separada del programa y de la ISO.'
+            throw (Get-AIOString 'errors.e215')
         }
         $mountResult = Get-DiskImage -ImagePath $IsoPath -ErrorAction Stop
         if (-not $mountResult.Attached) {
@@ -511,7 +511,7 @@ function Expand-AIOSelectedIso {
         Start-Sleep -Seconds 2
 
         $vol = $mountResult | Get-Volume -ErrorAction Stop
-        if (@($vol).Count -ne 1 -or -not $vol.DriveLetter) { throw "No se pudo obtener la letra de la unidad montada." }
+        if (@($vol).Count -ne 1 -or -not $vol.DriveLetter) { throw (Get-AIOString 'errors.e504') }
 
         $driveRoot = "$($vol.DriveLetter):\"
 
@@ -669,7 +669,7 @@ public sealed class AIOMountProcReaderV1 : IDisposable {
         }
         if ($progState.Active) { Write-Host ''; $progState.Active = $false }
         if ($null -eq $roboExit -or $roboExit -notin (0..7)) {
-            throw "Error al copiar la ISO (Robocopy $roboExit). Carpeta parcial: $ExtractDir"
+            throw (Get-AIOString 'errors.e219' -FormatArgs @($roboExit, $ExtractDir))
         }
         $SelectedPath = $ExtractDir
         Write-Host (Get-AIOString 'montaje.iso_extracted_ok' $copiedFiles ($completedBytes / 1GB) $swCopy.Elapsed.ToString('mm\:ss')) -ForegroundColor Green
@@ -705,13 +705,11 @@ function Mount-Image {
     Write-Host (Get-AIOString 'montaje.source_title') -ForegroundColor Cyan
     Write-Host "=======================================================" -ForegroundColor Cyan
     Write-Host (Get-AIOString 'montaje.source_question')
-    Write-Host (Get-AIOString 'montaje.source_opt1')
-    Write-Host (Get-AIOString 'montaje.source_opt2') -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host (Get-AIOString 'montaje.source_cancel') -ForegroundColor Red
-    Write-Host ""
-    
-    $sourceType = Read-MenuOption (Get-AIOString 'montaje.source_prompt')
+    $sourceItems = @(
+        @{ Value = '1'; Label = (Get-AIOString 'montaje.source_opt1'); Color = 'White' }
+        @{ Value = '2'; Label = (Get-AIOString 'montaje.source_opt2'); Color = 'Yellow'; SpaceAfter = $true }
+    )
+    $sourceType = [string](Show-AIOConsoleMenu -Items $sourceItems -AllowBack -BackValue 'V')
 
     if ($sourceType.ToUpper() -eq 'V') { return }
 
@@ -861,7 +859,7 @@ function Mount-Image {
                     $selectedPart = $menuItems[$number] 
                     Write-Log -LogLevel INFO -Message "MountManager: El usuario selecciono manualmente la particion [$($selectedPart.DriveLetter):]."
                 } else { 
-                    throw "Seleccion invalida." 
+                    throw (Get-AIOString 'errors.e576')
                 }
             }
 
@@ -869,7 +867,7 @@ function Mount-Image {
             $disk = Get-AIOVerifiedVhdDisk $Script:WIM_FILE_PATH
             $confirmed = Get-AIOVerifiedVhdPartition $disk $selectedPart.PartitionNumber
             if ($confirmed.DiskNumber -ne $selectedPart.DiskNumber -or $confirmed.Offset -ne $selectedPart.Offset) {
-                throw 'La particion ha cambiado desde la seleccion.'
+                throw (Get-AIOString 'errors.e345')
             }
             $selectedPart = $confirmed
             $driveLetter = "$($selectedPart.DriveLetter):\"
@@ -911,6 +909,7 @@ function Mount-Image {
         Write-Warning (Get-AIOString 'montaje.invalid_ext_warn')
         Pause; return
     }
+	Clear-Host
     Write-Host (Get-AIOString 'montaje.wim_reading') -ForegroundColor Yellow
     Write-Log -LogLevel INFO -Message "MountManager: Consultando indices de '$Script:WIM_FILE_PATH'."
     try {
@@ -1106,17 +1105,17 @@ function Reload-Image {
         $mounted = Get-AIOMountForPath -Mounts @(Get-AIOMountedImages) -Path $Script:MOUNT_DIR
         if (-not $mounted -or $mounted.Status -ne 'OK' -or $mounted.ImageIndex -ne $Script:MOUNTED_INDEX -or
             (Get-AIOFileIdentity $mounted.ImageFile).Id -ne (Get-AIOFileIdentity $Script:WIM_FILE_PATH).Id) {
-            throw 'La sesion registrada en DISM ya no coincide con el WIM seleccionado.'
+            throw (Get-AIOString 'errors.e361')
         }
         Unmount-Hives | Out-Host
         $result = Invoke-AIOConsoleSystemTool -Tool dism.exe -Arguments @('/Unmount-Image',"/MountDir:$Script:MOUNT_DIR",'/Discard')
-        if ($result.ExitCode -ne 0) { throw "Error al desmontar el WIM: $($result.ExitCode)" }
+        if ($result.ExitCode -ne 0) { throw (Get-AIOString 'errors.e220' -FormatArgs @(($result.ExitCode))) }
         $Script:IMAGE_MOUNTED = 0
         $Script:AIODashboardCache = $null
         $Script:CachedControlSet = $null
         $Script:ForceMenuRefresh = $false
         $result = Invoke-AIOConsoleSystemTool -Tool dism.exe -WaitForToolOnly -Arguments @('/Mount-Image',"/ImageFile:$Script:WIM_FILE_PATH","/Index:$Script:MOUNTED_INDEX","/MountDir:$Script:MOUNT_DIR")
-        if ($result.ExitCode -ne 0) { throw "Error al volver a montar el WIM: $($result.ExitCode)" }
+        if ($result.ExitCode -ne 0) { throw (Get-AIOString 'errors.e221' -FormatArgs @(($result.ExitCode))) }
         $Script:IMAGE_MOUNTED = 1
         Write-Host (Get-AIOString 'montaje.reload_ok') -ForegroundColor Green
         return $true

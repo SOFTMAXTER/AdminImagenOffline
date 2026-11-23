@@ -357,7 +357,7 @@ function Show-Services-Offline-GUI {
                 Unlock-Single-Key -SubKeyPath ($regPath -replace "^Registry::HKLM\\", "")
 
                 try {
-                    if (-not (Test-Path -LiteralPath $regPath)) { throw "La clave del servicio no existe en la colmena Offline." }
+                    if (-not (Test-Path -LiteralPath $regPath)) { throw (Get-AIOString 'errors.e306') }
                     
                     Set-ItemProperty -Path $regPath -Name "Start" -Value $targetVal -Type DWord -Force -ErrorAction Stop
                     

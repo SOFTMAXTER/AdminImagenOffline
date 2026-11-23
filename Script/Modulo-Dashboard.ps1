@@ -197,7 +197,7 @@ function Read-AIODashboardRegistryKey {
     try {
         $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Default)
         $key = $base.OpenSubKey(($SubKey + '\Microsoft\Windows NT\CurrentVersion'), $false)
-        if ($null -eq $key) { throw 'No existe Windows NT\CurrentVersion en el SOFTWARE de la imagen.' }
+        if ($null -eq $key) { throw (Get-AIOString 'errors.e386') }
         $values = [ordered]@{}
         foreach ($name in $script:AIODashboardMonitoredRegistryValues) {
             $values[$name] = $key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
@@ -216,14 +216,14 @@ function Invoke-AIODashboardReg {
     $global:LASTEXITCODE = $null
     $lines = @(& reg.exe @Arguments 2>&1 | ForEach-Object { $_.ToString() })
     $exitCode = $global:LASTEXITCODE
-    if ($null -eq $exitCode) { throw 'No se pudo ejecutar reg.exe.' }
+    if ($null -eq $exitCode) { throw (Get-AIOString 'errors.e490') }
     [pscustomobject]@{ ExitCode = $exitCode; Lines = $lines }
 }
 
 function Get-AIODashboardRegistryData {
     param([Parameter(Mandatory = $true)][string]$MountPath)
     $hive = Join-Path $MountPath 'Windows\System32\config\SOFTWARE'
-    if (-not (Test-Path -LiteralPath $hive -PathType Leaf)) { throw "No se encontro SOFTWARE en $MountPath." }
+    if (-not (Test-Path -LiteralPath $hive -PathType Leaf)) { throw (Get-AIOString 'errors.e436' -FormatArgs @($MountPath)) }
     $loadedKey = $null
     try { $loadedKey = Get-AIODashboardLoadedHive -HivePath $hive }
     catch { Write-Log -LogLevel WARN -Message "Dashboard: No se pudo verificar un hive ya cargado: $($_.Exception.Message)" }
@@ -236,7 +236,7 @@ function Get-AIODashboardRegistryData {
         # reintentar la deteccion en hivelist antes de abortar.
         try { $loadedKey = Get-AIODashboardLoadedHive -HivePath $hive } catch {}
         if ($loadedKey) { return Read-AIODashboardRegistryKey -SubKey $loadedKey }
-        throw "No se pudo cargar SOFTWARE (reg.exe: $($load.ExitCode)). $($load.Lines -join ' ')"
+        throw (Get-AIOString 'errors.e476' -FormatArgs @(($load.ExitCode), ($load.Lines -join ' ')))
     }
     $data = $null
     try {
@@ -254,7 +254,7 @@ function Get-AIODashboardRegistryData {
             }
         }
         if (-not $unloaded) {
-            throw "No se pudo descargar HKLM\$temporaryKey (codigo $($unload.ExitCode)). Revisa esta clave antes de desmontar la imagen."
+            throw (Get-AIOString 'errors.e482' -FormatArgs @($temporaryKey, ($unload.ExitCode)))
         }
     }
     return $data
@@ -266,12 +266,12 @@ function Get-AIODashboardPeArchitecture {
     try {
         $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
         $reader = New-Object IO.BinaryReader($stream)
-        if ($stream.Length -lt 64 -or $reader.ReadUInt16() -ne 0x5A4D) { throw 'Cabecera DOS invalida.' }
+        if ($stream.Length -lt 64 -or $reader.ReadUInt16() -ne 0x5A4D) { throw (Get-AIOString 'errors.e011') }
         $stream.Position = 0x3C
         $offset = $reader.ReadUInt32()
-        if ($offset -lt 64 -or $offset -gt ($stream.Length - 6)) { throw 'Desplazamiento PE invalido.' }
+        if ($offset -lt 64 -or $offset -gt ($stream.Length - 6)) { throw (Get-AIOString 'errors.e057') }
         $stream.Position = $offset
-        if ($reader.ReadUInt32() -ne 0x4550) { throw 'Firma PE invalida.' }
+        if ($reader.ReadUInt32() -ne 0x4550) { throw (Get-AIOString 'errors.e268') }
         switch ($reader.ReadUInt16()) {
             0x014C { return 'x86' }
             0x8664 { return 'x64' }
@@ -279,7 +279,7 @@ function Get-AIODashboardPeArchitecture {
             0x01C4 { return 'ARM' }
             0xA641 { return 'ARM64EC' }
             0xA64E { return 'ARM64X' }
-            default { throw 'Arquitectura PE no reconocida.' }
+            default { throw (Get-AIOString 'errors.e004') }
         }
     } finally {
         if ($null -ne $reader) { $reader.Dispose() }
@@ -290,20 +290,20 @@ function Get-AIODashboardPeArchitecture {
 function Get-AIODashboardCurrentEdition {
     param([Parameter(Mandatory = $true)][string]$MountPath)
     if (-not (Test-Path -LiteralPath $MountPath -PathType Container)) {
-        throw "No existe el directorio de la imagen: $MountPath."
+        throw (Get-AIOString 'errors.e396' -FormatArgs @($MountPath))
     }
     # El helper de Modulo-Montaje agrega /English y comprueba la ejecucion nativa.
     # Consultar la imagen MONTADA: el XML del WIM puede preceder a un cambio de edicion.
     $query = Invoke-AIOMountDismQuery -Arguments @("/Image:$MountPath", '/Get-CurrentEdition')
     if ($null -eq $query.ExitCode -or $query.ExitCode -ne 0) {
-        throw "DISM no pudo consultar la edicion offline (codigo $($query.ExitCode)). $($query.Lines -join ' ')"
+        throw (Get-AIOString 'errors.e049' -FormatArgs @(($query.ExitCode), ($query.Lines -join ' ')))
     }
     $editions = @(
         foreach ($line in (($query.Lines -join "`n") -split '\r?\n')) {
             if ($line -match '^\s*Current Edition\s*:\s*([A-Za-z0-9_]+)\s*$') { $matches[1] }
         }
     )
-    if ($editions.Count -ne 1) { throw 'DISM no devolvio una unica edicion actual reconocible.' }
+    if ($editions.Count -ne 1) { throw (Get-AIOString 'errors.e046') }
     return $editions[0]
 }
 
@@ -479,12 +479,12 @@ function Get-AIODashboardImageInfo {
         [IO.Path]::GetExtension($ImagePath) -notin @('.wim', '.esd', '.swm')) { return $null }
     $imageIndex = 0
     if (-not [int]::TryParse([string]$Index, [ref]$imageIndex) -or $imageIndex -lt 1) {
-        throw 'No hay un indice WIM valido para consultar sus metadatos.'
+        throw (Get-AIOString 'errors.e407')
     }
-    if (-not (Test-Path -LiteralPath $ImagePath -PathType Leaf)) { throw "No se encuentra la imagen de origen: $ImagePath." }
+    if (-not (Test-Path -LiteralPath $ImagePath -PathType Leaf)) { throw (Get-AIOString 'errors.e455' -FormatArgs @($ImagePath)) }
     $images = @(Get-WindowsImage -ImagePath $ImagePath -Index $imageIndex -ErrorAction Stop)
     if ($images.Count -ne 1 -or [string]$images[0].ImageIndex -ne [string]$imageIndex) {
-        throw "La consulta WIM no devolvio exclusivamente el indice $imageIndex."
+        throw (Get-AIOString 'errors.e309' -FormatArgs @($imageIndex))
     }
     return $images[0]
 }
@@ -495,7 +495,7 @@ function Get-AIODashboardLaunchText {
     if (-not (Test-Path -LiteralPath $ini -PathType Leaf)) { return '' }
     # Solo leer el INI; nunca ejecutar scripts ni expandir variables del host.
     if ((Get-Item -LiteralPath $ini -Force -ErrorAction Stop).Length -gt 64KB) {
-        throw 'winpeshl.ini supera 64 KB; no se usara para identificar el entorno.'
+        throw (Get-AIOString 'errors.e641')
     }
     $section = ''; $commands = @()
     foreach ($line in @(Get-Content -LiteralPath $ini -ErrorAction Stop)) {

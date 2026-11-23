@@ -550,7 +550,7 @@ function Invoke-AIOLangDism {
     )
 
     if (-not (Test-Path -LiteralPath $script:AIOLangDismPath -PathType Leaf)) {
-        throw "No se encontro DISM en '$script:AIOLangDismPath'."
+        throw (Get-AIOString 'errors.e434' -FormatArgs @($script:AIOLangDismPath))
     }
 
     $safeContext = ($Context -replace '[^A-Za-z0-9_.-]', '_')
@@ -590,7 +590,7 @@ function Invoke-AIOLangDism {
 
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $startInfo
-        if (-not $process.Start()) { throw 'No se pudo iniciar dism.exe.' }
+        if (-not $process.Start()) { throw (Get-AIOString 'errors.e498') }
 
         $stdoutTask = $null
         $stderrTask = $null
@@ -659,21 +659,21 @@ function Assert-AIOLangNoMountedImages {
     param()
 
     if ($Script:IMAGE_MOUNTED -and [int]$Script:IMAGE_MOUNTED -ne 0) {
-        throw 'AdminImagenOffline tiene una imagen montada. Guardala o desmontala antes de integrar idiomas en un medio completo.'
+        throw (Get-AIOString 'errors.e000')
     }
 
     # Consultar el mismo DISM elegido para el mantenimiento. Un fallo o una
     # salida desconocida no demuestra que sea seguro iniciar otro montaje.
     $result = Invoke-AIOLangDism -Arguments @('/Get-MountedImageInfo') -Context 'Comprobar montajes existentes' -SuccessCodes @(0) -Quiet
-    if (-not $result.Success) { throw 'No se pudo comprobar el registro de montajes DISM.' }
+    if (-not $result.Success) { throw (Get-AIOString 'errors.e478') }
     $paths = @($result.Output | ForEach-Object {
         if ([string]$_ -match '(?i)^\s*Mount (?:Dir|Directory)\s*:\s*(.*?)\s*$') { $matches[1] }
     })
     if ($paths.Count -gt 0) {
-        throw "Hay imagenes registradas en DISM (incluso si requieren recuperacion): $($paths -join ', ')."
+        throw (Get-AIOString 'errors.e280' -FormatArgs @(($paths -join ', ')))
     }
     if (($result.Output -join "`n") -notmatch '(?im)^\s*No mounted images found\.?\s*$') {
-        throw 'DISM no confirmo que no haya imagenes montadas; se detiene antes de modificar el medio.'
+        throw (Get-AIOString 'errors.e040')
     }
 }
 
@@ -705,7 +705,7 @@ function Mount-AIOLangImage {
     )
 
     if ($MountPath -in $script:AIOLangMountedPaths) {
-        throw "El montaje '$MountPath' sigue pendiente; no se vaciara ni reutilizara."
+        throw (Get-AIOString 'errors.e169' -FormatArgs @($MountPath))
     }
     Initialize-AIOLangDirectory -Path $MountPath -Empty
 
@@ -798,10 +798,10 @@ function Expand-AIOLangCabNative {
     )
 
     if (-not (Test-Path -LiteralPath $script:AIOLangExpandPath -PathType Leaf)) {
-        throw "No se encontro expand.exe en '$script:AIOLangExpandPath'."
+        throw (Get-AIOString 'errors.e439' -FormatArgs @($script:AIOLangExpandPath))
     }
     if (-not (Test-Path -LiteralPath $CabPath -PathType Leaf)) {
-        throw "No existe el CAB '$CabPath'."
+        throw (Get-AIOString 'errors.e388' -FormatArgs @($CabPath))
     }
 
     Initialize-AIOLangDirectory -Path $Destination
@@ -823,7 +823,7 @@ function Expand-AIOLangCabNative {
     $extracted = [int]($after - $before)
     if ($extracted -le 0 -and -not $AllowEmpty) {
         $details = @($attempts | ForEach-Object { "Patron '$($_.Pattern)' codigo $($_.ExitCode)" }) -join '; '
-        throw "expand.exe no extrajo archivos de '$CabPath'. $details"
+        throw (Get-AIOString 'errors.e626' -FormatArgs @($CabPath, $details))
     }
 
     return [pscustomobject]@{
@@ -860,7 +860,7 @@ function Get-AIOLangImageIndexes {
         catch {}
     }
 
-    if ($indexes.Count -eq 0) { throw "No se pudieron enumerar indices en '$ImagePath' con el DISM activo." }
+    if ($indexes.Count -eq 0) { throw (Get-AIOString 'errors.e466' -FormatArgs @($ImagePath)) }
     return [int[]]@($indexes.ToArray() | Sort-Object -Unique)
 }
 
@@ -973,7 +973,7 @@ function Get-AIOLangImageRecords {
             }
             catch {}
         }
-        if (-not $detail) { throw "No se pudieron obtener metadatos verificables del indice $index en '$ImagePath'." }
+        if (-not $detail) { throw (Get-AIOString 'errors.e470' -FormatArgs @($index, $ImagePath)) }
         [void]$records.Add($detail)
     }
     return [object[]]$records.ToArray()
@@ -995,13 +995,13 @@ function Expand-AIOLangEsdNative {
     )
 
     if (-not (Test-Path -LiteralPath $EsdPath -PathType Leaf)) {
-        throw "No existe el ESD '$EsdPath'."
+        throw (Get-AIOString 'errors.e389' -FormatArgs @($EsdPath))
     }
 
     Initialize-AIOLangDirectory -Path $Destination -Empty
     $indexes = @(Get-AIOLangEsdImageIndexes -EsdPath $EsdPath)
     if ($indexes.Count -eq 0) {
-        throw "DISM no pudo identificar indices aplicables dentro de '$EsdPath'."
+        throw (Get-AIOString 'errors.e050' -FormatArgs @($EsdPath))
     }
 
     foreach ($index in $indexes) {
@@ -1016,7 +1016,7 @@ function Expand-AIOLangEsdNative {
     }
 
     $count = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -ErrorAction SilentlyContinue).Count
-    if ($count -eq 0) { throw "DISM no extrajo archivos de '$EsdPath'." }
+    if ($count -eq 0) { throw (Get-AIOString 'errors.e047' -FormatArgs @($EsdPath)) }
     return $Destination
 }
 
@@ -1285,7 +1285,7 @@ function Initialize-AIOLangServicingEnvironment {
     }
 
     if (-not (Test-Path -LiteralPath $selectedPath -PathType Leaf)) {
-        throw 'No se encontro una herramienta DISM valida en Windows ni en el ADK.'
+        throw (Get-AIOString 'errors.e448')
     }
 
     $script:AIOLangDismPath = $selectedPath
@@ -1754,7 +1754,7 @@ function Assert-AIOLangEditionLanguageSupport {
             $edition = if ($_.PSObject.Properties['EditionId'] -and $_.EditionId) { $_.EditionId } else { $_.ImageName }
             "indice $($_.ImageIndex): $edition"
         }) -join '; '
-        throw "Las siguientes ediciones restringen la adicion de idiomas completos: $details. Selecciona una edicion multilingue compatible."
+        throw (Get-AIOString 'errors.e371' -FormatArgs @($details))
     }
 }
 
@@ -1771,7 +1771,7 @@ function Assert-AIOLangProductFamilyConsistency {
         else { Get-AIOLangImageProductFamily -Image $_ }
     } | Where-Object { $_ -in @('Client','Server') } | Select-Object -Unique)
     if ($families.Count -gt 1) {
-        throw "La seleccion mezcla imagenes Client y Server. Procesalas por separado para que los Language Packs y los recursos de Windows Setup mantengan una unica familia de producto."
+        throw (Get-AIOString 'errors.e358')
     }
 }
 
@@ -2187,7 +2187,7 @@ function Get-AIOLangRepositoryInventory {
     else {
         if ($files.Count -eq 0) {
             if ($AllowEmpty) { return [object[]]@() }
-            throw 'No se encontraron archivos CAB/ESD en el repositorio seleccionado.'
+            throw (Get-AIOString 'errors.e418')
         }
 
         $metadataRoot = Join-Path $ScratchRoot 'Metadata'
@@ -2296,9 +2296,9 @@ function Get-AIOLangRepositoryInventory {
 
     if ($resultInventory.Count -eq 0 -and -not $AllowEmpty) {
         if ($normalizedLocales.Count -gt 0) {
-            throw "No se encontraron paquetes compatibles para los idiomas solicitados: $($normalizedLocales -join ', ')."
+            throw (Get-AIOString 'errors.e430' -FormatArgs @(($normalizedLocales -join ', ')))
         }
-        throw 'No se encontraron paquetes CAB/ESD reconocidos como LanguagePack, LanguageFOD o WinPE.'
+        throw (Get-AIOString 'errors.e427')
     }
 
     return $resultInventory
@@ -2402,9 +2402,9 @@ function Get-AIOLangInstallImagePath {
     if (Test-Path -LiteralPath $wim -PathType Leaf) { return $wim }
     if (Test-Path -LiteralPath $esd -PathType Leaf) { return $esd }
     if (Test-Path -LiteralPath $swm -PathType Leaf) {
-        throw 'El medio contiene install.swm dividido. Une o exporta los archivos SWM a install.wim antes de usar este modulo.'
+        throw (Get-AIOString 'errors.e165')
     }
-    throw "No se encontro sources\install.wim ni sources\install.esd en '$MediaRoot'."
+    throw (Get-AIOString 'errors.e445' -FormatArgs @($MediaRoot))
 }
 
 function Get-AIOLangImageMetadata {
@@ -2412,7 +2412,7 @@ function Get-AIOLangImageMetadata {
     param([Parameter(Mandatory = $true)] [string]$ImagePath, [switch]$SkipServicingEvidence)
 
     $records = @(Get-AIOLangImageRecords -ImagePath $ImagePath)
-    if ($records.Count -eq 0) { throw "No se encontraron indices en '$ImagePath'." }
+    if ($records.Count -eq 0) { throw (Get-AIOString 'errors.e425' -FormatArgs @($ImagePath)) }
     $details = New-Object System.Collections.Generic.List[object]
     foreach ($record in $records) {
         $languages = New-Object System.Collections.Generic.List[string]
@@ -2521,7 +2521,7 @@ function Select-AIOLangLocales {
         })
     }
     else { $locales = $candidateLocales }
-    if ($locales.Count -eq 0) { throw 'No hay idiomas principales compatibles con todas las imagenes seleccionables del medio.' }
+    if ($locales.Count -eq 0) { throw (Get-AIOString 'errors.e404') }
 
     Write-Host (Get-AIOString 'lenguajes.avail_langs') -ForegroundColor Yellow
     for ($i = 0; $i -lt $locales.Count; $i++) {
@@ -2626,7 +2626,7 @@ function Assert-AIOLangPackageCoverage {
         }
     }
     if ($missing.Count -gt 0) {
-        throw "Faltan paquetes de idioma compatibles para: $($missing -join '; ')."
+        throw (Get-AIOString 'errors.e263' -FormatArgs @(($missing -join '; ')))
     }
 
     return [pscustomobject]@{
@@ -2921,14 +2921,14 @@ function Save-AIOLangEastAsianFontPayload {
     $bootSource = Join-Path $MountPath 'Windows\Boot\Fonts'
     $bootCache = Join-Path $archRoot 'BootFonts'
     if (-not (Test-Path -LiteralPath $bootSource -PathType Container)) {
-        throw "No existe Windows\\Boot\\Fonts en el indice usado para preparar soporte de fuentes de Asia oriental ($Architecture)."
+        throw (Get-AIOString 'errors.e387' -FormatArgs @($Architecture))
     }
     if (-not (Test-Path -LiteralPath $bootCache -PathType Container)) {
         Initialize-AIOLangDirectory -Path $bootCache -Empty
         Copy-AIOLangTree -Source $bootSource -Destination $bootCache
     }
     $bootCount = @(Get-ChildItem -LiteralPath $bootCache -File -ErrorAction SilentlyContinue).Count
-    if ($bootCount -eq 0) { throw "No se pudieron capturar fuentes de arranque para $Architecture." }
+    if ($bootCount -eq 0) { throw (Get-AIOString 'errors.e464' -FormatArgs @($Architecture)) }
 
     $results = New-Object System.Collections.Generic.List[object]
     foreach ($locale in $eastAsian) {
@@ -2948,7 +2948,7 @@ function Save-AIOLangEastAsianFontPayload {
             [void]$captured.Add($fontName)
         }
         if ($captured.Count -eq 0) {
-            throw "No se encontraron fuentes de respaldo para '$locale'. Sin WinPE FontSupport, Windows Setup podria mostrar caracteres vacios."
+            throw (Get-AIOString 'errors.e422' -FormatArgs @($locale))
         }
 
         $support = [pscustomobject]@{
@@ -2997,7 +2997,7 @@ function Add-AIOLangEastAsianFontSupport {
         }
         foreach ($fontName in @($support.SystemFontNames)) {
             $source = Join-Path $support.SystemFontsRoot $fontName
-            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Falta la fuente EA preparada '$source'." }
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw (Get-AIOString 'errors.e260' -FormatArgs @($source)) }
             Copy-AIOLangFileWithRetry -Source $source -Destination (Join-Path $systemDestination $fontName)
             if ($fontName -notin $files) { [void]$files.Add($fontName) }
         }
@@ -3029,7 +3029,7 @@ function Assert-AIOLangEastAsianFontSupport {
     $bootCount = if (Test-Path -LiteralPath $bootRoot -PathType Container) { @(Get-ChildItem -LiteralPath $bootRoot -File -ErrorAction SilentlyContinue).Count } else { 0 }
     $missing = @($ExpectedFontFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $MountPath ("Windows\Fonts\$_")) -PathType Leaf) })
     if ($bootCount -eq 0 -or $missing.Count -gt 0) {
-        throw "$Context fallo: soporte de fuentes EA incompleto. BootFonts=$bootCount; faltantes=$($missing -join ', ')."
+        throw (Get-AIOString 'errors.e646' -FormatArgs @($Context, $bootCount, ($missing -join ', ')))
     }
     $result = [pscustomobject]@{
         Context = $Context
@@ -3062,12 +3062,12 @@ function Expand-AIOLangArchiveFull {
             [void](Expand-AIOLangEsdNative -EsdPath $ArchivePath -Destination $Destination)
         }
         default {
-            throw "Formato no admitido para extraer recursos: '$ArchivePath'."
+            throw (Get-AIOString 'errors.e270' -FormatArgs @($ArchivePath))
         }
     }
 
     $count = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -ErrorAction SilentlyContinue).Count
-    if ($count -eq 0) { throw "No se extrajeron recursos de '$ArchivePath'." }
+    if ($count -eq 0) { throw (Get-AIOString 'errors.e456' -FormatArgs @($ArchivePath)) }
     return $Destination
 }
 
@@ -3091,7 +3091,7 @@ function Initialize-AIOLangLanguagePayloads {
             $mumCandidates = @(Get-ChildItem -LiteralPath $destination -Recurse -File -Filter '*.mum' -ErrorAction SilentlyContinue | Where-Object {
                 $_.Name -match '(?i)LanguagePack|Common-Foundation|^update\.mum$'
             } | Sort-Object @{ Expression = { if ($_.Name -ieq 'update.mum') { 0 } else { 1 } } }, FullName)
-            if ($mumCandidates.Count -eq 0) { throw "No se encontro un manifiesto instalable dentro de '$($package.Name)'." }
+            if ($mumCandidates.Count -eq 0) { throw (Get-AIOString 'errors.e447' -FormatArgs @(($package.Name))) }
             $packagePath = $mumCandidates[0].FullName
         }
 
@@ -3296,7 +3296,7 @@ function Copy-AIOLangFileVerified {
         $destinationStream.Flush($true)
         $destinationStream.Dispose(); $destinationStream = $null
         $sourceStream.Dispose(); $sourceStream = $null
-        if ($length -ne [int64]$sourceItem.Length) { throw "La copia de '$Source' no coincide en tamano." }
+        if ($length -ne [int64]$sourceItem.Length) { throw (Get-AIOString 'errors.e312' -FormatArgs @($Source)) }
         if (Test-Path -LiteralPath $Destination -PathType Leaf) { [System.IO.File]::Replace($temporary, $Destination, $null) }
         else { [System.IO.File]::Move($temporary, $Destination) }
         [System.IO.File]::SetLastWriteTimeUtc($Destination, $sourceItem.LastWriteTimeUtc)
@@ -3305,7 +3305,7 @@ function Copy-AIOLangFileVerified {
         $sourceKey = Get-AIOLangFileCacheKey -Path $Source
         $script:AIOLangFileHashCache[$sourceKey] = $sourceHash
         $destinationHash = Get-AIOLangFileHashRequired -Path $Destination
-        if ($sourceHash -ne $destinationHash) { throw "La copia de '$Source' no coincide por SHA-256." }
+        if ($sourceHash -ne $destinationHash) { throw (Get-AIOString 'errors.e313' -FormatArgs @($Source)) }
         return [pscustomobject]@{ SHA256 = $sourceHash; Length = $length; Destination = $Destination }
     }
     finally {
@@ -3351,7 +3351,7 @@ function Get-AIOLangFileHashRequired {
     $script:AIOLangOptimizationStats.HashCacheMisses++
     $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
     if ([string]::IsNullOrWhiteSpace([string]$hash) -or $hash -notmatch '^[A-Fa-f0-9]{64}$') {
-        throw "No se pudo obtener un SHA-256 valido para '$Path'."
+        throw (Get-AIOString 'errors.e505' -FormatArgs @($Path))
     }
     $normalized = $hash.ToUpperInvariant()
     $script:AIOLangFileHashCache[$key] = $normalized
@@ -3375,7 +3375,7 @@ function Get-AIOLangDirectoryTreeHash {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)] [string]$Path)
 
-    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { throw "No existe el directorio para calcular hash de arbol: '$Path'." }
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { throw (Get-AIOString 'errors.e397' -FormatArgs @($Path)) }
     $root = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path.TrimEnd('\')
     $paths = [string[]]@([System.IO.Directory]::EnumerateFiles($root, '*', [System.IO.SearchOption]::AllDirectories))
     [Array]::Sort($paths, [System.StringComparer]::OrdinalIgnoreCase)
@@ -3419,7 +3419,7 @@ function Get-AIOLangVolumeFreeSpace {
         if ($parent -eq $probe) { break }
         $probe = $parent
     }
-    if ([string]::IsNullOrWhiteSpace($probe)) { throw "No se pudo resolver un volumen para '$Path'." }
+    if ([string]::IsNullOrWhiteSpace($probe)) { throw (Get-AIOString 'errors.e507' -FormatArgs @($Path)) }
     $resolvedProbe = (Resolve-Path -LiteralPath $probe -ErrorAction Stop).Path
     $root = [System.IO.Path]::GetPathRoot($resolvedProbe)
     try {
@@ -3483,18 +3483,18 @@ function Assert-AIOLangPreflightDiskSpace {
         if ($mediaSpace.Measurable) {
             Write-AIOLangLog -Level INFO -Message ("Preflight de espacio: requerido aprox. {0}; disponible {1} en {2}." -f (Format-AIOLangByteSize -Bytes $required), (Format-AIOLangByteSize -Bytes $mediaSpace.FreeBytes), $mediaSpace.Root)
             if ($mediaSpace.FreeBytes -lt $required) {
-                throw "Espacio insuficiente en $($mediaSpace.Root): se requieren aproximadamente $(Format-AIOLangByteSize -Bytes $required) y hay $(Format-AIOLangByteSize -Bytes $mediaSpace.FreeBytes)."
+                throw (Get-AIOString 'errors.e224' -FormatArgs @(($mediaSpace.Root), (Format-AIOLangByteSize -Bytes $required), (Format-AIOLangByteSize -Bytes $mediaSpace.FreeBytes)))
             }
         }
     }
     else {
         if ($mediaSpace.Measurable) {
             Write-AIOLangLog -Level INFO -Message ("Preflight de espacio del medio: requerido {0}; disponible {1} en {2}." -f (Format-AIOLangByteSize -Bytes $mediaNeed), (Format-AIOLangByteSize -Bytes $mediaSpace.FreeBytes), $mediaSpace.Root)
-            if ($mediaSpace.FreeBytes -lt $mediaNeed) { throw "Espacio insuficiente en el volumen del medio $($mediaSpace.Root)." }
+            if ($mediaSpace.FreeBytes -lt $mediaNeed) { throw (Get-AIOString 'errors.e222' -FormatArgs @(($mediaSpace.Root))) }
         }
         if ($scratchSpace.Measurable) {
             Write-AIOLangLog -Level INFO -Message ("Preflight de espacio temporal: requerido {0}; disponible {1} en {2}." -f (Format-AIOLangByteSize -Bytes $scratchNeed), (Format-AIOLangByteSize -Bytes $scratchSpace.FreeBytes), $scratchSpace.Root)
-            if ($scratchSpace.FreeBytes -lt $scratchNeed) { throw "Espacio insuficiente en el volumen temporal $($scratchSpace.Root)." }
+            if ($scratchSpace.FreeBytes -lt $scratchNeed) { throw (Get-AIOString 'errors.e223' -FormatArgs @(($scratchSpace.Root))) }
         }
     }
 
@@ -3565,19 +3565,19 @@ function Resolve-AIOLangPreflightBackup {
 
     $selected = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path.TrimEnd('\')
     if (-not (Test-Path -LiteralPath $selected -PathType Container)) {
-        throw "No existe la carpeta de respaldo '$selected'."
+        throw (Get-AIOString 'errors.e400' -FormatArgs @($selected))
     }
     if ((Split-Path -Leaf $selected) -ine 'Preflight') {
-        throw "Selecciona directamente la carpeta Preflight del respaldo actual."
+        throw (Get-AIOString 'errors.e579')
     }
 
     $manifestPath = Join-Path $selected 'manifest.json'
     $payloadRoot = Join-Path $selected 'Media'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-        throw "El respaldo '$selected' no contiene manifest.json."
+        throw (Get-AIOString 'errors.e191' -FormatArgs @($selected))
     }
     if (-not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
-        throw "El respaldo '$selected' no contiene la carpeta Media."
+        throw (Get-AIOString 'errors.e190' -FormatArgs @($selected))
     }
 
     return [pscustomobject]@{
@@ -3809,10 +3809,10 @@ function New-AIOLangPreflightBackup {
     }
 
     if ($hashedFileCount -ne [int]$plan.TotalFiles -or $progress.Current -ne [int]$plan.TotalFiles) {
-        throw "La cobertura del respaldo no coincide con el plan: esperados=$($plan.TotalFiles), respaldados=$hashedFileCount, progreso=$($progress.Current)."
+        throw (Get-AIOString 'errors.e307' -FormatArgs @(($plan.TotalFiles), $hashedFileCount, ($progress.Current)))
     }
     if ($totalBytes -ne [int64]$plan.TotalBytes) {
-        throw "El tamano respaldado no coincide con el plan: esperado=$($plan.TotalBytes), respaldado=$totalBytes."
+        throw (Get-AIOString 'errors.e211' -FormatArgs @(($plan.TotalBytes), $totalBytes))
     }
 
     $entriesIndexSha256 = Get-AIOLangEntriesIndexSha256 -Entries ([object[]]$entries.ToArray())
@@ -3838,7 +3838,7 @@ function New-AIOLangPreflightBackup {
         [int]$writtenManifest.FormatVersion -ne 3 -or
         [string]$writtenManifest.EntriesIndexSha256 -ne $entriesIndexSha256 -or
         [int]$writtenManifest.HashedFileCount -ne $hashedFileCount) {
-        throw 'El manifest.json de idiomas no supero la verificacion posterior a escritura.'
+        throw (Get-AIOString 'errors.e142')
     }
 
     Remove-Item -LiteralPath $incompletePath -Force -ErrorAction Stop
@@ -3865,7 +3865,7 @@ function Test-AIOLangPreflightBackup {
     $context = Resolve-AIOLangPreflightBackup -Path $BackupRoot
     $incompletePath = Join-Path $context.Root 'BACKUP_INCOMPLETO.txt'
     if (Test-Path -LiteralPath $incompletePath -PathType Leaf) {
-        throw "El respaldo Preflight esta marcado como incompleto: '$($context.Root)'."
+        throw (Get-AIOString 'errors.e194' -FormatArgs @(($context.Root)))
     }
 
     $manifest = Get-Content -LiteralPath $context.ManifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -3877,36 +3877,36 @@ function Test-AIOLangPreflightBackup {
     )
     foreach ($propertyName in $requiredManifestProperties) {
         if (-not $manifest.PSObject.Properties[$propertyName]) {
-            throw "El manifiesto '$($context.ManifestPath)' no contiene la propiedad obligatoria '$propertyName'."
+            throw (Get-AIOString 'errors.e146' -FormatArgs @(($context.ManifestPath), $propertyName))
         }
     }
 
     $schema = [int]$manifest.SchemaVersion
     $format = [int]$manifest.FormatVersion
     if ($schema -ne 3 -or $format -ne 3) {
-        throw "Respaldo no compatible: se requiere SchemaVersion/FormatVersion 3/3 y se recibio $schema/$format. Los respaldos anteriores deben recrearse."
+        throw (Get-AIOString 'errors.e559' -FormatArgs @($schema, $format))
     }
     if ([string]::IsNullOrWhiteSpace([string]$manifest.MediaRoot) -or
         [string]::IsNullOrWhiteSpace([string]$manifest.BackupRoot)) {
-        throw "El manifiesto '$($context.ManifestPath)' contiene rutas obligatorias vacias."
+        throw (Get-AIOString 'errors.e144' -FormatArgs @(($context.ManifestPath)))
     }
 
     $createdAt = [datetimeoffset]::MinValue
     if (-not [datetimeoffset]::TryParse([string]$manifest.CreatedAt, [ref]$createdAt)) {
-        throw "El manifiesto '$($context.ManifestPath)' contiene una fecha CreatedAt invalida."
+        throw (Get-AIOString 'errors.e145' -FormatArgs @(($context.ManifestPath)))
     }
 
     $entries = @($manifest.Entries)
     if ([int]$manifest.EntryCount -ne $entries.Count) {
-        throw "El manifiesto declara $($manifest.EntryCount) elementos, pero contiene $($entries.Count)."
+        throw (Get-AIOString 'errors.e159' -FormatArgs @(($manifest.EntryCount), ($entries.Count)))
     }
 
     if ([string]$manifest.HashAlgorithm -cne 'SHA256' -or [string]$manifest.HashCoverage -cne 'FilesAndDirectoryTrees') {
-        throw 'El manifiesto 3/3 no declara la cobertura SHA-256 esperada.'
+        throw (Get-AIOString 'errors.e147')
     }
     $indexHash = Get-AIOLangEntriesIndexSha256 -Entries $entries
     if ($indexHash -ne [string]$manifest.EntriesIndexSha256) {
-        throw 'EntriesIndexSha256 no coincide con el contenido del manifiesto.'
+        throw (Get-AIOString 'errors.e218')
     }
 
     $seenPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -3916,17 +3916,17 @@ function Test-AIOLangPreflightBackup {
         $requiredEntryProperties = @('RelativePath', 'Existed', 'Type', 'Size', 'FileCount', 'Sha256')
         foreach ($propertyName in $requiredEntryProperties) {
             if (-not $entry.PSObject.Properties[$propertyName]) {
-                throw "Una entrada del manifiesto no contiene la propiedad obligatoria '$propertyName'."
+                throw (Get-AIOString 'errors.e603' -FormatArgs @($propertyName))
             }
         }
 
         $relative = [string]$entry.RelativePath
         if ([string]::IsNullOrWhiteSpace($relative) -or [System.IO.Path]::IsPathRooted($relative) -or
             (@($relative -split '[\\/]' | Where-Object { $_ -eq '..' }).Count -gt 0)) {
-            throw "El manifiesto contiene una ruta relativa invalida: '$relative'."
+            throw (Get-AIOString 'errors.e158' -FormatArgs @($relative))
         }
         if (-not $seenPaths.Add($relative)) {
-            throw "El manifiesto contiene una entrada duplicada: '$relative'."
+            throw (Get-AIOString 'errors.e157' -FormatArgs @($relative))
         }
 
         $entryType = [string]$entry.Type
@@ -3934,56 +3934,56 @@ function Test-AIOLangPreflightBackup {
         $entryFileCount = [int]$entry.FileCount
         $existed = [bool]$entry.Existed
         if ($entrySize -lt 0 -or $entryFileCount -lt 0) {
-            throw "La entrada '$relative' contiene valores numericos invalidos."
+            throw (Get-AIOString 'errors.e322' -FormatArgs @($relative))
         }
 
         $path = Join-Path $context.PayloadRoot $relative
         if (-not $existed) {
             if ($entryType -ne 'Missing' -or $entrySize -ne 0 -or $entryFileCount -ne 0 -or -not [string]::IsNullOrWhiteSpace([string]$entry.Sha256)) {
-                throw "La entrada ausente '$relative' no cumple el formato Preflight actual."
+                throw (Get-AIOString 'errors.e325' -FormatArgs @($relative))
             }
             if (Test-Path -LiteralPath $path) {
-                throw "El respaldo contiene datos inesperados para la entrada ausente '$relative'."
+                throw (Get-AIOString 'errors.e196' -FormatArgs @($relative))
             }
             continue
         }
 
         if ($entryType -notin @('File', 'Directory')) {
-            throw "La entrada existente '$relative' tiene un tipo no admitido: '$entryType'."
+            throw (Get-AIOString 'errors.e327' -FormatArgs @($relative, $entryType))
         }
         if (-not (Test-Path -LiteralPath $path)) {
-            throw "El respaldo esta incompleto: falta '$relative'."
+            throw (Get-AIOString 'errors.e204' -FormatArgs @($relative))
         }
 
         if ($entryType -eq 'File') {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-                throw "La entrada '$relative' debe ser un archivo."
+                throw (Get-AIOString 'errors.e323' -FormatArgs @($relative))
             }
             if ([string]::IsNullOrWhiteSpace([string]$entry.Sha256) -or [string]$entry.Sha256 -notmatch '^[A-Fa-f0-9]{64}$') {
-                throw "La entrada de archivo '$relative' no contiene un SHA-256 valido."
+                throw (Get-AIOString 'errors.e326' -FormatArgs @($relative))
             }
             $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
             if ([int64]$item.Length -ne $entrySize) {
-                throw "Tamano invalido en '$relative'."
+                throw (Get-AIOString 'errors.e596' -FormatArgs @($relative))
             }
             $hash = Get-AIOLangFileHashRequired -Path $path
             if ($hash -ne [string]$entry.Sha256) {
-                throw "Hash invalido en '$relative'."
+                throw (Get-AIOString 'errors.e276' -FormatArgs @($relative))
             }
             if ($entryFileCount -ne 1) {
-                throw "FileCount invalido en el archivo '$relative'."
+                throw (Get-AIOString 'errors.e265' -FormatArgs @($relative))
             }
         }
         else {
             if (-not (Test-Path -LiteralPath $path -PathType Container)) {
-                throw "La entrada '$relative' debe ser un directorio."
+                throw (Get-AIOString 'errors.e324' -FormatArgs @($relative))
             }
             if ([string]::IsNullOrWhiteSpace([string]$entry.Sha256) -or [string]$entry.Sha256 -notmatch '^[A-Fa-f0-9]{64}$') {
-                throw "El directorio '$relative' no contiene un hash de arbol SHA-256 valido."
+                throw (Get-AIOString 'errors.e120' -FormatArgs @($relative))
             }
             $tree = Get-AIOLangDirectoryTreeHash -Path $path
             if ([int64]$tree.TotalBytes -ne $entrySize -or [int]$tree.FileCount -ne $entryFileCount -or [string]$tree.SHA256 -ne [string]$entry.Sha256) {
-                throw "Hash de arbol invalido en el directorio '$relative'."
+                throw (Get-AIOString 'errors.e275' -FormatArgs @($relative))
             }
         }
 
@@ -3992,10 +3992,10 @@ function Test-AIOLangPreflightBackup {
     }
 
     if ([int64]$manifest.TotalBytes -ne $calculatedTotalBytes) {
-        throw 'El total de bytes del manifiesto no coincide con el contenido del respaldo.'
+        throw (Get-AIOString 'errors.e213')
     }
     if ([int]$manifest.HashedFileCount -ne $calculatedHashedFiles) {
-        throw 'HashedFileCount no coincide con los archivos cubiertos por los hashes.'
+        throw (Get-AIOString 'errors.e278')
     }
 
     return [pscustomobject]@{
@@ -4019,7 +4019,7 @@ function Restore-AIOLangPreflightBackup {
     $validated = Test-AIOLangPreflightBackup -BackupRoot $BackupRoot
     $manifest = $validated.Manifest
     if ([string]::IsNullOrWhiteSpace($MediaRoot)) { $MediaRoot = [string]$manifest.MediaRoot }
-    if (-not (Test-Path -LiteralPath $MediaRoot -PathType Container)) { throw "No existe el medio destino '$MediaRoot'." }
+    if (-not (Test-Path -LiteralPath $MediaRoot -PathType Container)) { throw (Get-AIOString 'errors.e398' -FormatArgs @($MediaRoot)) }
     if (-not $Force -and -not (Read-AIOLangYesNo -Prompt "Restaurar el medio '$MediaRoot' desde este respaldo" -Default $false)) { return $false }
 
     $entries = @($manifest.Entries)
@@ -4042,14 +4042,14 @@ function Restore-AIOLangPreflightBackup {
                 
                 if ($entry.Type -eq 'File' -and $entry.Sha256) {
                     $hash = Get-AIOLangFileHashSafe -Path $destination
-                    if ($hash -ne [string]$entry.Sha256) { throw "La restauracion de '$relative' no supero la verificacion SHA-256." }
+                    if ($hash -ne [string]$entry.Sha256) { throw (Get-AIOString 'errors.e352' -FormatArgs @($relative)) }
                 }
                 elseif ($entry.Type -eq 'Directory') {
                     $tree = Get-AIOLangDirectoryTreeHash -Path $destination
                     if ([long]$tree.TotalBytes -ne [long]$entry.Size -or
                         [int]$tree.FileCount -ne [int]$entry.FileCount -or
                         [string]$tree.SHA256 -ne [string]$entry.Sha256) {
-                        throw "La restauracion del directorio '$relative' no supero la verificacion del arbol SHA-256."
+                        throw (Get-AIOString 'errors.e353' -FormatArgs @($relative))
                     }
                 }
             }
@@ -4116,7 +4116,7 @@ function Invoke-AIOLangAtomicReplacement {
         [Parameter(Mandatory = $true)] [string]$DestinationPath
     )
 
-    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw "No existe '$SourcePath'." }
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw (Get-AIOString 'errors.e383' -FormatArgs @($SourcePath)) }
     $destinationDirectory = Split-Path -Parent $DestinationPath
     Initialize-AIOLangDirectory -Path $destinationDirectory
 
@@ -4140,7 +4140,7 @@ function Invoke-AIOLangAtomicReplacement {
         Clear-AIOLangFileHashCache -Path $DestinationPath
         $sourceHash = [string]$stagedCopy.SHA256
         $destinationHash = (Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256 -ErrorAction Stop).Hash
-        if (-not $sourceHash -or $sourceHash -ne $destinationHash) { throw "Verificacion SHA-256 fallida despues de reemplazar '$DestinationPath'." }
+        if (-not $sourceHash -or $sourceHash -ne $destinationHash) { throw (Get-AIOString 'errors.e608' -FormatArgs @($DestinationPath)) }
         $replacementComplete = $true
     }
     catch {
@@ -4156,12 +4156,12 @@ function Invoke-AIOLangAtomicReplacement {
                 Clear-AIOLangFileHashCache -Path $DestinationPath
             }
             catch {
-                throw "Fallo el reemplazo: $($replacementError.Exception.Message). Restauracion incompleta de '$DestinationPath': $($_.Exception.Message). Original conservado en '$temporaryOld'."
+                throw (Get-AIOString 'errors.e240' -FormatArgs @(($replacementError.Exception.Message), $DestinationPath, ($_.Exception.Message), $temporaryOld))
             }
         }
         elseif (-not $hadDestination -and $replacementPublished) {
             try { Remove-Item -LiteralPath $DestinationPath -Force -ErrorAction Stop }
-            catch { throw "Fallo el reemplazo: $($replacementError.Exception.Message). No se pudo retirar el destino nuevo no verificado '$DestinationPath': $($_.Exception.Message)" }
+            catch { throw (Get-AIOString 'errors.e239' -FormatArgs @(($replacementError.Exception.Message), $DestinationPath, ($_.Exception.Message))) }
         }
         throw $replacementError
     }
@@ -4193,7 +4193,7 @@ function Convert-AIOLangEsdToWim {
     $temporary = Join-Path $ScratchPath 'install.converted.wim'
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
     $indexes = @(Get-AIOLangImageIndexes -ImagePath $EsdPath)
-    if ($indexes.Count -eq 0) { throw "No se encontraron indices en '$EsdPath'." }
+    if ($indexes.Count -eq 0) { throw (Get-AIOString 'errors.e425' -FormatArgs @($EsdPath)) }
 
     $position = 0
     foreach ($index in $indexes) {
@@ -4268,7 +4268,7 @@ function Get-AIOLangMountedPackageInventory {
             $identity = $null
         }
     }
-    if ($packages.Count -eq 0) { throw "DISM no devolvio un inventario CBS verificable para '$MountPath'." }
+    if ($packages.Count -eq 0) { throw (Get-AIOString 'errors.e045' -FormatArgs @($MountPath)) }
     return [object[]]$packages.ToArray()
 }
 
@@ -4482,10 +4482,10 @@ function Add-AIOLangPackageToImage {
     if ([System.IO.Path]::GetExtension($PackagePath) -ieq '.cab') {
         $info = Invoke-AIOLangDism -Arguments @("/Image:$MountPath", '/Get-PackageInfo', "/PackagePath:$PackagePath") -Context "$Context - comprobar aplicabilidad CBS" -Quiet
         $applicability = @($info.Output | Where-Object { [string]$_ -match '^\s*Applicable\s*:\s*(Yes|No)\s*$' })
-        if ($applicability.Count -ne 1) { throw "No se pudo determinar la aplicabilidad CBS de '$($Package.Name)' en '$MountPath'." }
+        if ($applicability.Count -ne 1) { throw (Get-AIOString 'errors.e484' -FormatArgs @(($Package.Name), $MountPath)) }
         if ([string]$applicability[0] -match ':\s*No\s*$') {
             Add-AIOLangOperation -Phase $script:AIOLangCurrentPhase -Context $Context -State 'NotApplicable' -Details @{ Package = $Package.Name; MountPath = $MountPath; Evidence = [string]$applicability[0] }
-            if (-not $AllowNotApplicable) { throw "CBS indica que '$($Package.Name)' no es aplicable a '$MountPath'." }
+            if (-not $AllowNotApplicable) { throw (Get-AIOString 'errors.e009' -FormatArgs @(($Package.Name), $MountPath)) }
             Write-Host (Get-AIOString 'lenguajes.skip_cbs_not_applicable' $Package.Name) -ForegroundColor DarkYellow
             return [pscustomobject]@{ Success = $true; State = 'NotApplicable'; ExitCode = 0 }
         }
@@ -4512,10 +4512,10 @@ function Add-AIOLangLanguagePacks {
 
     foreach ($package in $Packages | Sort-Object Locale, Name) {
         $payload = $Payloads | Where-Object { $_.Package.FilePath -eq $package.FilePath } | Select-Object -First 1
-        if (-not $payload) { throw "No se preparo el contenido de '$($package.Name)'." }
+        if (-not $payload) { throw (Get-AIOString 'errors.e462' -FormatArgs @(($package.Name))) }
         $context = "$ContextPrefix - paquete de idioma $($package.Locale)"
         $result = Add-AIOLangPackageToImage -MountPath $MountPath -Package $package -PackagePath $payload.PackagePath -Context $context
-        if (-not $result.Success) { throw "$context fallo." }
+        if (-not $result.Success) { throw (Get-AIOString 'errors.e644' -FormatArgs @($context)) }
     }
 }
 
@@ -4591,7 +4591,7 @@ function Assert-AIOLangInstalledPackages {
     }
 
     if ($missing.Count -gt 0) {
-        throw "La verificacion de paquetes detecto componentes ausentes: $($missing -join ', ')."
+        throw (Get-AIOString 'errors.e364' -FormatArgs @(($missing -join ', ')))
     }
     return [object[]]$results.ToArray()
 }
@@ -4698,9 +4698,9 @@ function Update-AIOLangWinREImage {
     )
 
     $winREImages = @(Get-AIOLangBootImageMetadata -BootWim $WinREPath)
-    if ($winREImages.Count -ne 1) { throw 'winre.wim debe contener exactamente un indice.' }
+    if ($winREImages.Count -ne 1) { throw (Get-AIOString 'errors.e642') }
     $descriptor = $winREImages[0]
-    if ($descriptor.Architecture -ne $Architecture) { throw 'La arquitectura de WinRE no coincide con install.wim.' }
+    if ($descriptor.Architecture -ne $Architecture) { throw (Get-AIOString 'errors.e295') }
     $Build = [int]$descriptor.Build
     # Microsoft: "Use languages from the Languages and Optional Features ISO,
     # not from the Windows 10 ADK, to localize WinRE." El ADK solo es fuente
@@ -4711,7 +4711,7 @@ function Update-AIOLangWinREImage {
         $_.Category -ne 'WinPE' -or ($pkgSource -ne 'ADK WinPE')
     })
     $packages = @(Get-AIOLangPackagesForImage -Inventory $winREInventory -Image $descriptor -Locales $Locales -Category 'WinPE')
-    if ($packages.Count -eq 0) { throw "No se encontraron paquetes WinPE compatibles para $Architecture / build $Build (deben provenir del repositorio/ISO de Languages and Optional Features, no del ADK)." }
+    if ($packages.Count -eq 0) { throw (Get-AIOString 'errors.e429' -FormatArgs @($Architecture, $Build)) }
 
     Mount-AIOLangImage -ImagePath $WinREPath -Index 1 -MountPath $MountPath -ScratchPath $ScratchPath -Context 'Montar winre.wim'
     $committed = $false
@@ -4831,7 +4831,7 @@ function Assert-AIOLangFileReparsePolicy {
 
     if (($Snapshot.AttributesValue -band [int][System.IO.FileAttributes]::ReparsePoint) -eq 0) { return }
     if ($null -eq $Snapshot.ReparseTag) {
-        throw "No se pudo identificar el punto de reanalisis de '${Path}': $($Snapshot.Errors -join ' | ')"
+        throw (Get-AIOString 'errors.e494' -FormatArgs @(${Path}, ($Snapshot.Errors -join ' | ')))
     }
     # WIM y WOF son filtros de almacenamiento, no enlaces que redirigen a
     # otra ruta. El filtro gestiona su materializacion durante la escritura.
@@ -4839,7 +4839,7 @@ function Assert-AIOLangFileReparsePolicy {
     $tagHex = '0x{0:X8}' -f [uint32]$Snapshot.ReparseTag
     $isDirectory = ($Snapshot.AttributesValue -band [int][System.IO.FileAttributes]::Directory) -ne 0
     if ($isDirectory -or $tagHex -notin @('0x80000008', '0x80000017')) {
-        throw "Punto de reanalisis no admitido para escritura: '$Path' (tag $tagHex)."
+        throw (Get-AIOString 'errors.e544' -FormatArgs @($Path, $tagHex))
     }
     Write-AIOLangLog -Level INFO -Message "Archivo respaldado por WIM/WOF admitido para copia: '$Path' (tag $tagHex)."
 }
@@ -4924,7 +4924,7 @@ function Invoke-AIOLangFileSecurityCommand {
     )
 
     $executable = Join-Path $script:AIOLangNativeSystemDirectory $Name
-    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw "No se encontro '$executable'." }
+    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw (Get-AIOString 'errors.e433' -FormatArgs @($executable)) }
     # En Windows PowerShell 5.1 stderr nativo puede producir ErrorRecord.
     # Capturarlo no debe impedir leer y comprobar el codigo real del proceso.
     $ErrorActionPreference = 'Continue'
@@ -4934,7 +4934,7 @@ function Invoke-AIOLangFileSecurityCommand {
     $exitCode = $global:LASTEXITCODE
     $detail = ($output | Out-String).Trim()
     Write-AIOLangLog -Level INFO -Message "Idiomas: $Name; codigo=$exitCode; $detail"
-    if ($null -eq $exitCode -or $exitCode -ne 0) { throw "Idiomas: $Name fallo con codigo '${exitCode}': $detail" }
+    if ($null -eq $exitCode -or $exitCode -ne 0) { throw (Get-AIOString 'errors.e286' -FormatArgs @($Name, ${exitCode}, $detail)) }
 }
 
 function Set-AIOLangCopyFileAttributes {
@@ -4966,7 +4966,7 @@ function Set-AIOLangCopyFileAttributes {
     [System.IO.File]::SetAttributes($Path, $toSet)
     $observed = [System.IO.File]::GetAttributes($Path)
     if (([int]$observed -band [int]$settableMask) -ne [int]$requested) {
-        throw "No se pudieron establecer los atributos editables '$requested' en '$Path'. Atributos observados: '$observed'."
+        throw (Get-AIOString 'errors.e467' -FormatArgs @($requested, $Path, $observed))
     }
 }
 
@@ -5001,11 +5001,11 @@ function Restore-AIOLangCopyFileSecurity {
     try {
         $restored = Get-AIOLangFileAccessSnapshot -Path $Path
         if ($restored.OwnerSid -ne $Original.OwnerSid -or $restored.Sddl -cne $Original.Sddl) {
-            throw 'La comprobacion de propietario/DACL no coincide con el respaldo original.'
+            throw (Get-AIOString 'errors.e308')
         }
     }
     catch { [void]$failures.Add($_.Exception.Message) }
-    if ($failures.Count -gt 0) { throw "No se pudo restaurar la seguridad de '${Path}': $($failures -join ' | ')" }
+    if ($failures.Count -gt 0) { throw (Get-AIOString 'errors.e508' -FormatArgs @(${Path}, ($failures -join ' | '))) }
 }
 
 function Copy-AIOLangProtectedFile {
@@ -5020,12 +5020,12 @@ function Copy-AIOLangProtectedFile {
     $attributesTouched = $false
     $copyError = $null
     try {
-        if (-not (Test-Path -LiteralPath $Source -PathType Leaf -ErrorAction Stop)) { throw "No existe el archivo Idiomas '$Source'." }
-        if (Test-Path -LiteralPath $Destination -PathType Container -ErrorAction Stop) { throw "El destino Idiomas es un directorio: '$Destination'." }
+        if (-not (Test-Path -LiteralPath $Source -PathType Leaf -ErrorAction Stop)) { throw (Get-AIOString 'errors.e391' -FormatArgs @($Source)) }
+        if (Test-Path -LiteralPath $Destination -PathType Container -ErrorAction Stop) { throw (Get-AIOString 'errors.e108' -FormatArgs @($Destination)) }
         $hadDestination = Test-Path -LiteralPath $Destination -PathType Leaf -ErrorAction Stop
         if ($hadDestination) {
             $original = Get-AIOLangFileAccessSnapshot -Path $Destination
-            if ($null -eq $original.AttributesValue) { throw "No se pudieron respaldar los atributos de '$Destination'." }
+            if ($null -eq $original.AttributesValue) { throw (Get-AIOString 'errors.e471' -FormatArgs @($Destination)) }
             if (($original.AttributesValue -band [int][System.IO.FileAttributes]::ReparsePoint) -ne 0) {
                 Assert-AIOLangFileReparsePolicy -Path $Destination -Snapshot $original
             }
@@ -5052,7 +5052,7 @@ function Copy-AIOLangProtectedFile {
                 Write-AIOLangFileCopyDiagnostic -Source $Source -Destination $Destination -Phase 'BeforePermissionRetry' -Message $_.Exception.Message -OriginalDestination $original
 
                 if (-not $original.Sddl -or -not $original.OwnerSid -or -not $original.AccessSddl) {
-                    throw "No se puede reintentar '$Destination': no se pudo respaldar su propietario/DACL. $($original.Errors -join ' | ')"
+                    throw (Get-AIOString 'errors.e524' -FormatArgs @($Destination, ($original.Errors -join ' | ')))
                 }
                 $securityTouched = $true
                 Invoke-AIOLangFileSecurityCommand -Name 'takeown.exe' -Arguments @('/F', $Destination, '/A')
@@ -5063,7 +5063,7 @@ function Copy-AIOLangProtectedFile {
             }
             $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256 -ErrorAction Stop).Hash
             $destinationHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256 -ErrorAction Stop).Hash
-            if ($sourceHash -ne $destinationHash) { throw "Verificacion SHA-256 fallida para el archivo Idiomas '$Destination'." }
+            if ($sourceHash -ne $destinationHash) { throw (Get-AIOString 'errors.e609' -FormatArgs @($Destination)) }
         }
         catch {
             $copyError = $_
@@ -5084,7 +5084,7 @@ function Copy-AIOLangProtectedFile {
             if ($restoreErrors.Count -gt 0) {
                 $copyDetail = if ($copyError) { " Error de copia: $($copyError.Exception.Message)." } else { '' }
                 # Una restauracion fallida impide commit aunque la copia funciono.
-                throw "Idiomas: fallo la restauracion de '${Destination}': $($restoreErrors -join ' | ').$copyDetail"
+                throw (Get-AIOString 'errors.e285' -FormatArgs @(${Destination}, ($restoreErrors -join ' | '), $copyDetail))
             }
         }
     }
@@ -5235,7 +5235,7 @@ function Get-AIOLangPayloadFileIndex {
 
     $root = [string]$Payload.ExtractRoot
     if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath $root -PathType Container)) {
-        throw "No existe el arbol extraido del payload de idioma '$($Payload.Locale)': '$root'."
+        throw (Get-AIOString 'errors.e390' -FormatArgs @(($Payload.Locale), $root))
     }
 
     $builders = @{}
@@ -5318,7 +5318,7 @@ function Copy-AIOLangMediaLangIniToBootImage {
 
     $source = Join-Path $MediaRoot 'sources\lang.ini'
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-        throw "No existe '$source'; no se puede sincronizar el selector de idioma de Windows Setup."
+        throw (Get-AIOString 'errors.e384' -FormatArgs @($source))
     }
     $destinationDirectory = Join-Path $MountPath 'sources'
     Initialize-AIOLangDirectory -Path $destinationDirectory
@@ -5360,7 +5360,7 @@ function Assert-AIOLangMountedWinPELocalization {
     $missingIntl = @($Locales | Where-Object { $_ -notin $intlLocales })
     $resourcesOnly = [bool]($missingIntl.Count -gt 0 -and $SetupImage -and $AllowSetupResourcesOnly)
     if ($missingIntl.Count -gt 0 -and -not $resourcesOnly) {
-        throw "${Context}: DISM /Get-Intl no reporta los idiomas $($missingIntl -join ', ')."
+        throw (Get-AIOString 'errors.e649' -FormatArgs @(${Context}, ($missingIntl -join ', ')))
     }
 
     $langIniLocales = @()
@@ -5370,7 +5370,7 @@ function Assert-AIOLangMountedWinPELocalization {
         $langIniLocales = @(Get-AIOLangLangIniLocalesFromPath -Path $langIni)
         $missingLangIni = @($Locales | Where-Object { $_ -notin $langIniLocales })
         if ($missingLangIni.Count -gt 0) {
-            throw "${Context}: sources\lang.ini interno no contiene $($missingLangIni -join ', ')."
+            throw (Get-AIOString 'errors.e655' -FormatArgs @(${Context}, ($missingLangIni -join ', ')))
         }
 
         $coreNames = [string[]]$script:AIOLangPolicy.SetupCoreMui
@@ -5382,7 +5382,7 @@ function Assert-AIOLangMountedWinPELocalization {
             else { @() }
             $coreFound = @($coreNames | Where-Object { Test-Path -LiteralPath (Join-Path $localeRoot $_) -PathType Leaf })
             if ($muiFiles.Count -eq 0 -or $coreFound.Count -eq 0) {
-                throw "${Context}: faltan recursos MUI esenciales de Windows Setup para $locale en '$localeRoot'."
+                throw (Get-AIOString 'errors.e652' -FormatArgs @(${Context}, $locale, $localeRoot))
             }
             [void]$resourceChecks.Add([pscustomobject]@{
                 Locale = $locale
@@ -5612,7 +5612,7 @@ function Merge-AIOLangPayloadIntoBootImage {
         }
 
         if ($coreCopied.Count -eq 0) {
-            throw "El paquete de idioma $($payload.Locale) no contiene recursos MUI esenciales de Setup compatibles con $Architecture."
+            throw (Get-AIOString 'errors.e181' -FormatArgs @(($payload.Locale), $Architecture))
         }
         if ($payload.Locale -notin $processedLocales) { [void]$processedLocales.Add($payload.Locale) }
     }
@@ -5842,9 +5842,9 @@ function Get-AIOLangMediaVerification {
     }
     else { $installImages }
 
-    if (@($selectedImages).Count -eq 0) { throw 'No se encontraron indices de install.wim para verificar.' }
+    if (@($selectedImages).Count -eq 0) { throw (Get-AIOString 'errors.e424') }
     if ($Indexes -and @($Indexes | Where-Object { $_ -notin @($selectedImages.ImageIndex) }).Count -gt 0) {
-        throw 'Faltan indices seleccionados en los metadatos de install.wim.'
+        throw (Get-AIOString 'errors.e262')
     }
     $imageLanguageChecks = New-Object System.Collections.Generic.List[object]
     foreach ($image in $selectedImages) {
@@ -6100,7 +6100,7 @@ function New-AIOLangDiagnosticBundle {
     try {
         $diagnosticFiles = @(Get-ChildItem -LiteralPath $folder -Force -ErrorAction Stop)
         if ($diagnosticFiles.Count -eq 0) {
-            throw 'La carpeta de diagnostico no contiene archivos.'
+            throw (Get-AIOString 'errors.e300')
         }
 
         if (Get-Command Compress-Archive -ErrorAction SilentlyContinue) {
@@ -6112,7 +6112,7 @@ function New-AIOLangDiagnosticBundle {
         }
 
         if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf) -or (Get-Item -LiteralPath $zipPath).Length -eq 0) {
-            throw 'El archivo ZIP de diagnostico no fue creado correctamente.'
+            throw (Get-AIOString 'errors.e096')
         }
     }
     catch {
@@ -6147,7 +6147,7 @@ function Invoke-AIOLangMediaIntegration {
     )
 
     if ($script:AIOLangMountedPaths.Count -gt 0 -and -not (Clear-AIOLangMountedImages)) {
-        throw "Hay montajes pendientes de una sesion anterior: $($script:AIOLangMountedPaths -join ', ')."
+        throw (Get-AIOString 'errors.e282' -FormatArgs @(($script:AIOLangMountedPaths -join ', ')))
     }
     $started = Get-Date
     $script:AIOLangOperationLog = New-Object System.Collections.ArrayList
@@ -6205,7 +6205,7 @@ function Invoke-AIOLangMediaIntegration {
     $installImage = Get-AIOLangInstallImagePath -MediaRoot $MediaRoot
     try {
         Assert-AIOLangNoMountedImages
-        if (-not (Test-AIOLangMediaWritable -MediaRoot $MediaRoot)) { throw "El medio '$MediaRoot' no permite escritura." }
+        if (-not (Test-AIOLangMediaWritable -MediaRoot $MediaRoot)) { throw (Get-AIOString 'errors.e163' -FormatArgs @($MediaRoot)) }
 
         # El respaldo debe existir antes de cualquier extraccion de payloads o
         # normalizacion de recursos. Aunque esas operaciones usan la sesion
@@ -6234,7 +6234,7 @@ function Invoke-AIOLangMediaIntegration {
         foreach ($locale in $Locales) {
             $setupPackage = Get-AIOLangBestPackage -Packages $Inventory -Locale $locale -Architecture $setupDescriptor.Architecture -Build $setupDescriptor.Build -Category 'LanguagePack' -ProductFamily $mediaProductFamily -ServicingBuilds (Get-AIOLangImageServicingBuilds -Image $setupDescriptor)
             if (-not $setupPackage) {
-                throw "Falta el paquete $locale compatible con la arquitectura de Setup $($setupDescriptor.Architecture) / build $($setupDescriptor.Build)."
+                throw (Get-AIOString 'errors.e257' -FormatArgs @($locale, ($setupDescriptor.Architecture), ($setupDescriptor.Build)))
             }
             if ($setupPackage.FilePath -notin @($languagePackages | ForEach-Object { $_.FilePath })) { [void]$languagePackages.Add($setupPackage) }
         }
@@ -6294,21 +6294,21 @@ function Invoke-AIOLangMediaIntegration {
         $verification = Get-AIOLangMediaVerification -MediaRoot $MediaRoot -InstallWim $installImage -Locales $Locales -DefaultLocale $DefaultLocale -Indexes $verificationIndexes
         $missingPayload = @($verification.PayloadChecks | Where-Object { -not $_.SourcesFolder -or -not $_.SourcesPopulated })
         if ($missingPayload.Count -gt 0) {
-            throw "Faltan recursos localizados de Setup para: $(@($missingPayload.Locale) -join ', ')."
+            throw (Get-AIOString 'errors.e264' -FormatArgs @((@($missingPayload.Locale) -join ', ')))
         }
-        if (-not $verification.LangIniPresent) { throw 'No se genero sources\lang.ini.' }
+        if (-not $verification.LangIniPresent) { throw (Get-AIOString 'errors.e457') }
         if (@($verification.MissingLangIniLocales).Count -gt 0) {
-            throw "sources\lang.ini no contiene: $(@($verification.MissingLangIniLocales) -join ', ')."
+            throw (Get-AIOString 'errors.e631' -FormatArgs @((@($verification.MissingLangIniLocales) -join ', ')))
         }
         if (-not $verification.DefaultInLangIni) {
-            throw "El idioma predeterminado '$DefaultLocale' no aparece en sources\lang.ini."
+            throw (Get-AIOString 'errors.e128' -FormatArgs @($DefaultLocale))
         }
         $failedLanguageChecks = @($verification.ImageLanguageChecks | Where-Object { -not $_.Complete })
         if ($failedLanguageChecks.Count -gt 0) {
             $details = @($failedLanguageChecks | ForEach-Object {
                 "indice $($_.ImageIndex): $(@($_.MissingLanguages) -join ', ')"
             }) -join '; '
-            throw "La verificacion de install.wim detecto idiomas ausentes en $details."
+            throw (Get-AIOString 'errors.e362' -FormatArgs @($details))
         }
 
 		Write-Host "`n=======================================================" -ForegroundColor DarkCyan
@@ -6469,7 +6469,7 @@ function Start-AIOLangIntegrationWizard {
     $scanRoot = $null
     [void](Initialize-AIOLangTerminalState)
     try {
-        if (-not (Test-AIOLangAdministrator)) { throw 'Ejecuta AdminImagenOffline como Administrador.' }
+        if (-not (Test-AIOLangAdministrator)) { throw (Get-AIOString 'errors.e082') }
         $adkInfo = Initialize-AIOLangServicingEnvironment
         Assert-AIOLangNoMountedImages
 
@@ -6477,7 +6477,7 @@ function Start-AIOLangIntegrationWizard {
         if (-not $mediaRoot) { return }
         $mediaRoot = (Resolve-Path -LiteralPath $mediaRoot -ErrorAction Stop).Path
         $script:AIOLangLastTerminalState.MediaRoot = $mediaRoot
-        if (-not (Test-Path -LiteralPath (Join-Path $mediaRoot 'sources') -PathType Container)) { throw 'La carpeta seleccionada no contiene el directorio sources.' }
+        if (-not (Test-Path -LiteralPath (Join-Path $mediaRoot 'sources') -PathType Container)) { throw (Get-AIOString 'errors.e302') }
         $installImage = Get-AIOLangInstallImagePath -MediaRoot $mediaRoot
         $bootWim = Join-Path $mediaRoot 'sources\boot.wim'
 
@@ -6719,7 +6719,10 @@ function Start-AIOLangIntegrationWizard {
         Write-Host (Get-AIOString 'lenguajes.plan_single' $exportSingle) -ForegroundColor White
         Write-Host (Get-AIOString 'lenguajes.plan_backup') -ForegroundColor White
         Write-Host ''
-        $start = (Read-MenuOption (Get-AIOString 'actualizaciones.start_prompt')).Trim().ToUpperInvariant()
+        $startItems = @(
+            @{ Value = 'I'; Label = (Get-AIOString 'actualizaciones.start_opt'); Color = 'Green'; SpaceAfter = $true }
+        )
+        $start = ([string](Show-AIOConsoleMenu -Items $startItems -AllowBack -BackValue 'V')).Trim().ToUpperInvariant()
         if ($start -ne 'I') {
             $script:AIOLangLastTerminalState.Status = 'Cancelled'
             $script:AIOLangLastTerminalState.Phase = 'Confirmacion del plan'
@@ -6767,14 +6770,23 @@ function Show-LanguageIntegrator-Menu {
         Write-Host (Get-AIOString 'lenguajes.menu_title') -ForegroundColor Cyan
         Write-Host '=======================================================' -ForegroundColor Cyan
         Write-Host ''
-        Write-Host (Get-AIOString 'lenguajes.menu_opt1') -ForegroundColor Green
-        Write-Host (Get-AIOString 'lenguajes.menu_opt1_desc') -ForegroundColor Gray
-        Write-Host ''
-        Write-Host (Get-AIOString 'lenguajes.menu_opt2') -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'lenguajes.menu_opt2_desc') -ForegroundColor Gray
-        Write-Host ''
-        Write-Host (Get-AIOString 'lenguajes.menu_back') -ForegroundColor Red
-        $choice = (Read-MenuOption ("`n" + (Get-AIOString 'common.select_option'))).Trim().ToUpperInvariant()
+        $langMenuItems = @(
+            @{
+                Value      = '1'
+                Label      = (Get-AIOString 'lenguajes.menu_opt1')
+                Color      = 'Green'
+                Details    = @(@{ Text = (Get-AIOString 'lenguajes.menu_opt1_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '2'
+                Label      = (Get-AIOString 'lenguajes.menu_opt2')
+                Color      = 'Yellow'
+                Details    = @(@{ Text = (Get-AIOString 'lenguajes.menu_opt2_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+        )
+        $choice = ([string](Show-AIOConsoleMenu -Items $langMenuItems -AllowBack -BackValue 'V')).Trim().ToUpperInvariant()
         switch ($choice) {
             '1' { Start-AIOLangIntegrationWizard }
             '2' { Show-AIOLangRestoreMenu }

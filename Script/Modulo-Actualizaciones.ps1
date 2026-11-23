@@ -666,7 +666,7 @@ function Initialize-AIOUpdateServicingEnvironment {
     }
 
     if (-not (Test-Path -LiteralPath $selectedPath -PathType Leaf)) {
-        throw 'No se encontro una herramienta DISM valida en Windows ni en el ADK.'
+        throw (Get-AIOString 'errors.e448')
     }
 
     $script:AIOUpdateDismPath = $selectedPath
@@ -681,7 +681,7 @@ function Initialize-AIOUpdateServicingEnvironment {
     $probe = Invoke-AIOUpdateDism -Arguments @('/Get-MountedImageInfo') -Context 'Comprobar DISM activo' -SuccessCodes @(0) -Quiet
     $nativeVersion = $null
     foreach ($line in $probe.Output) { if ([string]$line -match '^Version:\s*(\d+\.\d+\.\d+\.\d+)') { $nativeVersion = [version]$Matches[1]; break } }
-    if (-not $nativeVersion) { throw "No se pudo confirmar la version nativa del DISM seleccionado. Registro DISM: $($probe.LogPath)" }
+    if (-not $nativeVersion) { throw (Get-AIOString 'errors.e479' -FormatArgs @(($probe.LogPath))) }
     $adkInfo | Add-Member -NotePropertyName ExecutableFileVersion -NotePropertyValue $selectedVersion -Force
     $adkInfo.ActiveDismVersion = $nativeVersion
     $selectedVersion = $nativeVersion
@@ -1008,7 +1008,7 @@ function Copy-AIOUpdateFileVerified {
         $destinationStream.Flush($true)
         $destinationStream.Dispose(); $destinationStream = $null
         $sourceStream.Dispose(); $sourceStream = $null
-        if ($length -ne [int64]$sourceItem.Length) { throw "La copia de '$Source' no coincide en tamano." }
+        if ($length -ne [int64]$sourceItem.Length) { throw (Get-AIOString 'errors.e312' -FormatArgs @($Source)) }
 
         if (Test-Path -LiteralPath $Destination -PathType Leaf) {
             [System.IO.File]::Replace($temporary, $Destination, $null)
@@ -1022,7 +1022,7 @@ function Copy-AIOUpdateFileVerified {
         $sourceKey = Get-AIOUpdateFileCacheKey -Path $Source
         $script:AIOUpdateFileHashCache[$sourceKey] = $sourceHash
         $destinationHash = Get-AIOUpdateFileSha256 -Path $Destination
-        if ($sourceHash -ne $destinationHash) { throw "La copia de '$Source' no coincide por SHA-256." }
+        if ($sourceHash -ne $destinationHash) { throw (Get-AIOString 'errors.e313' -FormatArgs @($Source)) }
         return [pscustomobject]@{ SHA256 = $sourceHash; Length = $length; Destination = $Destination }
     }
     finally {
@@ -1099,7 +1099,7 @@ function Get-AIOUpdateFileSha256 {
     $script:AIOUpdateOptimizationStats.HashCacheMisses++
     $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
     if ([string]::IsNullOrWhiteSpace([string]$hash) -or $hash -notmatch '^[A-Fa-f0-9]{64}$') {
-        throw "No se pudo obtener un SHA-256 valido para '$Path'."
+        throw (Get-AIOString 'errors.e505' -FormatArgs @($Path))
     }
     $normalized = $hash.ToUpperInvariant()
     $script:AIOUpdateFileHashCache[$key] = $normalized
@@ -1266,7 +1266,7 @@ function New-AIOUpdatePreflightBackup {
 
     $files = @(Get-AIOUpdatePreflightBackupFiles -MediaRoot $media -IncludeSetupSurface:$IncludeSetupSurface)
     if ($files.Count -eq 0) {
-        throw 'No se encontraron archivos del medio para crear el respaldo previo.'
+        throw (Get-AIOString 'errors.e421')
     }
 
     [int64]$totalBytes = 0
@@ -1283,7 +1283,7 @@ function New-AIOUpdatePreflightBackup {
             [int64]$reserve = [math]::Max([int64](2GB), [int64]($criticalBytes + ($totalBytes * 0.20)))
             [int64]$required = $totalBytes + $reserve
             if ($drive.AvailableFreeSpace -lt $required) {
-                throw ("Espacio insuficiente para el respaldo previo. Requerido aproximado: {0:N2} GB; disponible: {1:N2} GB." -f ($required / 1GB), ($drive.AvailableFreeSpace / 1GB))
+                throw (Get-AIOString 'errors.e_upd_preflight_space' -FormatArgs @(($required / 1GB), ($drive.AvailableFreeSpace / 1GB)))
             }
         }
         catch {
@@ -1337,7 +1337,7 @@ function New-AIOUpdatePreflightBackup {
     $filesIndexSha256 = Get-AIOUpdateFilesIndexSha256 -Records ([object[]]$records.ToArray())
     $trustedLocales = @(Get-AIOUpdateLocalesFromLangIniPath -Path (Join-Path $media 'sources\lang.ini'))
     if ($IncludeSetupSurface -and $trustedLocales.Count -eq 0) {
-        throw 'No se pudo derivar una lista confiable de idiomas desde sources\lang.ini; no se continuara con una superficie Setup modificable.'
+        throw (Get-AIOString 'errors.e481')
     }
     $manifest = [pscustomobject]@{
         SchemaVersion       = 3
@@ -1364,7 +1364,7 @@ function New-AIOUpdatePreflightBackup {
         [int]$writtenManifest.FormatVersion -ne 3 -or
         [string]$writtenManifest.FilesIndexSha256 -ne $filesIndexSha256 -or
         [int]$writtenManifest.HashedFileCount -ne $records.Count) {
-        throw 'El manifest.json del respaldo no supero la verificacion posterior a escritura.'
+        throw (Get-AIOString 'errors.e143')
     }
 
     Remove-Item -LiteralPath $incompletePath -Force -ErrorAction Stop
@@ -1467,11 +1467,11 @@ function Initialize-AIOUpdatePreflightRuntimeIndex {
         }
 
         if ([int]$manifest.SchemaVersion -ne 3 -or [int]$manifest.FormatVersion -ne 3) {
-            throw 'El indice de ejecucion solo admite manifiestos Preflight 3/3.'
+            throw (Get-AIOString 'errors.e130')
         }
         $trustedLocales = @($manifest.TrustedLocales | ForEach-Object { ([string]$_).ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
         if ([bool]$Context.IncludeSetupSurface -and $trustedLocales.Count -eq 0) {
-            throw 'El manifiesto Preflight 3/3 no contiene TrustedLocales para filtrar SetupDU.'
+            throw (Get-AIOString 'errors.e149')
         }
         foreach ($locale in $trustedLocales) { $script:AIOUpdateTrustedLocales[$locale] = $true }
         foreach ($surfaceName in @('Sources', 'Boot', 'EfiBoot')) {
@@ -1703,7 +1703,7 @@ function Invoke-AIOUpdateAtomicReplacement {
     )
 
     if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
-        throw "${Context}: no existe el archivo de reemplazo '$Source'."
+        throw (Get-AIOString 'errors.e653' -FormatArgs @(${Context}, $Source))
     }
     $destinationDirectory = Split-Path -Parent $Destination
     Initialize-AIOUpdateDirectory -Path $destinationDirectory
@@ -1745,7 +1745,7 @@ function Invoke-AIOUpdateAtomicReplacement {
         }
         if ($originalMoved) {
             try {
-                if (-not (Test-Path -LiteralPath $rollbackPath -PathType Leaf)) { throw "No se encontro el original '$rollbackPath'." }
+                if (-not (Test-Path -LiteralPath $rollbackPath -PathType Leaf)) { throw (Get-AIOString 'errors.e438' -FormatArgs @($rollbackPath)) }
                 Move-Item -LiteralPath $rollbackPath -Destination $Destination -Force -ErrorAction Stop
                 $originalMoved = $false
             }
@@ -1771,16 +1771,16 @@ function Resolve-AIOUpdatePreflightRoot {
 
     $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path.TrimEnd('\')
     if ((Split-Path -Leaf $resolved) -ine 'Preflight') {
-        throw "Selecciona directamente la carpeta 'Preflight' del respaldo actual."
+        throw (Get-AIOString 'errors.e578')
     }
 
     $manifestPath = Join-Path $resolved 'manifest.json'
     $mirrorRoot = Join-Path $resolved 'Media'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-        throw "La carpeta seleccionada no contiene el manifest.json actual: '$resolved'."
+        throw (Get-AIOString 'errors.e303' -FormatArgs @($resolved))
     }
     if (-not (Test-Path -LiteralPath $mirrorRoot -PathType Container)) {
-        throw "La carpeta seleccionada no contiene la estructura actual 'Preflight\Media': '$resolved'."
+        throw (Get-AIOString 'errors.e304' -FormatArgs @($resolved))
     }
 
     return $resolved
@@ -1797,7 +1797,7 @@ function Read-AIOUpdatePreflightManifest {
     $incomplete = Join-Path $root 'BACKUP_INCOMPLETO.txt'
 
     if (Test-Path -LiteralPath $incomplete -PathType Leaf) {
-        throw "El respaldo Preflight esta marcado como incompleto: '$root'."
+        throw (Get-AIOString 'errors.e194' -FormatArgs @($root))
     }
 
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -1809,46 +1809,46 @@ function Read-AIOUpdatePreflightManifest {
     )
     foreach ($propertyName in $requiredProperties) {
         if (-not $manifest.PSObject.Properties[$propertyName]) {
-            throw "El manifiesto Preflight no contiene la propiedad obligatoria '$propertyName'."
+            throw (Get-AIOString 'errors.e155' -FormatArgs @($propertyName))
         }
     }
 
     $schema = [int]$manifest.SchemaVersion
     $format = [int]$manifest.FormatVersion
     if ($schema -ne 3 -or $format -ne 3) {
-        throw "Respaldo no compatible: se requiere SchemaVersion/FormatVersion 3/3 y se recibio $schema/$format. Los respaldos anteriores deben recrearse."
+        throw (Get-AIOString 'errors.e559' -FormatArgs @($schema, $format))
     }
     if ([string]$manifest.Structure -cne 'Preflight\Media') {
-        throw "La estructura del respaldo no es valida: se requiere 'Preflight\Media'."
+        throw (Get-AIOString 'errors.e328')
     }
     if ([string]::IsNullOrWhiteSpace([string]$manifest.MediaRoot)) {
-        throw 'El manifiesto Preflight no contiene MediaRoot.'
+        throw (Get-AIOString 'errors.e153')
     }
     $createdAt = [datetimeoffset]::MinValue
     if (-not [datetimeoffset]::TryParse([string]$manifest.CreatedAt, [ref]$createdAt)) {
-        throw 'El manifiesto Preflight contiene una fecha CreatedAt invalida.'
+        throw (Get-AIOString 'errors.e150')
     }
     if (-not $manifest.Files -or @($manifest.Files).Count -eq 0) {
-        throw 'El manifiesto Preflight no contiene archivos.'
+        throw (Get-AIOString 'errors.e154')
     }
     if ([int]$manifest.FileCount -ne @($manifest.Files).Count) {
-        throw 'FileCount no coincide con la lista Files del manifiesto Preflight.'
+        throw (Get-AIOString 'errors.e266')
     }
     if ([string]$manifest.HashAlgorithm -cne 'SHA256' -or [string]$manifest.HashCoverage -cne 'AllFiles') {
-        throw 'El manifiesto no declara cobertura SHA256 para todos los archivos.'
+        throw (Get-AIOString 'errors.e161')
     }
     if ([string]$manifest.LocalePolicy -cne 'LangIni') {
-        throw 'El manifiesto no declara la politica de idiomas LangIni.'
+        throw (Get-AIOString 'errors.e162')
     }
 
     $trustedLocales = @($manifest.TrustedLocales | ForEach-Object { ([string]$_).ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
     foreach ($locale in $trustedLocales) {
         if ($locale -notmatch '^(?i)[a-z]{2,3}-[a-z0-9]{2,8}(?:-[a-z0-9]{2,8})?$') {
-            throw "El manifiesto contiene un idioma confiable invalido: '$locale'."
+            throw (Get-AIOString 'errors.e156' -FormatArgs @($locale))
         }
     }
     if ([bool]$manifest.IncludeSetupSurface -and $trustedLocales.Count -eq 0) {
-        throw 'El manifiesto no contiene idiomas confiables para la superficie Setup.'
+        throw (Get-AIOString 'errors.e160')
     }
 
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -1856,41 +1856,41 @@ function Read-AIOUpdatePreflightManifest {
     foreach ($record in @($manifest.Files)) {
         foreach ($propertyName in @('RelativePath', 'Length', 'LastWriteTimeUtc', 'SHA256')) {
             if (-not $record.PSObject.Properties[$propertyName]) {
-                throw "Un registro de archivos no contiene la propiedad obligatoria '$propertyName'."
+                throw (Get-AIOString 'errors.e602' -FormatArgs @($propertyName))
             }
         }
         $relative = [string]$record.RelativePath
         if ([string]::IsNullOrWhiteSpace($relative) -or [System.IO.Path]::IsPathRooted($relative) -or
             (@($relative -split '[\\/]' | Where-Object { $_ -eq '..' }).Count -gt 0)) {
-            throw "El manifiesto Preflight contiene una ruta invalida: '$relative'."
+            throw (Get-AIOString 'errors.e152' -FormatArgs @($relative))
         }
         if (-not $seen.Add($relative)) {
-            throw "El manifiesto Preflight contiene una ruta duplicada: '$relative'."
+            throw (Get-AIOString 'errors.e151' -FormatArgs @($relative))
         }
         if ($null -eq $record.Length -or [int64]$record.Length -lt 0) {
-            throw "El registro '$relative' no contiene una longitud valida."
+            throw (Get-AIOString 'errors.e188' -FormatArgs @($relative))
         }
         $hash = [string]$record.SHA256
         if ($hash -notmatch '^[A-Fa-f0-9]{64}$') {
-            throw "El registro '$relative' no contiene un SHA-256 valido."
+            throw (Get-AIOString 'errors.e187' -FormatArgs @($relative))
         }
         $declaredBytes += [int64]$record.Length
     }
 
     if ([int64]$manifest.TotalBytes -ne $declaredBytes) {
-        throw 'TotalBytes no coincide con la suma de los registros Files.'
+        throw (Get-AIOString 'errors.e601')
     }
     if ([int]$manifest.HashedFileCount -ne @($manifest.Files).Count) {
-        throw 'HashedFileCount no coincide con la lista Files.'
+        throw (Get-AIOString 'errors.e277')
     }
     $indexHash = Get-AIOUpdateFilesIndexSha256 -Records @($manifest.Files)
     if ($indexHash -ne [string]$manifest.FilesIndexSha256) {
-        throw 'FilesIndexSha256 no coincide con el contenido del manifiesto.'
+        throw (Get-AIOString 'errors.e267')
     }
 
     $mirrorRoot = Join-Path $root 'Media'
     if (-not (Test-Path -LiteralPath $mirrorRoot -PathType Container)) {
-        throw "No existe la carpeta Media del respaldo: '$mirrorRoot'."
+        throw (Get-AIOString 'errors.e399' -FormatArgs @($mirrorRoot))
     }
 
     return [pscustomobject]@{
@@ -1980,7 +1980,7 @@ function Restore-AIOUpdatePreflightBackup {
 
     $validation = Test-AIOUpdatePreflightBackup -PreflightRoot $PreflightRoot -Scope $Scope
     if (-not $validation.Success) {
-        throw "El respaldo Preflight no supero la validacion: $($validation.Errors -join ' ')"
+        throw (Get-AIOString 'errors.e195' -FormatArgs @(($validation.Errors -join ' ')))
     }
 
     $manifest = $validation.Manifest
@@ -1991,11 +1991,11 @@ function Restore-AIOUpdatePreflightBackup {
         (Resolve-Path -LiteralPath ([string]$manifest.MediaRoot) -ErrorAction Stop).Path.TrimEnd('\')
     }
     else {
-        throw 'El medio original ya no existe. Especifica TargetMediaRoot.'
+        throw (Get-AIOString 'errors.e168')
     }
 
     if (-not (Test-AIOUpdateMediaWritable -MediaRoot $target)) {
-        throw "El destino de restauracion no es escribible: '$target'."
+        throw (Get-AIOString 'errors.e111' -FormatArgs @($target))
     }
 
     $records = @($manifest.Files)
@@ -2005,7 +2005,7 @@ function Restore-AIOUpdatePreflightBackup {
         'Setup'      { $records = @($records | Where-Object { $_.RelativePath -notin @('sources\install.wim', 'sources\boot.wim') }) }
     }
     if ($records.Count -eq 0) {
-        throw "El respaldo no contiene archivos para el alcance '$Scope'."
+        throw (Get-AIOString 'errors.e207' -FormatArgs @($Scope))
     }
 
     $started = Get-Date
@@ -2043,12 +2043,12 @@ function Restore-AIOUpdatePreflightBackup {
                 param($path)
                 $file = Get-Item -LiteralPath $path -ErrorAction Stop
                 if ([int64]$file.Length -ne $expectedLength) {
-                    throw "La restauracion de '$relative' no coincide en tamano."
+                    throw (Get-AIOString 'errors.e350' -FormatArgs @($relative))
                 }
                 if (-not [string]::IsNullOrWhiteSpace($expectedHash)) {
                     $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash
                     if ($hash -ne $expectedHash) {
-                        throw "La restauracion de '$relative' no coincide por SHA-256."
+                        throw (Get-AIOString 'errors.e351' -FormatArgs @($relative))
                     }
                 }
             }.GetNewClosure()
@@ -2240,7 +2240,7 @@ function Invoke-AIOUpdateDism {
     )
 
     if (-not (Test-Path -LiteralPath $script:AIOUpdateDismPath -PathType Leaf)) {
-        throw "No se encontro DISM en '$script:AIOUpdateDismPath'."
+        throw (Get-AIOString 'errors.e434' -FormatArgs @($script:AIOUpdateDismPath))
     }
 
     $safeContext = ($Context -replace '[^A-Za-z0-9_.-]', '_')
@@ -2301,7 +2301,7 @@ function Invoke-AIOUpdateDism {
         $process.StartInfo = $startInfo
 
         if (-not $process.Start()) {
-            throw 'System.Diagnostics.Process.Start() devolvio False.'
+            throw (Get-AIOString 'errors.e594')
         }
         $processStarted = $true
 
@@ -2650,7 +2650,7 @@ function Get-AIOUpdateCachedWimFile {
     $identity = '{0}|{1}|{2}|{3}' -f $file.FullName.ToLowerInvariant(), $file.Length, $file.LastWriteTimeUtc.Ticks, $Index
     $root = Join-Path (Join-Path $StagingRoot 'RecoveryDependencyCache') (Get-AIOUpdateTextSha256 -Text $identity)
     $relative = $ImagePath.Replace('/', '\').TrimStart('\')
-    if ($relative -match '(^|\\)\.{1,2}(\\|$)' -or $relative -match '[:*?"<>|\x00-\x1f]' -or -not $relative) { throw 'Ruta interna WIM no valida.' }
+    if ($relative -match '(^|\\)\.{1,2}(\\|$)' -or $relative -match '[:*?"<>|\x00-\x1f]' -or -not $relative) { throw (Get-AIOString 'errors.e562') }
     $destination = Join-Path $root $relative
     if (-not $script:AIOUpdateExtractedFileCache) { $script:AIOUpdateExtractedFileCache = @{} }
     if ($script:AIOUpdateExtractedFileCache.ContainsKey($destination) -and (Test-Path -LiteralPath $destination -PathType Leaf)) {
@@ -2724,7 +2724,7 @@ function Invoke-AIOUpdateWimExtractPath {
         [ValidateRange(1, 2147483647)] [int]$Index = 1
     )
     $relative = $ImagePath.Replace('\', '/').TrimStart('/')
-    if (-not $relative -or $relative -match '(^|/)\.{1,2}(/|$)' -or $relative -match '[:*?"<>|\x00-\x1f]') { throw 'Ruta interna WIM no valida.' }
+    if (-not $relative -or $relative -match '(^|/)\.{1,2}(/|$)' -or $relative -match '[:*?"<>|\x00-\x1f]') { throw (Get-AIOString 'errors.e562') }
     $work = Join-Path $TemporaryPath ('WimExtract_' + [guid]::NewGuid().ToString('N'))
     Initialize-AIOUpdateDirectory -Path $work
     Initialize-AIOUpdateDirectory -Path (Split-Path -Parent $DestinationPath)
@@ -2745,10 +2745,10 @@ function Invoke-AIOUpdateWimExtractPath {
         Remove-Item -LiteralPath $extracted -Force -ErrorAction SilentlyContinue
         if (-not (Initialize-AIOUpdateWimApi)) { return $false }
         $hWim = [AIOUpdate.WimNative]::OpenRead($WimPath, [ref]$creationResult)
-        if ($hWim -eq [IntPtr]::Zero) { throw "WIMCreateFile fallo con Win32=$([AIOUpdate.WimNative]::LastError)." }
-        if ([AIOUpdate.WimNative]::WIMSetTemporaryPath($hWim, $work) -eq 0) { throw "WIMSetTemporaryPath fallo con Win32=$([AIOUpdate.WimNative]::LastError)." }
+        if ($hWim -eq [IntPtr]::Zero) { throw (Get-AIOString 'errors.e612' -FormatArgs @(([AIOUpdate.WimNative]::LastError))) }
+        if ([AIOUpdate.WimNative]::WIMSetTemporaryPath($hWim, $work) -eq 0) { throw (Get-AIOString 'errors.e614' -FormatArgs @(([AIOUpdate.WimNative]::LastError))) }
         $hImage = [AIOUpdate.WimNative]::WIMLoadImage($hWim, [uint32]$Index)
-        if ($hImage -eq [IntPtr]::Zero) { throw "WIMLoadImage fallo con Win32=$([AIOUpdate.WimNative]::LastError)." }
+        if ($hImage -eq [IntPtr]::Zero) { throw (Get-AIOString 'errors.e613' -FormatArgs @(([AIOUpdate.WimNative]::LastError))) }
         foreach ($candidate in @($relative.Replace('/', '\'), ('\' + $relative.Replace('/', '\')))) {
             Remove-Item -LiteralPath $extracted -Force -ErrorAction SilentlyContinue
             if ([AIOUpdate.WimNative]::WIMExtractImagePath($hImage, $candidate, $extracted, 0) -ne 0 -and
@@ -2910,7 +2910,7 @@ function Assert-AIOUpdateNoMountedImages {
     [CmdletBinding()]
     param()
     $mounted = @(Get-AIOUpdateNativeMountedImages)
-    if ($mounted.Count) { throw "Hay imagenes montadas por DISM: $(($mounted.Path) -join ', '). Desmonta esos montajes antes de continuar." }
+    if ($mounted.Count) { throw (Get-AIOString 'errors.e279' -FormatArgs @((($mounted.Path) -join ', '))) }
 }
 
 function Test-AIOUpdateMediaWritable {
@@ -3245,7 +3245,7 @@ function Get-AIOUpdateCbsRootIdentity {
         $reader = [System.Xml.XmlReader]::Create($inputReader, $settings)
         [void]$reader.MoveToContent()
         if ($reader.NodeType -ne [System.Xml.XmlNodeType]::Element -or $reader.LocalName -ne 'assembly') {
-            throw 'El manifiesto CBS no comienza con assembly.'
+            throw (Get-AIOString 'errors.e148')
         }
         $rootDepth = $reader.Depth
         while ($reader.Read()) {
@@ -3256,7 +3256,7 @@ function Get-AIOUpdateCbsRootIdentity {
             $token = [string]$reader.GetAttribute('publicKeyToken')
             $architecture = [string]$reader.GetAttribute('processorArchitecture')
             if (-not $name -or -not $token -or -not $architecture -or -not [version]::TryParse($reader.GetAttribute('version'), [ref]$version)) {
-                throw 'La identidad raiz CBS no tiene nombre, token, arquitectura o version validos.'
+                throw (Get-AIOString 'errors.e337')
             }
             $language = [string]$reader.GetAttribute('language')
             if ($language -in @('neutral', '*')) { $language = '' }
@@ -3910,11 +3910,11 @@ function Get-AIOUpdateLcuFamilyKey {
         $info.Source = 'Arquitectura declarada en inventario'
     }
     if ($architectures.Count -ne 1) {
-        throw "No se puede preparar la cadena LCU de '$($Package.Name)': falta una arquitectura objetivo unica y fiable."
+        throw (Get-AIOString 'errors.e521' -FormatArgs @(($Package.Name)))
     }
     $version = $null
     if (-not $Package.VersionReliable -or -not [version]::TryParse([string]$Package.Version, [ref]$version) -or $version.Build -lt [int]$script:AIOUpdatePolicy.MinimumRecognizedCbsBuild) {
-        throw "No se puede preparar la cadena LCU de '$($Package.Name)': falta una version CBS fiable."
+        throw (Get-AIOString 'errors.e522' -FormatArgs @(($Package.Name)))
     }
     $Package | Add-Member -NotePropertyName Architectures -NotePropertyValue ([string[]]$architectures) -Force
     $Package | Add-Member -NotePropertyName ArchitectureSource -NotePropertyValue $info.Source -Force
@@ -4245,7 +4245,7 @@ function Clear-AIOUpdateFileProtectionAttributes {
 
     $original = Get-AIOUpdateFileAccessSnapshot -Path $Path
     try {
-        if ($null -eq $original.AttributesValue) { throw "No se pudieron leer los atributos de '$Path'." }
+        if ($null -eq $original.AttributesValue) { throw (Get-AIOString 'errors.e468' -FormatArgs @($Path)) }
         if (($original.AttributesValue -band [int][System.IO.FileAttributes]::ReparsePoint) -ne 0) {
             Assert-AIOUpdateFileReparsePolicy -Path $Path -Snapshot $original
         }
@@ -4348,7 +4348,7 @@ function Assert-AIOUpdateFileReparsePolicy {
 
     if (($Snapshot.AttributesValue -band [int][System.IO.FileAttributes]::ReparsePoint) -eq 0) { return }
     if ($null -eq $Snapshot.ReparseTag) {
-        throw "No se pudo identificar el punto de reanalisis de '${Path}': $($Snapshot.Errors -join ' | ')"
+        throw (Get-AIOString 'errors.e494' -FormatArgs @(${Path}, ($Snapshot.Errors -join ' | ')))
     }
     # WIM y WOF son filtros de almacenamiento, no enlaces que redirigen a
     # otra ruta. El filtro gestiona su materializacion durante la escritura.
@@ -4356,7 +4356,7 @@ function Assert-AIOUpdateFileReparsePolicy {
     $tagHex = '0x{0:X8}' -f [uint32]$Snapshot.ReparseTag
     $isDirectory = ($Snapshot.AttributesValue -band [int][System.IO.FileAttributes]::Directory) -ne 0
     if ($isDirectory -or $tagHex -notin @('0x80000008', '0x80000017')) {
-        throw "Punto de reanalisis no admitido para escritura: '$Path' (tag $tagHex)."
+        throw (Get-AIOString 'errors.e544' -FormatArgs @($Path, $tagHex))
     }
     Write-AIOUpdateLog -Level INFO -Message "Archivo respaldado por WIM/WOF admitido para copia: '$Path' (tag $tagHex)."
 }
@@ -4441,7 +4441,7 @@ function Invoke-AIOUpdateFileSecurityCommand {
     )
 
     $executable = Join-Path $script:AIOUpdateNativeSystemDirectory $Name
-    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw "No se encontro '$executable'." }
+    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw (Get-AIOString 'errors.e433' -FormatArgs @($executable)) }
     # En Windows PowerShell 5.1 stderr nativo puede producir ErrorRecord.
     # Capturarlo no debe impedir leer y comprobar el codigo real del proceso.
     $ErrorActionPreference = 'Continue'
@@ -4451,7 +4451,7 @@ function Invoke-AIOUpdateFileSecurityCommand {
     $exitCode = $global:LASTEXITCODE
     $detail = ($output | Out-String).Trim()
     Write-AIOUpdateLog -Level INFO -Message "SetupDU: $Name; codigo=$exitCode; $detail"
-    if ($null -eq $exitCode -or $exitCode -ne 0) { throw "SetupDU: $Name fallo con codigo '${exitCode}': $detail" }
+    if ($null -eq $exitCode -or $exitCode -ne 0) { throw (Get-AIOString 'errors.e591' -FormatArgs @($Name, ${exitCode}, $detail)) }
 }
 
 function Set-AIOUpdateCopyFileAttributes {
@@ -4483,7 +4483,7 @@ function Set-AIOUpdateCopyFileAttributes {
     [System.IO.File]::SetAttributes($Path, $toSet)
     $observed = [System.IO.File]::GetAttributes($Path)
     if (([int]$observed -band [int]$settableMask) -ne [int]$requested) {
-        throw "No se pudieron establecer los atributos editables '$requested' en '$Path'. Atributos observados: '$observed'."
+        throw (Get-AIOString 'errors.e467' -FormatArgs @($requested, $Path, $observed))
     }
 }
 
@@ -4518,11 +4518,11 @@ function Restore-AIOUpdateCopyFileSecurity {
     try {
         $restored = Get-AIOUpdateFileAccessSnapshot -Path $Path
         if ($restored.OwnerSid -ne $Original.OwnerSid -or $restored.Sddl -cne $Original.Sddl) {
-            throw 'La comprobacion de propietario/DACL no coincide con el respaldo original.'
+            throw (Get-AIOString 'errors.e308')
         }
     }
     catch { [void]$failures.Add($_.Exception.Message) }
-    if ($failures.Count -gt 0) { throw "No se pudo restaurar la seguridad de '${Path}': $($failures -join ' | ')" }
+    if ($failures.Count -gt 0) { throw (Get-AIOString 'errors.e508' -FormatArgs @(${Path}, ($failures -join ' | '))) }
 }
 
 function Copy-AIOUpdateSetupDUFile {
@@ -4537,12 +4537,12 @@ function Copy-AIOUpdateSetupDUFile {
     $attributesTouched = $false
     $copyError = $null
     try {
-        if (-not (Test-Path -LiteralPath $Source -PathType Leaf -ErrorAction Stop)) { throw "No existe el archivo SetupDU '$Source'." }
-        if (Test-Path -LiteralPath $Destination -PathType Container -ErrorAction Stop) { throw "El destino SetupDU es un directorio: '$Destination'." }
+        if (-not (Test-Path -LiteralPath $Source -PathType Leaf -ErrorAction Stop)) { throw (Get-AIOString 'errors.e392' -FormatArgs @($Source)) }
+        if (Test-Path -LiteralPath $Destination -PathType Container -ErrorAction Stop) { throw (Get-AIOString 'errors.e109' -FormatArgs @($Destination)) }
         $hadDestination = Test-Path -LiteralPath $Destination -PathType Leaf -ErrorAction Stop
         if ($hadDestination) {
             $original = Get-AIOUpdateFileAccessSnapshot -Path $Destination
-            if ($null -eq $original.AttributesValue) { throw "No se pudieron respaldar los atributos de '$Destination'." }
+            if ($null -eq $original.AttributesValue) { throw (Get-AIOString 'errors.e471' -FormatArgs @($Destination)) }
             if (($original.AttributesValue -band [int][System.IO.FileAttributes]::ReparsePoint) -ne 0) {
                 Assert-AIOUpdateFileReparsePolicy -Path $Destination -Snapshot $original
             }
@@ -4571,7 +4571,7 @@ function Copy-AIOUpdateSetupDUFile {
                 # antes del primer intento. No se usa Unlock-Single-File porque
                 # su contrato no propaga todas las fallas.
                 if (-not $original.Sddl -or -not $original.OwnerSid -or -not $original.AccessSddl) {
-                    throw "No se puede reintentar '$Destination': no se pudo respaldar su propietario/DACL. $($original.Errors -join ' | ')"
+                    throw (Get-AIOString 'errors.e524' -FormatArgs @($Destination, ($original.Errors -join ' | ')))
                 }
                 $securityTouched = $true
                 Invoke-AIOUpdateFileSecurityCommand -Name 'takeown.exe' -Arguments @('/F', $Destination, '/A')
@@ -4582,7 +4582,7 @@ function Copy-AIOUpdateSetupDUFile {
             }
             $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256 -ErrorAction Stop).Hash
             $destinationHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256 -ErrorAction Stop).Hash
-            if ($sourceHash -ne $destinationHash) { throw "Verificacion SHA-256 fallida para el archivo SetupDU '$Destination'." }
+            if ($sourceHash -ne $destinationHash) { throw (Get-AIOString 'errors.e610' -FormatArgs @($Destination)) }
         }
         catch {
             $copyError = $_
@@ -4603,7 +4603,7 @@ function Copy-AIOUpdateSetupDUFile {
             if ($restoreErrors.Count -gt 0) {
                 $copyDetail = if ($copyError) { " Error de copia: $($copyError.Exception.Message)." } else { '' }
                 # Una restauracion fallida impide commit aunque la copia funciono.
-                throw "SetupDU: fallo la restauracion de '${Destination}': $($restoreErrors -join ' | ').$copyDetail"
+                throw (Get-AIOString 'errors.e590' -FormatArgs @(${Destination}, ($restoreErrors -join ' | '), $copyDetail))
             }
         }
     }
@@ -4735,12 +4735,12 @@ function Test-AIOUpdateDirectoryHashMirror {
         $relative = $sourceFile.FullName.Substring($SourceRoot.Length).TrimStart('\')
         $destination = Join-Path $DestinationRoot $relative
         if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) {
-            throw "Falta el archivo copiado '$destination'."
+            throw (Get-AIOString 'errors.e255' -FormatArgs @($destination))
         }
         $sourceHash = (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
         $destinationHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash
         if ($sourceHash -ne $destinationHash) {
-            throw "El archivo '$destination' no coincide por SHA-256."
+            throw (Get-AIOString 'errors.e092' -FormatArgs @($destination))
         }
         $verified++
     }
@@ -4849,7 +4849,7 @@ function Rebuild-AIOUpdateWim {
     )
 
     $images = @(Get-AIOUpdateImageMetadata -ImagePath $WimPath | Sort-Object ImageIndex)
-    if ($images.Count -eq 0) { throw "No hay indices para reconstruir '$WimPath'." }
+    if ($images.Count -eq 0) { throw (Get-AIOString 'errors.e405' -FormatArgs @($WimPath)) }
 
     $leaf = [System.IO.Path]::GetFileName($WimPath)
     $temp = Join-Path $StagingRoot ($leaf + '.rebuild.wim')
@@ -4870,12 +4870,12 @@ function Rebuild-AIOUpdateWim {
 
     $rebuilt = @(Get-AIOUpdateImageMetadata -ImagePath $temp | Sort-Object ImageIndex)
     if ($rebuilt.Count -ne $images.Count) {
-        throw "La reconstruccion de '$leaf' cambio el numero de indices."
+        throw (Get-AIOString 'errors.e349' -FormatArgs @($leaf))
     }
 
     $preflightPath = Get-AIOUpdatePreflightBackupPath -Destination $WimPath
     if (-not $preflightPath) {
-        throw "No se encontro la copia Preflight de '$leaf'; no se reemplazara el WIM original."
+        throw (Get-AIOString 'errors.e440' -FormatArgs @($leaf))
     }
 
     $expectedCount = $images.Count
@@ -4883,7 +4883,7 @@ function Rebuild-AIOUpdateWim {
         param($candidate)
         $verifiedImages = @(Get-AIOUpdateImageMetadata -ImagePath $candidate | Sort-Object ImageIndex)
         if ($verifiedImages.Count -ne $expectedCount) {
-            throw "La verificacion posterior de '$leaf' devolvio $($verifiedImages.Count) indices; se esperaban $expectedCount."
+            throw (Get-AIOString 'errors.e367' -FormatArgs @($leaf, ($verifiedImages.Count), $expectedCount))
         }
     }.GetNewClosure()
 
@@ -4909,7 +4909,7 @@ function Set-AIOUpdateWimCreationTime {
 
     $wimlib = Find-AIOUpdateWimlib
     if (-not $wimlib) {
-        throw 'No se encontro wimlib-imagex.exe. Copialo en AdminImagenOffline\Tools\wimlib o agregalo al PATH del sistema para modificar la fecha interna del WIM.'
+        throw (Get-AIOString 'errors.e451')
     }
 
     $xmlPath = Join-Path $ScratchRoot ([System.IO.Path]::GetFileName($WimPath) + '.xml')
@@ -4918,7 +4918,7 @@ function Set-AIOUpdateWimCreationTime {
 
     & $wimlib info $WimPath --extract-xml $xmlPath *> $null
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $xmlPath -PathType Leaf)) {
-        throw "wimlib no pudo extraer los metadatos de '$WimPath'."
+        throw (Get-AIOString 'errors.e634' -FormatArgs @($WimPath))
     }
 
     [xml]$xml = Get-Content -LiteralPath $xmlPath -Raw -ErrorAction Stop
@@ -4933,14 +4933,14 @@ function Set-AIOUpdateWimCreationTime {
             --image-property "CREATIONTIME/HIGHPART=$high" `
             --image-property "CREATIONTIME/LOWPART=$low" *> $null
         if ($LASTEXITCODE -ne 0) {
-            throw "wimlib no pudo modificar CREATIONTIME del indice $index en '$WimPath'."
+            throw (Get-AIOString 'errors.e636' -FormatArgs @($index, $WimPath))
         }
         $expected[$index] = "$high|$low"
     }
 
     & $wimlib info $WimPath --extract-xml $verifyPath *> $null
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $verifyPath -PathType Leaf)) {
-        throw "No se pudo verificar CREATIONTIME en '$WimPath'."
+        throw (Get-AIOString 'errors.e510' -FormatArgs @($WimPath))
     }
 
     [xml]$verifyXml = Get-Content -LiteralPath $verifyPath -Raw -ErrorAction Stop
@@ -4949,7 +4949,7 @@ function Set-AIOUpdateWimCreationTime {
         if (-not $expected.ContainsKey($index)) { continue }
         $actual = "$([string]$image.CREATIONTIME.HIGHPART)|$([string]$image.CREATIONTIME.LOWPART)"
         if ($actual -ne $expected[$index]) {
-            throw "CREATIONTIME no coincide con LASTMODIFICATIONTIME en el indice $index de '$WimPath'."
+            throw (Get-AIOString 'errors.e010' -FormatArgs @($index, $WimPath))
         }
     }
 
@@ -5119,7 +5119,7 @@ function Get-AIOUpdateImageMetadata {
     param([Parameter(Mandatory = $true)] [string]$ImagePath)
     $summary = Invoke-AIOUpdateDism -Arguments @('/Get-ImageInfo', "/ImageFile:$ImagePath") -Context 'Consultar indices WIM' -SuccessCodes @(0) -Quiet
     $indexes = @($summary.Output | ForEach-Object { if ([string]$_ -match '^\s*Index\s*:\s*(\d+)\s*$') { [int]$Matches[1] } } | Sort-Object -Unique)
-    if (-not $indexes.Count) { throw "DISM no devolvio indices reconocibles para '$ImagePath'." }
+    if (-not $indexes.Count) { throw (Get-AIOString 'errors.e044' -FormatArgs @($ImagePath)) }
     foreach ($index in $indexes) {
         $result = Invoke-AIOUpdateDism -Arguments @('/Get-ImageInfo', "/ImageFile:$ImagePath", "/Index:$index") -Context "Consultar metadatos WIM indice $index" -SuccessCodes @(0) -Quiet
         $fields = @{}
@@ -5128,10 +5128,10 @@ function Get-AIOUpdateImageMetadata {
         }
         $version = $null
         if (-not [version]::TryParse([string]$fields['Version'], [ref]$version) -or -not $fields['Architecture'] -or -not $fields['Name']) {
-            throw "DISM no devolvio Version, Architecture y Name validos para el indice $index."
+            throw (Get-AIOString 'errors.e042' -FormatArgs @($index))
         }
         $revision = 0
-        if ($fields.ContainsKey('ServicePack Build') -and -not [int]::TryParse($fields['ServicePack Build'], [ref]$revision)) { throw 'ServicePack Build no reconocido.' }
+        if ($fields.ContainsKey('ServicePack Build') -and -not [int]::TryParse($fields['ServicePack Build'], [ref]$revision)) { throw (Get-AIOString 'errors.e588') }
         if ($version.Revision -lt 0) { $version = New-Object version($version.Major, $version.Minor, $version.Build, $revision) }
         [pscustomobject]@{
             ImageIndex = $index; ImageName = $fields['Name']; ImageDescription = $fields['Description']
@@ -5244,10 +5244,10 @@ function Assert-AIOUpdateCompatibleIndexes {
     $families = @($builds | ForEach-Object { Get-AIOUpdateServicingBuildFamily -Build ([int]$_) } | Sort-Object -Unique)
 
     if ($architectures.Count -gt 1) {
-        throw "Los indices seleccionados tienen arquitecturas diferentes: $($architectures -join ', ')."
+        throw (Get-AIOString 'errors.e380' -FormatArgs @(($architectures -join ', ')))
     }
     if ($families.Count -gt 1) {
-        throw "Los indices seleccionados pertenecen a familias CBS diferentes: $($builds -join ', ')."
+        throw (Get-AIOString 'errors.e379' -FormatArgs @(($builds -join ', ')))
     }
 
     return [pscustomobject]@{
@@ -5316,7 +5316,7 @@ function Get-AIOUpdateEsuPreparationProfile {
         'x64'   { @('amd64', 'eeb9d8760f514b22', '0e1abda7d0e42ef6') }
         'x86'   { @('x86',   '929b3cf256f3d9ec', 'b1fc22241886bdc0') }
         'arm64' { @('arm64', 'eeb9e0b00f513fbe', '0e1ac5e1d0e42392') }
-        default { throw "Arquitectura ESU no admitida: '$Architecture'." }
+        default { throw (Get-AIOString 'errors.e003' -FormatArgs @($Architecture)) }
     }
     # Identidad, version y sufijos forman un perfil fijo; no se deducen de la LCU.
     [pscustomobject]@{
@@ -5336,7 +5336,7 @@ function Get-AIOUpdateEsuCompatibilityAssessment {
         [Parameter(Mandatory = $true)] [object]$Image,
         [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [object[]]$CompatiblePackages
     )
-    if (-not (Test-AIOUpdateWindows10EsuImage -Image $Image)) { throw 'ESU: imagen fuera del alcance de los perfiles offline.' }
+    if (-not (Test-AIOUpdateWindows10EsuImage -Image $Image)) { throw (Get-AIOString 'errors.e065') }
     $profile = Get-AIOUpdateEsuPreparationProfile -Architecture $Image.Architecture
     $lcus = @($CompatiblePackages | Where-Object { Test-AIOUpdateWindows10EsuEraLcu -Package $_ })
     $lcuVersions = @($lcus | ForEach-Object { [string]$_.Version } | Sort-Object -Unique)
@@ -5394,12 +5394,12 @@ function Invoke-AIOUpdateEsuNativeCommand {
         [Parameter(Mandatory = $true)] [string[]]$Arguments
     )
     $exe = Join-Path $script:AIOUpdateNativeSystemDirectory $Name
-    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "ESU: no existe '$exe'." }
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw (Get-AIOString 'errors.e071' -FormatArgs @($exe)) }
     $ErrorActionPreference = 'Continue'
     $global:LASTEXITCODE = $null
     $output = & $exe @Arguments 2>&1
     $code = $global:LASTEXITCODE
-    if ($null -eq $code -or $code -ne 0) { throw "ESU: $Name fallo ($code): $(($output | Out-String).Trim())" }
+    if ($null -eq $code -or $code -ne 0) { throw (Get-AIOString 'errors.e081' -FormatArgs @($Name, $code, (($output | Out-String).Trim()))) }
 }
 
 function Initialize-AIOUpdateEsuRegistryApi {
@@ -5506,12 +5506,12 @@ function Invoke-AIOUpdateEsuHiveSession {
         [switch]$VerifyOnly
     )
     $extractedVerification = $VerifyOnly -and ($MountPath -in $script:AIOUpdateEsuVerificationPaths)
-    if ($MountPath -notin $script:AIOUpdateMountedPaths -and -not $extractedVerification) { throw 'ESU: la ruta no es un montaje ni una extraccion de verificacion de esta sesion.' }
-    if ($MountPath -in $script:AIOUpdateEsuVerificationPaths -and -not $VerifyOnly) { throw 'ESU: una extraccion temporal solo admite verificacion.' }
-    if (Test-Path -LiteralPath (Join-Path $MountPath 'Windows\System32\wpeinit.exe')) { throw 'ESU: no se prepara WinPE, boot.wim ni WinRE.' }
+    if ($MountPath -notin $script:AIOUpdateMountedPaths -and -not $extractedVerification) { throw (Get-AIOString 'errors.e070') }
+    if ($MountPath -in $script:AIOUpdateEsuVerificationPaths -and -not $VerifyOnly) { throw (Get-AIOString 'errors.e079') }
+    if (Test-Path -LiteralPath (Join-Path $MountPath 'Windows\System32\wpeinit.exe')) { throw (Get-AIOString 'errors.e073') }
     foreach ($relative in @('Windows', 'Windows\System32', 'Windows\System32\config', 'Windows\WinSxS', 'Windows\WinSxS\Manifests')) {
         $dir = Get-Item -LiteralPath (Join-Path $MountPath $relative) -Force -ErrorAction Stop
-        if (-not $dir.PSIsContainer -or ($dir.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "ESU: directorio no admitido '$relative'." }
+        if (-not $dir.PSIsContainer -or ($dir.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw (Get-AIOString 'errors.e061' -FormatArgs @($relative)) }
     }
     Initialize-AIOUpdateEsuRegistryApi
     $session = 'AIOU_ESU_' + [guid]::NewGuid().ToString('N')
@@ -5526,7 +5526,7 @@ function Invoke-AIOUpdateEsuHiveSession {
         foreach ($kind in @('SOFTWARE','COMPONENTS')) {
             $path = Join-Path $MountPath "Windows\System32\config\$kind"
             $hiveFile = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-            if ($hiveFile.PSIsContainer -or ($hiveFile.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "ESU: colmena no admitida '$kind'." }
+            if ($hiveFile.PSIsContainer -or ($hiveFile.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw (Get-AIOString 'errors.e060' -FormatArgs @($kind)) }
             # Las extracciones ya son copias desechables; evitar duplicarlas.
             if ($VerifyOnly -and -not $extractedVerification) {
                 Initialize-AIOUpdateDirectory -Path $copyRoot
@@ -5538,7 +5538,7 @@ function Invoke-AIOUpdateEsuHiveSession {
             Invoke-AIOUpdateEsuNativeCommand -Name 'reg.exe' -Arguments @('load', "HKLM\$name", $path)
             [void]$script:AIOUpdateEsuLoadedHives.Add([pscustomobject]@{ Name=$name; MountPath=$MountPath })
             $roots[$kind] = $base.OpenSubKey($name)
-            if (-not $roots[$kind]) { throw "ESU: no se pudo abrir la colmena '$kind'." }
+            if (-not $roots[$kind]) { throw (Get-AIOString 'errors.e074' -FormatArgs @($kind)) }
         }
         & $Action $roots.SOFTWARE $roots.COMPONENTS
     }
@@ -5547,7 +5547,7 @@ function Invoke-AIOUpdateEsuHiveSession {
         if ($base) { $base.Dispose() }
         $closed = Close-AIOUpdateEsuHives -MountPath $MountPath
         if ($privileges) { $privileges.Dispose() }
-        if (-not $closed) { throw 'ESU: quedaron colmenas cargadas. Se impide guardar o reutilizar el montaje.' }
+        if (-not $closed) { throw (Get-AIOString 'errors.e077') }
         if ($VerifyOnly -and (Test-Path -LiteralPath $copyRoot)) { Remove-Item -LiteralPath $copyRoot -Recurse -Force -ErrorAction Stop }
     }
 }
@@ -5667,9 +5667,9 @@ function Write-AIOUpdateEsuManifest {
                 $restore = New-Object Security.AccessControl.DirectorySecurity
                 $restore.SetSecurityDescriptorSddlForm($sddl, [Security.AccessControl.AccessControlSections]::Access)
                 Set-Acl -LiteralPath $parent -AclObject $restore -ErrorAction Stop
-                if ((Get-Acl -LiteralPath $parent).GetSecurityDescriptorSddlForm($sections) -cne $sddl) { throw 'El propietario/DACL no coincide con el original.' }
+                if ((Get-Acl -LiteralPath $parent).GetSecurityDescriptorSddlForm($sections) -cne $sddl) { throw (Get-AIOString 'errors.e184') }
             } catch { $errors += $_.Exception.Message }
-            if ($errors.Count) { throw "ESU: no se restauro la seguridad de Manifests: $($errors -join ' | ')" }
+            if ($errors.Count) { throw (Get-AIOString 'errors.e075' -FormatArgs @(($errors -join ' | '))) }
         }
     }
 }
@@ -5682,15 +5682,15 @@ function Invoke-AIOUpdateWindows10EsuPreparation {
         [Parameter(Mandatory = $true)] [string]$Context,
         [switch]$VerifyOnly
     )
-    if (-not (Test-AIOUpdateWindows10EsuImage -Image $Image)) { throw 'ESU: la preparacion solo admite Windows 10 cliente no LTSC, familia CBS 19041.' }
-    if (-not $VerifyOnly -and -not $script:AIOUpdatePreflightContext) { throw 'ESU: falta el respaldo Preflight de esta sesion.' }
+    if (-not (Test-AIOUpdateWindows10EsuImage -Image $Image)) { throw (Get-AIOString 'errors.e069') }
+    if (-not $VerifyOnly -and -not $script:AIOUpdatePreflightContext) { throw (Get-AIOString 'errors.e063') }
     $descriptor = Get-AIOUpdateEsuDescriptor -Architecture $Image.Architecture
     $manifest = Join-Path $MountPath ('Windows\WinSxS\Manifests\' + $descriptor.ManifestName)
     $pattern = '^' + $descriptor.Architecture + '_microsoft-windows-foundation_31bf3856ad364e35_(\d+\.\d+\.\d+\.\d+)_none_([0-9a-f]{16})\.manifest$'
     $foundations = @(Get-ChildItem -LiteralPath (Join-Path $MountPath 'Windows\WinSxS\Manifests') -Filter '*_microsoft-windows-foundation_*.manifest' -File -ErrorAction Stop |
         ForEach-Object { if ($_.Name -match $pattern) { [pscustomobject]@{ Version=[version]$Matches[1]; Suffix=$Matches[2] } } } |
         Sort-Object Version -Descending)
-    if (-not $foundations.Count) { throw 'ESU: no se encontro el manifiesto Foundation de la arquitectura destino.' }
+    if (-not $foundations.Count) { throw (Get-AIOString 'errors.e072') }
     # La referencia Foundation mantiene la version fijada al preparar. Otras versiones pueden aparecer tras la LCU.
     $foundationValues = @($foundations | ForEach-Object { 'c!microsoft-w..-foundation_31bf3856ad364e35_{0}_{1}' -f $_.Version,$_.Suffix })
     $result = Invoke-AIOUpdateEsuHiveSession -MountPath $MountPath -VerifyOnly:$VerifyOnly -Action {
@@ -5698,9 +5698,9 @@ function Invoke-AIOUpdateWindows10EsuPreparation {
         $current = $software.OpenSubKey('Microsoft\Windows NT\CurrentVersion')
         try {
             if (-not $current -or [string]$current.GetValue('InstallationType') -ine 'Client' -or
-                [string]$current.GetValue('EditionID') -match '(?i)^(?:EnterpriseS|IoTEnterpriseS|Server|WinPE)') { throw 'ESU: la identidad real del registro offline no es un cliente Windows 10 admitido.' }
+                [string]$current.GetValue('EditionID') -match '(?i)^(?:EnterpriseS|IoTEnterpriseS|Server|WinPE)') { throw (Get-AIOString 'errors.e067') }
             $currentBuild = 0
-            if (-not [int]::TryParse([string]$current.GetValue('CurrentBuildNumber'), [ref]$currentBuild) -or ((Get-AIOUpdateServicingBuildFamily -Build $currentBuild) -ne [int]$script:AIOUpdatePolicy.Windows10EsuCbsBuild -and ($currentBuild -lt 19041 -or $currentBuild -gt 19045))) { throw 'ESU: la build real del registro offline no pertenece a la familia Windows 10 19041.' }
+            if (-not [int]::TryParse([string]$current.GetValue('CurrentBuildNumber'), [ref]$currentBuild) -or ((Get-AIOUpdateServicingBuildFamily -Build $currentBuild) -ne [int]$script:AIOUpdatePolicy.Windows10EsuCbsBuild -and ($currentBuild -lt 19041 -or $currentBuild -gt 19045))) { throw (Get-AIOString 'errors.e066') }
         } finally { if ($current) { $current.Dispose() } }
         $diagnostic = Get-AIOUpdateEsuPreparationDiagnostic -Software $software -Components $components -Descriptor $descriptor -ManifestPath $manifest -FoundationValues $foundationValues
         $diagnostic | Add-Member -NotePropertyName Context -NotePropertyValue $Context
@@ -5710,8 +5710,8 @@ function Invoke-AIOUpdateWindows10EsuPreparation {
         if ($diagnostic.State -in @('AlreadyPrepared', 'NewerComponent')) {
             return [pscustomobject]@{ State=$(if ($VerifyOnly) { 'EsuVerified' } else { 'EsuAlreadyPrepared' }); Performed=$false }
         }
-        if ($VerifyOnly) { throw "ESU: la preparacion no es consistente. $($diagnostic.Reason)" }
-        if (-not $diagnostic.CanPrepare) { throw "ESU: $($diagnostic.Reason)" }
+        if ($VerifyOnly) { throw (Get-AIOString 'errors.e068' -FormatArgs @(($diagnostic.Reason))) }
+        if (-not $diagnostic.CanPrepare) { throw (Get-AIOString 'errors.e080' -FormatArgs @(($diagnostic.Reason))) }
         if (-not (Test-Path -LiteralPath $manifest)) { Write-AIOUpdateEsuManifest -Path $manifest -Bytes $descriptor.ManifestBytes }
         $component = $null; $winner = $null; $branch = $null
         try {
@@ -5728,7 +5728,7 @@ function Invoke-AIOUpdateWindows10EsuPreparation {
             $component.Flush(); $winner.Flush(); $branch.Flush()
         } finally { foreach ($key in @($component,$winner,$branch)) { if ($key) { $key.Dispose() } } }
         [AIOUpdate.EsuPrivilegeScope]::InvalidateIndex($components)
-        if (-not (Test-AIOUpdateEsuComponentState $software $components $descriptor $manifest $foundationValues[0])) { throw 'ESU: fallo la comprobacion de la preparacion recien escrita.' }
+        if (-not (Test-AIOUpdateEsuComponentState $software $components $descriptor $manifest $foundationValues[0])) { throw (Get-AIOString 'errors.e062') }
         [pscustomobject]@{ State='EsuPrepared'; Performed=$true }
     }
     Add-AIOUpdateMaintenanceRecord -Context $Context -State $result.State -Performed $result.Performed `
@@ -5747,9 +5747,7 @@ function Assert-AIOUpdateEsuPrerequisites {
     if (-not $targets.Count) { return }
     if ($PrepareWindows10Esu) { return }
     $names = @($targets | ForEach-Object { $_.Packages } | ForEach-Object { $_.Name } | Sort-Object -Unique)
-    throw ("Se detectaron LCU de la etapa ESU para Windows 10 cliente no LTSC: {0}. " -f ($names -join ', ')) +
-        'La preparacion offline requiere elegir explicitamente Preparar integracion ESU offline. ' +
-        'Sin esa opcion, aplica la LCU tras desplegar y habilitar ESU en el equipo destino.'
+    throw (Get-AIOString 'errors.e_upd_esu_required' -FormatArgs @(($names -join ', ')))
 }
 
 
@@ -5765,7 +5763,7 @@ function Mount-AIOUpdateImage {
     )
 
     if ($MountPath -in $script:AIOUpdateMountedPaths) {
-        throw "El montaje '$MountPath' sigue pendiente; no se vaciara ni reutilizara."
+        throw (Get-AIOString 'errors.e169' -FormatArgs @($MountPath))
     }
     Initialize-AIOUpdateDirectory -Path $MountPath -Empty
     [void]$script:AIOUpdateMountedPaths.Add($MountPath)
@@ -5877,7 +5875,7 @@ function Get-AIOUpdateNativeMountedImages {
     $result = Invoke-AIOUpdateDism -Arguments @('/Get-MountedImageInfo') -Context 'Consultar montajes DISM' -SuccessCodes @(0) -Quiet
     $records = @(ConvertFrom-AIOUpdateDismRecords -Lines $result.Output -StartKey 'Mount Dir')
     if (-not $records.Count -and ($result.Output -join "`n") -notmatch '(?i)No mounted images found') {
-        throw 'DISM no confirmo un registro de montajes reconocible; se detiene antes de modificar el medio.'
+        throw (Get-AIOString 'errors.e041')
     }
     foreach ($record in $records) {
         [pscustomobject]@{ Path = $record.'Mount Dir'; MountStatus = $record.Status; ImagePath = $record.'Image File'; ImageIndex = $record.'Image Index' }
@@ -5890,9 +5888,9 @@ function Get-AIOUpdateMountedPackageInventory {
     try {
         $result = Invoke-AIOUpdateDism -Arguments @("/Image:$MountPath", '/Get-Packages', '/Format:List') -Context 'Consultar inventario CBS' -SuccessCodes @(0) -Quiet
         $records = @(ConvertFrom-AIOUpdateDismRecords -Lines $result.Output -StartKey 'Package Identity')
-        if (-not $records.Count) { throw 'La imagen no devolvio identidades CBS; no se aceptara un inventario vacio.' }
+        if (-not $records.Count) { throw (Get-AIOString 'errors.e340') }
         foreach ($record in $records) {
-            if (-not $record.State -or $record.'Package Identity' -notmatch '^[^~]+~[^~]+~[^~]+~[^~]*~\d+\.\d+\.\d+\.\d+$') { throw 'Registro CBS incompleto o no reconocido.' }
+            if (-not $record.State -or $record.'Package Identity' -notmatch '^[^~]+~[^~]+~[^~]+~[^~]*~\d+\.\d+\.\d+\.\d+$') { throw (Get-AIOString 'errors.e550') }
             [pscustomobject]@{
                 PackageName = [string]$record.'Package Identity'
                 PackageState = ([string]$record.State -replace '\s','')
@@ -5927,7 +5925,7 @@ function Initialize-AIOUpdateLcuMsuStaging {
             # Retain the original filename. DISM resolves the chain from the target.
             $path = Join-Path $folder $package.Name
             if (Test-Path -LiteralPath $path -PathType Leaf) {
-                if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $package.FullName -Algorithm SHA256).Hash) { throw "MSU diferentes con el mismo nombre: $($package.Name)." }
+                if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $package.FullName -Algorithm SHA256).Hash) { throw (Get-AIOString 'errors.e381' -FormatArgs @(($package.Name))) }
             }
             else { Copy-Item -LiteralPath $package.FullName -Destination $path -ErrorAction Stop }
             $script:AIOUpdatePackagePathMap[$package.FullName] = $path
@@ -6559,7 +6557,7 @@ function Add-AIOUpdatePackageList {
             $hexCode = '0x{0:X8}' -f $result.UnsignedCode
             if ($result.PSObject.Properties['ErrorMessage'] -and $result.ErrorMessage) { throw $result.ErrorMessage }
             $description = Get-AIOUpdateExitCodeText -ExitCode $result.ExitCode
-            throw "$effectiveContext fallo. Codigo DISM: $($result.ExitCode) ($hexCode). $description"
+            throw (Get-AIOString 'errors.e645' -FormatArgs @($effectiveContext, ($result.ExitCode), $hexCode, $description))
         }
 
         # Una LCU no puede darse por integrada solo por un codigo 0 o por
@@ -6573,7 +6571,7 @@ function Add-AIOUpdatePackageList {
                 $result.Success = $false
                 $result.State = 'MissingCbsEvidence'
                 Update-AIOUpdateDependencyPlanExecution -Context $DependencyContext -Package $package -Result $result
-                throw "$effectiveContext no quedo verificado en CBS: $($lcuEvidence.Reason). Codigo DISM: $($result.ExitCode)."
+                throw (Get-AIOString 'errors.e647' -FormatArgs @($effectiveContext, ($lcuEvidence.Reason), ($result.ExitCode)))
             }
             $result | Add-Member -NotePropertyName CbsEvidence -NotePropertyValue $lcuEvidence -Force
         }
@@ -6657,7 +6655,7 @@ function Invoke-AIOUpdateCleanup {
             Add-AIOUpdateMaintenanceRecord -Context $Context -State 'SkippedPendingActions' -Reason 'DISM confirmo operaciones pendientes; limpieza aplazada.'
             return [pscustomobject]@{ Success = $true; State = 'SkippedPendingActions'; Performed = $false; ExitCode = $result.ExitCode; Context = $Context }
         }
-        throw "$Context fallo con codigo $($result.ExitCode). No se guardara una imagen tras un fallo de limpieza no previsto."
+        throw (Get-AIOString 'errors.e643' -FormatArgs @($Context, ($result.ExitCode)))
     }
     return $result
 }
@@ -7267,14 +7265,14 @@ function Copy-AIOUpdateFileWithBackup {
     $preflightState = Get-AIOUpdatePreflightPathState -Destination $Destination
 
     if ($destinationExisted -and -not $preflightPath -and -not $preflightState.KnownNew) {
-        throw "El archivo existente '$Destination' no esta cubierto por Preflight ni fue registrado explicitamente como creado por esta sesion; no se reemplazara."
+        throw (Get-AIOString 'errors.e100' -FormatArgs @($Destination))
     }
 
     $verifier = {
         param($candidate)
         $destinationHash = Get-AIOUpdateFileSha256 -Path $candidate
         if ($destinationHash -ne $sourceHash) {
-            throw "La copia no coincide por SHA-256: '$candidate'."
+            throw (Get-AIOString 'errors.e317' -FormatArgs @($candidate))
         }
     }.GetNewClosure()
 
@@ -7285,7 +7283,7 @@ function Copy-AIOUpdateFileWithBackup {
     if (-not $destinationExisted -and -not $preflightPath) {
         $registeredAsSessionCreated = Register-AIOUpdateSessionCreatedPath -Path $Destination -Source $Source -Reason 'Creado por Copy-AIOUpdateFileWithBackup'
         if ($preflightState.CoveredSurface -and -not $registeredAsSessionCreated) {
-            throw "El archivo nuevo '$Destination' fue copiado, pero no pudo registrarse como creado por la sesion."
+            throw (Get-AIOString 'errors.e103' -FormatArgs @($Destination))
         }
     }
 
@@ -7329,7 +7327,7 @@ function Initialize-AIOUpdateWinRECombinedStack {
     $targets = @(Get-AIOUpdateCompatiblePackages -Inventory $Inventory -Category @('LCU') -Architecture $Architecture -Build $Build -ImageName 'WinRE' | Where-Object {
         $_.VersionReliable -and (Get-AIOUpdateServicingBuildFamily -Build ([version]$_.Version).Build) -eq $family
     } | Sort-Object Version -Descending | Select-Object -First 1)
-    if (-not $targets.Count) { throw 'WinRE: falta un SSU utilizable o un MSU combinado de su familia de mantenimiento.' }
+    if (-not $targets.Count) { throw (Get-AIOString 'errors.e620') }
     $package = $targets[0]
     $path = Get-AIOUpdateEffectivePackagePath -Package $package
     $result = Invoke-AIOUpdateDism -Arguments @("/Image:$MountPath", '/Add-Package', "/PackagePath:$path", "/ScratchDir:$ScratchPath") -Context "WinRE: preparar SOLO la pila desde $($package.Name)" -NoThrow -DisplayIdentity (Get-AIOUpdatePackageDisplayIdentity -Package $package)
@@ -7358,7 +7356,7 @@ function Initialize-AIOUpdateWinRECombinedStack {
     # Microsoft's combined-package exception is limited to 0x8007007e and
     # must still leave demonstrable SSU evidence; never exempt other errors.
     if (-not $result.Success -and -not ($code -eq [uint32]2147942526 -and $verified)) {
-        throw "WinRE: fallo al preparar la pila con el MSU combinado. Codigo $($result.ExitCode)."
+        throw (Get-AIOString 'errors.e619' -FormatArgs @(($result.ExitCode)))
     }
     Add-AIOUpdateMaintenanceRecord -Context 'WinRE SSU combinado' -State $(if ($verified) { 'ServicingStackVerified' } else { 'StackVersionUnconfirmed' }) -Performed $verified -Reason "MSU=$($package.Name); DISM=$($result.ExitCode); la actualizacion de recuperacion se acreditara exclusivamente con SafeOS Installed."
     [pscustomobject]@{ Inventory = [object[]]$after; Verified = $verified }
@@ -7408,7 +7406,7 @@ function Get-AIOUpdateWinREFromInstallWim {
         $mounted = $true
         $source = Join-Path $InstallMount 'Windows\System32\Recovery\winre.wim'
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-            throw "El indice $Index no contiene Windows\System32\Recovery\winre.wim."
+            throw (Get-AIOString 'errors.e134' -FormatArgs @($Index))
         }
         Copy-Item -LiteralPath $source -Destination $Destination -Force -ErrorAction Stop
         [void](Dismount-AIOUpdateImage -MountPath $InstallMount -Mode Discard -Context 'Cierre del montaje usado para extraer WinRE')
@@ -7445,10 +7443,10 @@ function Assert-AIOUpdateWinREIntegrity {
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         if (-not (Test-Path -LiteralPath $WinREPath -PathType Leaf)) {
-            throw "No existe el archivo WinRE que se debe verificar: '$WinREPath'."
+            throw (Get-AIOString 'errors.e394' -FormatArgs @($WinREPath))
         }
         if (-not (Find-AIOUpdateWimlib)) {
-            throw 'Se requiere wimlib-imagex.exe en Tools\wimlib o en PATH para verificar WinRE.'
+            throw (Get-AIOString 'errors.e574')
         }
         Write-Host (Get-AIOString 'actualizaciones.verifying_winre_wimlib') -ForegroundColor Cyan
         Write-AIOUpdateLog -Level INFO -Message "${context}: wimlib-imagex verify '$WinREPath'."
@@ -7461,7 +7459,7 @@ function Assert-AIOUpdateWinREIntegrity {
         }
         if (-not $result.Success -or $result.ExitCode -ne 0) {
             $detail = (@($result.Output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last 8) -join ' | ')
-            throw "wimlib verify fallo para '$WinREPath' (codigo $($result.ExitCode)). $detail"
+            throw (Get-AIOString 'errors.e638' -FormatArgs @($WinREPath, ($result.ExitCode), $detail))
         }
         $reason = "wimlib verify completado; archivo='$WinREPath'; codigo=0; segundos={0:N2}." -f $timer.Elapsed.TotalSeconds
         Add-AIOUpdateMaintenanceRecord -Context $context -State 'WimIntegrityVerified' -Performed $true -Reason $reason
@@ -7492,7 +7490,7 @@ function Update-AIOUpdateWinRE {
 
     # Detectar la herramienta requerida antes de modificar la copia de WinRE.
     if (-not (Find-AIOUpdateWimlib)) {
-        throw 'WinRE: se requiere wimlib-imagex.exe en Tools\wimlib o en PATH para verificarlo antes de reinyectar. No se ha iniciado su mantenimiento.'
+        throw (Get-AIOString 'errors.e621')
     }
     Copy-Item -LiteralPath $SourceWinRE -Destination $DestinationWinRE -Force -ErrorAction Stop
     $image = @(Get-AIOUpdateImageMetadata -ImagePath $DestinationWinRE | Select-Object -First 1)[0]
@@ -7542,7 +7540,7 @@ function Update-AIOUpdateWinRE {
         $recoveryCandidates = @($winrePackages.ToArray())
         $recoveryEvidence = @(Get-AIOUpdateWinRERecoveryEvidence -Packages $recoveryCandidates -InstalledInventory $currentInventory)
         if ($recoveryCandidates.Count -gt 0 -and $recoveryEvidence.Count -eq 0) {
-            throw 'WinRE: SafeOS no quedo Installed ni fue sustituido por un SafeOS instalado compatible; un SSU o una LCU no prueban la actualizacion de recuperacion.'
+            throw (Get-AIOString 'errors.e618')
         }
         $recoveryUpdated = $recoveryEvidence.Count -gt 0
         $recoveryState = if ($recoveryUpdated) { 'RecoveryVerified' } elseif ($Policy.SsuVerified) { 'ServicingStackOnly' } else { 'NoApplicableUpdates' }
@@ -7555,7 +7553,7 @@ function Update-AIOUpdateWinRE {
             $preReport = New-AIOUpdateVerificationReport -Target 'winre.wim' -Phase 'PreCommit' -Before $baseline -After $after -OperationResults ([object[]]($operations.ToArray()))
             [void]$VerificationReports.Add($preReport)
             Write-AIOUpdateVerificationReport -Report $preReport
-            if (-not $preReport.Success) { throw 'Fallo la verificacion previa al commit de winre.wim.' }
+            if (-not $preReport.Success) { throw (Get-AIOString 'errors.e250') }
         }
         else {
             Write-AIOUpdateLog -Level INFO -Message 'WinRE: informes CBS Pre/Post-Commit omitidos por configuracion; la integridad WIM con wimlib sigue siendo obligatoria antes de reinyectar.'
@@ -7587,11 +7585,11 @@ function Update-AIOUpdateWinRE {
             Mount-AIOUpdateImage -ImagePath $DestinationWinRE -Index 1 -MountPath $WinREMount -ScratchPath $ScratchPath -Context 'Verificando winre.wim guardado' -ReadOnly
             $mounted = $true
             $post = @(Get-AIOUpdateMountedPackageInventory -MountPath $WinREMount -Strict)
-            if ($recoveryUpdated -and @(Get-AIOUpdateWinRERecoveryEvidence -Packages $recoveryCandidates -InstalledInventory $post).Count -eq 0) { throw 'El SafeOS verificado no se conservo en winre.wim tras commit/exportacion.' }
+            if ($recoveryUpdated -and @(Get-AIOUpdateWinRERecoveryEvidence -Packages $recoveryCandidates -InstalledInventory $post).Count -eq 0) { throw (Get-AIOString 'errors.e083') }
             $postReport = New-AIOUpdateVerificationReport -Target 'winre.wim' -Phase 'PostCommit' -Before $baseline -After $post -OperationResults ([object[]]($operations.ToArray()))
             [void]$VerificationReports.Add($postReport)
             Write-AIOUpdateVerificationReport -Report $postReport
-            if (-not $postReport.Success) { throw 'Fallo la verificacion posterior al commit de winre.wim.' }
+            if (-not $postReport.Success) { throw (Get-AIOString 'errors.e247') }
             [void](Dismount-AIOUpdateImage -MountPath $WinREMount -Mode Discard -Context 'Cerrando verificacion de winre.wim')
             $mounted = $false
         }
@@ -7625,8 +7623,8 @@ function Get-AIOUpdateWimFileSha256 {
         [Parameter(Mandatory = $true)] [string]$ImagePath
     )
     $wimlib = Find-AIOUpdateWimlib
-    if (-not $wimlib) { throw 'No se encontro wimlib para leer el archivo WIM.' }
-    if (-not (Test-Path -LiteralPath $WimPath -PathType Leaf)) { throw "No existe '$WimPath'." }
+    if (-not $wimlib) { throw (Get-AIOString 'errors.e449') }
+    if (-not (Test-Path -LiteralPath $WimPath -PathType Leaf)) { throw (Get-AIOString 'errors.e383' -FormatArgs @($WimPath)) }
     # Leer bytes directamente: nunca pasar el contenido binario por la consola
     # de PowerShell ni materializar otra copia completa de winre.wim.
     $arguments = @('extract', $WimPath, [string]$Index, $ImagePath, '--no-globs', '--to-stdout')
@@ -7643,14 +7641,14 @@ function Get-AIOUpdateWimFileSha256 {
     $started = $false
     try {
         $started = $process.Start()
-        if (-not $started) { throw 'No se pudo iniciar wimlib para calcular SHA-256.' }
+        if (-not $started) { throw (Get-AIOString 'errors.e500') }
         # Drenar stderr en paralelo impide bloquear la tuberia de datos binarios.
         $errorsTask = $process.StandardError.ReadToEndAsync()
         $hash = $sha.ComputeHash($process.StandardOutput.BaseStream)
         $process.WaitForExit()
         $details = $errorsTask.GetAwaiter().GetResult().Trim()
         if ($process.ExitCode -ne 0) {
-            throw "wimlib no pudo leer '$ImagePath' del indice $Index; codigo=$($process.ExitCode). $details"
+            throw (Get-AIOString 'errors.e635' -FormatArgs @($ImagePath, $Index, ($process.ExitCode), $details))
         }
         if ($details) { Write-AIOUpdateLog -Level INFO -Message "wimlib SHA-256: $details" }
         return [BitConverter]::ToString($hash).Replace('-', '')
@@ -7680,15 +7678,15 @@ function Test-AIOUpdateInstallPostCommitDirect {
         Add-AIOUpdateMaintenanceRecord -Context $context -State 'InstallPostCommitMountFallback' -Reason 'wimlib no disponible; se conserva la verificacion con montaje de solo lectura.'
         return $false
     }
-    if (-not $VerifyEsu -and -not $ServicedWinRE) { throw 'No se indicaron comprobaciones PostCommit.' }
+    if (-not $VerifyEsu -and -not $ServicedWinRE) { throw (Get-AIOString 'errors.e459') }
     if (-not $script:AIOUpdateSessionRoot -or -not (Test-Path -LiteralPath $script:AIOUpdateSessionRoot -PathType Container)) {
-        throw 'Falta la carpeta de trabajo de esta sesion para verificar install.wim.'
+        throw (Get-AIOString 'errors.e259')
     }
     $root = Join-Path $script:AIOUpdateSessionRoot ('PostCommit_' + $Index + '_' + [guid]::NewGuid().ToString('N'))
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $fileCount = 0; $extractedBytes = [int64]0
     try {
-        if (-not (Test-Path -LiteralPath $InstallWim -PathType Leaf)) { throw "No existe '$InstallWim'." }
+        if (-not (Test-Path -LiteralPath $InstallWim -PathType Leaf)) { throw (Get-AIOString 'errors.e383' -FormatArgs @($InstallWim)) }
         Write-Host (Get-AIOString 'actualizaciones.verifying_install_wimlib' $Index) -ForegroundColor DarkCyan
         if ($VerifyEsu) {
             $descriptor = Get-AIOUpdateEsuDescriptor -Architecture $Image.Architecture
@@ -7702,11 +7700,11 @@ function Test-AIOUpdateInstallPostCommitDirect {
             foreach ($line in @($result.Output)) {
                 if (-not [string]::IsNullOrWhiteSpace([string]$line)) { Write-AIOUpdateLog -Level INFO -Message "wimlib PostCommit: $line" }
             }
-            if (-not $result.Success -or $result.ExitCode -ne 0) { throw "Fallo la extraccion PostCommit del indice $Index; codigo=$($result.ExitCode)." }
+            if (-not $result.Success -or $result.ExitCode -ne 0) { throw (Get-AIOString 'errors.e244' -FormatArgs @($Index, ($result.ExitCode))) }
             foreach ($relative in $required) {
                 $file = Get-Item -LiteralPath (Join-Path $root $relative) -Force -ErrorAction Stop
                 if ($file.PSIsContainer -or $file.Length -eq 0 -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                    throw "Archivo PostCommit no admitido: '$relative'."
+                    throw (Get-AIOString 'errors.e002' -FormatArgs @($relative))
                 }
             }
             $files = @(Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction Stop)
@@ -7719,7 +7717,7 @@ function Test-AIOUpdateInstallPostCommitDirect {
         }
         if ($ServicedWinRE) {
             $hash = Get-AIOUpdateWimFileSha256 -WimPath $InstallWim -Index $Index -ImagePath 'Windows/System32/Recovery/winre.wim'
-            if ($hash -ne $ServicedWinRE.Hash) { throw "El hash de winre.wim reinyectado no coincide en el indice $Index." }
+            if ($hash -ne $ServicedWinRE.Hash) { throw (Get-AIOString 'errors.e127' -FormatArgs @($Index)) }
             Add-AIOUpdateMaintenanceRecord -Context $context -State 'EmbeddedWinREHashVerified' -Performed $true -Reason "SHA-256=$hash; lectura binaria desde install.wim sin copia temporal de WinRE."
             Write-Host (Get-AIOString 'actualizaciones.verified_winre_sha') -ForegroundColor Green
         }
@@ -7732,7 +7730,7 @@ function Test-AIOUpdateInstallPostCommitDirect {
         $closed = Close-AIOUpdateEsuHives -MountPath $root
         if (-not $closed) {
             Add-AIOUpdateMaintenanceRecord -Context $context -State 'InstallPostCommitDirectFailed' -Reason "Quedaron colmenas cargadas; se conserva '$root'."
-            throw 'ESU: quedaron colmenas de verificacion cargadas; se conserva la carpeta temporal.'
+            throw (Get-AIOString 'errors.e078')
         }
         [void]$script:AIOUpdateEsuVerificationPaths.Remove($root)
         if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop }
@@ -7767,14 +7765,14 @@ function Update-AIOUpdateInstallWim {
         $position++
         $indexWinRE = $ServicedWinRE
         if ($ServicedWinREByIndex -and $ServicedWinREByIndex.Count -gt 0) {
-            if (-not $ServicedWinREByIndex.ContainsKey([string]$index)) { throw "Falta WinRE actualizado para el indice $index." }
+            if (-not $ServicedWinREByIndex.ContainsKey([string]$index)) { throw (Get-AIOString 'errors.e254' -FormatArgs @($index)) }
             $indexWinRE = $ServicedWinREByIndex[[string]$index]
         }
         elseif ($indexWinRE -and $Indexes.Count -gt 1 -and -not $indexWinRE.SourceHash) {
-            throw 'Se requiere verificar el WinRE original de cada indice antes de reutilizar una copia.'
+            throw (Get-AIOString 'errors.e572')
         }
         $image = $imageMetadata | Where-Object { [int]$_.ImageIndex -eq [int]$index } | Select-Object -First 1
-        if (-not $image) { throw "No se encontro metadata del indice $index." }
+        if (-not $image) { throw (Get-AIOString 'errors.e443' -FormatArgs @($index)) }
         $architecture = Convert-AIOUpdateArchitectureName -Architecture $image.Architecture
         $build = ([version]$image.Version).Build
         $editionId = if ($image.PSObject.Properties['EditionId']) { [string]$image.EditionId } else { '' }
@@ -7796,7 +7794,7 @@ function Update-AIOUpdateInstallWim {
                 $winreTarget = Join-Path $InstallMount 'Windows\System32\Recovery\winre.wim'
                 if ($indexWinRE.SourceHash) {
                     $originalHash = (Get-FileHash -LiteralPath $winreTarget -Algorithm SHA256 -ErrorAction Stop).Hash
-                    if ($originalHash -ne $indexWinRE.SourceHash) { throw "WinRE del indice $index no coincide con el original usado para actualizarlo." }
+                    if ($originalHash -ne $indexWinRE.SourceHash) { throw (Get-AIOString 'errors.e615' -FormatArgs @($index)) }
                 }
                 Copy-AIOUpdateSetupDUFile -Source $indexWinRE.Path -Destination $winreTarget
             }
@@ -7816,11 +7814,11 @@ function Update-AIOUpdateInstallWim {
                 Add-AIOUpdateMaintenanceRecord -Context "Install indice ${index}: perfil ESU" -State ('EsuProfile' + $assessment.State) -Reason ("Perfil=$($assessment.ProfileId); SSU=$($assessment.SsuVersions); LCU=$($assessment.LcuVersions). " + $assessment.Reason)
                 Write-Host ("   [ESU] " + $assessment.Reason) -ForegroundColor Yellow
                 $backupWim = Get-AIOUpdatePreflightBackupPath -Destination $InstallWim
-                if (-not $backupWim -or -not (Test-Path -LiteralPath $backupWim -PathType Leaf)) { throw 'ESU: falta la copia Preflight de install.wim; no se preparara la imagen.' }
+                if (-not $backupWim -or -not (Test-Path -LiteralPath $backupWim -PathType Leaf)) { throw (Get-AIOString 'errors.e064') }
             }
             foreach ($package in $orderedInstallPackages) {
                 if ($esuNeeded -and -not $esuPrepared -and (Test-AIOUpdateWindows10EsuEraLcu -Package $package)) {
-                    if (-not $PrepareWindows10Esu) { throw 'ESU: preparacion no autorizada en esta ejecucion.' }
+                    if (-not $PrepareWindows10Esu) { throw (Get-AIOString 'errors.e076') }
                     [void](Invoke-AIOUpdateWindows10EsuPreparation -MountPath $InstallMount -Image $image -Context "Install indice ${index}: preparacion ESU")
                     $esuPrepared = $true
                 }
@@ -7846,7 +7844,7 @@ function Update-AIOUpdateInstallWim {
                 $preReport = New-AIOUpdateVerificationReport -Target "install.wim indice $index" -Phase 'PreCommit' -Before $baseline -After $after -OperationResults ([object[]]($operations.ToArray()))
                 [void]$VerificationReports.Add($preReport)
                 Write-AIOUpdateVerificationReport -Report $preReport
-                if (-not $preReport.Success) { throw "Fallo la verificacion previa al commit del indice $index." }
+                if (-not $preReport.Success) { throw (Get-AIOString 'errors.e251' -FormatArgs @($index)) }
             }
             else {
                 Write-AIOUpdateLog -Level INFO -Message "Install indice ${index}: informes completos Pre/Post-Commit omitidos por configuracion; las comprobaciones ESU posteriores usaran extraccion selectiva cuando wimlib este disponible."
@@ -7870,14 +7868,14 @@ function Update-AIOUpdateInstallWim {
                     $postReport = New-AIOUpdateVerificationReport -Target "install.wim indice $index" -Phase 'PostCommit' -Before $baseline -After $post -OperationResults ([object[]]($operations.ToArray()))
                     [void]$VerificationReports.Add($postReport)
                     Write-AIOUpdateVerificationReport -Report $postReport
-                    if (-not $postReport.Success) { throw "Fallo la verificacion posterior al commit del indice $index." }
+                    if (-not $postReport.Success) { throw (Get-AIOString 'errors.e248' -FormatArgs @($index)) }
                 }
 
                 if ($indexWinRE) {
                     $embeddedWinRE = Join-Path $InstallMount 'Windows\System32\Recovery\winre.wim'
                     $embeddedHash = (Get-FileHash -LiteralPath $embeddedWinRE -Algorithm SHA256 -ErrorAction Stop).Hash
                     if ($embeddedHash -ne $indexWinRE.Hash) {
-                        throw "El hash de winre.wim reinyectado no coincide en el indice $index."
+                        throw (Get-AIOString 'errors.e127' -FormatArgs @($index))
                     }
                     Write-Host (Get-AIOString 'actualizaciones.verified_winre_sha') -ForegroundColor Green
                 }
@@ -7921,19 +7919,19 @@ function Export-AIOUpdateSingleInstallIndex {
 
     $exportedImages = @(Get-AIOUpdateImageMetadata -ImagePath $exportPath)
     if ($exportedImages.Count -ne 1 -or [int]$exportedImages[0].ImageIndex -ne 1) {
-        throw 'La verificacion del install.wim exportado no devolvio exactamente un indice.'
+        throw (Get-AIOString 'errors.e365')
     }
 
     $preflightPath = Get-AIOUpdatePreflightBackupPath -Destination $InstallWim
     if (-not $preflightPath) {
-        throw 'No se encontro la copia Preflight de install.wim; no se reemplazara el WIM original.'
+        throw (Get-AIOString 'errors.e441')
     }
 
     $verifier = {
         param($candidate)
         $finalImages = @(Get-AIOUpdateImageMetadata -ImagePath $candidate)
         if ($finalImages.Count -ne 1 -or [int]$finalImages[0].ImageIndex -ne 1) {
-            throw 'El install.wim final no contiene exactamente un indice.'
+            throw (Get-AIOString 'errors.e136')
         }
     }
 
@@ -8172,7 +8170,7 @@ namespace AIOUpdate {
     try { return [AIOUpdate.PeDependencyReaderV2]::Read($Path, [bool]$HeadersOnly) }
     catch {
         $mode = if ($HeadersOnly) { 'cabeceras/arquitectura' } else { 'importaciones normales y diferidas' }
-        throw "No se pudo analizar el archivo PE '$Path' ($mode): $($_.Exception.GetBaseException().Message)"
+        throw (Get-AIOString 'errors.e475' -FormatArgs @($Path, $mode, ($_.Exception.GetBaseException().Message)))
     }
 }
 
@@ -8214,7 +8212,7 @@ function Get-AIOUpdateMissingRecoveryDependencies {
         $info = Get-AIOUpdatePeDependencyInfo -Path $file
         foreach ($name in @($info.Imports) + @($info.DelayImports)) {
             if ($name -match '(?i)^(api|ext)-ms-') { continue }
-            if (-not $name -or $name -in @('.','..') -or $name -match '[\\/:*?"<>|\x00-\x1f]') { throw "Importacion PE invalida en '$file': '$name'." }
+            if (-not $name -or $name -in @('.','..') -or $name -match '[\\/:*?"<>|\x00-\x1f]') { throw (Get-AIOString 'errors.e289' -FormatArgs @($file, $name)) }
             $found = $false; $wrongMachine = $false
             foreach ($directory in @((Split-Path -Parent $file),$system32) | Select-Object -Unique) {
                 $candidate = Join-Path $directory $name
@@ -8233,7 +8231,7 @@ function Get-AIOUpdateMissingRecoveryDependencies {
             # Do not traverse WinSxS or protected log directories to infer resolution.
             $required = $name -in @($info.Imports)
             if ($missing.ContainsKey($name)) {
-                if (-not (Test-AIOUpdatePeMachineMatch -Expected $missing[$name].Machine -Actual $info.Machine)) { throw "Dependencia '$name' solicitada por arquitecturas distintas." }
+                if (-not (Test-AIOUpdatePeMachineMatch -Expected $missing[$name].Machine -Actual $info.Machine)) { throw (Get-AIOString 'errors.e055' -FormatArgs @($name)) }
                 $missing[$name].Required = $missing[$name].Required -or $required
                 $missing[$name].WrongArchitecture = $missing[$name].WrongArchitecture -or $wrongMachine
             }
@@ -8251,7 +8249,7 @@ function Get-AIOUpdateMissingRecoveryDependencies {
 function Find-AIOUpdateRecoveryDependencySource {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)] [string]$ImageRoot, [Parameter(Mandatory = $true)] [string]$Name, [Parameter(Mandatory = $true)] [int]$Machine)
-    if ($Name -match '[\\/:*?"<>|\x00-\x1f]' -or $Name -notmatch '(?i)\.dll$') { throw "Nombre de dependencia invalido: '$Name'." }
+    if ($Name -match '[\\/:*?"<>|\x00-\x1f]' -or $Name -notmatch '(?i)\.dll$') { throw (Get-AIOString 'errors.e531' -FormatArgs @($Name)) }
     foreach ($relative in @(Get-AIOUpdateRecoveryDependencyLocations -Name $Name)) {
         $candidate = Join-Path $ImageRoot $relative
         if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
@@ -8291,14 +8289,14 @@ function Repair-AIOUpdateRecoveryDependencies {
                     }
                     continue
                 }
-                if ($dependency.WrongArchitecture) { throw "Arquitectura incorrecta en una dependencia existente: $($dependency.Name). No se sustituira automaticamente." }
+                if ($dependency.WrongArchitecture) { throw (Get-AIOString 'errors.e006' -FormatArgs @(($dependency.Name))) }
                 $supported += $dependency
             }
             if (-not $supported.Count) { break }
             if (-not $sourceRoot) {
-                if (-not $InstallWim -or -not $InstallIndexes.Count) { throw 'Falta install.wim para las dependencias de recuperacion conocidas.' }
+                if (-not $InstallWim -or -not $InstallIndexes.Count) { throw (Get-AIOString 'errors.e258') }
                 $targetVersion = Get-AIOUpdateExecutableVersion -Path (Join-Path $system32 'ntdll.dll')
-                if (-not $targetVersion) { throw 'No se pudo verificar la version binaria de WinPE.' }
+                if (-not $targetVersion) { throw (Get-AIOString 'errors.e516') }
                 foreach ($donor in @(Get-AIOUpdateImageMetadata -ImagePath $InstallWim | Where-Object {
                     [int]$_.ImageIndex -in $InstallIndexes -and (Convert-AIOUpdateArchitectureName -Architecture $_.Architecture) -eq $Architecture
                 })) {
@@ -8320,10 +8318,10 @@ function Repair-AIOUpdateRecoveryDependencies {
                     [void](Dismount-AIOUpdateImage -MountPath $donorMount -Mode Discard -Context 'Cerrar fuente de distinta version binaria')
                     $mounted = $false
                 }
-                if (-not $sourceRoot) { throw 'No hay fuente de dependencias con la misma arquitectura y version binaria que WinPE.' }
+                if (-not $sourceRoot) { throw (Get-AIOString 'errors.e403') }
             }
             foreach ($dependency in $supported) {
-                if (@($copied | Where-Object Name -eq $dependency.Name).Count) { throw "La copia de $($dependency.Name) no resolvio su ubicacion; requiere revision." }
+                if (@($copied | Where-Object Name -eq $dependency.Name).Count) { throw (Get-AIOString 'errors.e315' -FormatArgs @(($dependency.Name))) }
                 if (-not $mounted) {
                     foreach ($location in @(Get-AIOUpdateRecoveryDependencyLocations -Name $dependency.Name)) {
                         $cachedFile = Get-AIOUpdateCachedWimFile -WimPath $InstallWim -Index $donor.ImageIndex -ImagePath $location -ScratchPath $ScratchPath -StagingRoot $StagingRoot
@@ -8335,7 +8333,7 @@ function Repair-AIOUpdateRecoveryDependencies {
                     Mount-AIOUpdateImage -ImagePath $InstallWim -Index $donor.ImageIndex -MountPath $donorMount -ScratchPath $ScratchPath -Context 'Leer fuente de dependencias de recuperacion (respaldo)' -ReadOnly
                     $mounted = $true
                     $sourceVersion = Get-AIOUpdateExecutableVersion -Path (Join-Path $donorMount 'Windows\System32\ntdll.dll')
-                    if (-not $sourceVersion -or $sourceVersion -ne $targetVersion) { throw 'La fuente de respaldo no coincide con la version binaria de WinPE.' }
+                    if (-not $sourceVersion -or $sourceVersion -ne $targetVersion) { throw (Get-AIOString 'errors.e333') }
                     $sourceRoot = $donorMount
                     $source = Find-AIOUpdateRecoveryDependencySource -ImageRoot $sourceRoot -Name $dependency.Name -Machine $dependency.Machine
                 }
@@ -8345,10 +8343,10 @@ function Repair-AIOUpdateRecoveryDependencies {
                     throw $reason
                 }
                 $destination = Join-Path $system32 $dependency.Name
-                if (Test-Path -LiteralPath $destination) { throw "La dependencia $($dependency.Name) ya existe; no se sobrescribira." }
+                if (Test-Path -LiteralPath $destination) { throw (Get-AIOString 'errors.e320' -FormatArgs @(($dependency.Name))) }
                 [void](Copy-AIOUpdateSetupDUFile -Source $source -Destination $destination)
                 $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256 -ErrorAction Stop).Hash
-                if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash -ne $hash) { throw "Fallo SHA-256 de $($dependency.Name)." }
+                if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash -ne $hash) { throw (Get-AIOString 'errors.e231' -FormatArgs @(($dependency.Name))) }
                 $relative = $source.Substring($sourceRoot.Length).TrimStart('\','/')
                 [void]$copied.Add([pscustomobject]@{ Name = $dependency.Name; RelativePath = ('Windows\System32\'+$dependency.Name); SHA256 = $hash; SourceIndex = $donor.ImageIndex; SourceVersion = [string]$sourceVersion; SourceRelativePath = $relative; RequestedBy = $dependency.RequestedBy })
                 Add-AIOUpdateMaintenanceRecord -Context 'Dependencias de recuperacion' -State 'CopiedMissingDependency' -Performed $true -Reason "$($dependency.Name); origen=$relative; indice=$($donor.ImageIndex); SHA256=$hash; requerido por $($dependency.RequestedBy)."
@@ -8372,7 +8370,7 @@ function Assert-AIOUpdateRecoveryDependencyCopies {
         $path = Join-Path $MountPath $copy.RelativePath
         if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
             (Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash -ne $copy.SHA256) {
-            throw "La dependencia '$($copy.Name)' no se conservo correctamente tras guardar boot.wim."
+            throw (Get-AIOString 'errors.e319' -FormatArgs @(($copy.Name)))
         }
     }
 }
@@ -8508,7 +8506,7 @@ function Update-AIOUpdateBootWim {
                 $preReport = New-AIOUpdateVerificationReport -Target "boot.wim indice $index" -Phase 'PreCommit' -Before $baseline -After $after -OperationResults ([object[]]($operations.ToArray()))
                 [void]$VerificationReports.Add($preReport)
                 Write-AIOUpdateVerificationReport -Report $preReport
-                if (-not $preReport.Success) { throw "Fallo la verificacion previa al commit de boot.wim indice $index." }
+                if (-not $preReport.Success) { throw (Get-AIOString 'errors.e249' -FormatArgs @($index)) }
             }
             else {
                 Write-AIOUpdateLog -Level INFO -Message "Boot indice ${index}: verificaciones Pre/Post-Commit omitidas por configuracion."
@@ -8525,7 +8523,7 @@ function Update-AIOUpdateBootWim {
                 $postReport = New-AIOUpdateVerificationReport -Target "boot.wim indice $index" -Phase 'PostCommit' -Before $baseline -After $post -OperationResults ([object[]]($operations.ToArray()))
                 [void]$VerificationReports.Add($postReport)
                 Write-AIOUpdateVerificationReport -Report $postReport
-                if (-not $postReport.Success) { throw "Fallo la verificacion posterior al commit de boot.wim indice $index." }
+                if (-not $postReport.Success) { throw (Get-AIOString 'errors.e246' -FormatArgs @($index)) }
 
                 if ($index -eq $setupIndex) {
                     try {
@@ -8637,13 +8635,13 @@ function Assert-AIOUpdateSetupLanguagesPreserved {
     )
 
     $normalizedLocales = @($AllowedLocales | ForEach-Object { ([string]$_).ToLowerInvariant() } | Where-Object { $_ } | Sort-Object -Unique)
-    if ($normalizedLocales.Count -eq 0) { throw "${Context}: no hay TrustedLocales para verificar." }
+    if ($normalizedLocales.Count -eq 0) { throw (Get-AIOString 'errors.e654' -FormatArgs @(${Context})) }
 
     $langIni = Join-Path $MountPath 'sources\lang.ini'
     $langIniLocales = @(Get-AIOUpdateLocalesFromLangIniPath -Path $langIni | ForEach-Object { ([string]$_).ToLowerInvariant() })
     $missingLangIni = @($normalizedLocales | Where-Object { $_ -notin $langIniLocales })
     if ($missingLangIni.Count -gt 0) {
-        throw "${Context}: boot.wim perdio idiomas en sources\lang.ini: $($missingLangIni -join ', ')."
+        throw (Get-AIOString 'errors.e650' -FormatArgs @(${Context}, ($missingLangIni -join ', ')))
     }
 
     $checks = New-Object System.Collections.Generic.List[object]
@@ -8656,7 +8654,7 @@ function Assert-AIOUpdateSetupLanguagesPreserved {
         $coreCandidates = $script:AIOUpdateSetupCoreMuiCandidates
         $coreFiles = @($coreCandidates | Where-Object { Test-Path -LiteralPath (Join-Path $localeRoot $_) -PathType Leaf })
         if ($muiFiles.Count -eq 0 -or $coreFiles.Count -eq 0) {
-            throw "${Context}: faltan recursos MUI esenciales de Setup para $locale despues de aplicar actualizaciones."
+            throw (Get-AIOString 'errors.e651' -FormatArgs @(${Context}, $locale))
         }
         [void]$checks.Add([pscustomobject]@{ Locale = $locale; MuiCount = $muiFiles.Count; CoreFiles = [string[]]$coreFiles })
     }
@@ -8682,7 +8680,7 @@ function Invoke-AIOUpdateSetupDUExpand {
     $detail = ($output | Out-String).Trim()
     Write-AIOUpdateLog -Level INFO -Message "SetupDU/expand.exe: codigo=$exitCode; $detail"
     if ($null -eq $exitCode -or $exitCode -ne 0) {
-        throw "No se pudo extraer SetupDU (codigo '${exitCode}'): $detail"
+        throw (Get-AIOString 'errors.e492' -FormatArgs @(${exitCode}, $detail))
     }
 }
 
@@ -8695,7 +8693,7 @@ function Expand-AIOUpdateSetupDU {
 
     Initialize-AIOUpdateDirectory -Path $Destination -Empty
     foreach ($package in @($Packages | Where-Object { $null -ne $_ })) {
-        if (-not (Test-Path -LiteralPath $package.FullName -PathType Leaf)) { throw "No existe SetupDU '$($package.FullName)'." }
+        if (-not (Test-Path -LiteralPath $package.FullName -PathType Leaf)) { throw (Get-AIOString 'errors.e385' -FormatArgs @(($package.FullName))) }
         if ($package.Extension -eq '.cab') {
             Invoke-AIOUpdateSetupDUExpand -Arguments @('-R', '-F:*', $package.FullName, $Destination)
         }
@@ -8704,19 +8702,19 @@ function Expand-AIOUpdateSetupDU {
             Initialize-AIOUpdateDirectory -Path $inner
             Invoke-AIOUpdateSetupDUExpand -Arguments @('-F:*.cab', $package.FullName, $inner)
             $cabs = @(Get-ChildItem -LiteralPath $inner -Filter '*.cab' -File -ErrorAction Stop | Where-Object { $_.Name -ine 'WSUSSCAN.cab' })
-            if ($cabs.Count -eq 0) { throw "SetupDU '$($package.Name)' no contiene CAB de contenido." }
+            if ($cabs.Count -eq 0) { throw (Get-AIOString 'errors.e589' -FormatArgs @(($package.Name))) }
             foreach ($cab in $cabs) {
                 Invoke-AIOUpdateSetupDUExpand -Arguments @('-R', '-F:*', $cab.FullName, $Destination)
             }
             Remove-Item -LiteralPath $inner -Recurse -Force -ErrorAction Stop
         }
-        else { throw "Formato SetupDU no compatible: '$($package.Name)'." }
+        else { throw (Get-AIOString 'errors.e269' -FormatArgs @(($package.Name))) }
     }
     if (@($Packages | Where-Object { $null -ne $_ }).Count -gt 0) {
         $payload = @(Get-ChildItem -LiteralPath $Destination -Recurse -File -ErrorAction Stop | Where-Object {
             $_.Name -notin @('update.mum', 'update.cat', 'WSUSSCAN.cab')
         })
-        if ($payload.Count -eq 0) { throw 'La extraccion SetupDU no produjo archivos de contenido.' }
+        if ($payload.Count -eq 0) { throw (Get-AIOString 'errors.e330') }
     }
 }
 
@@ -8782,7 +8780,7 @@ function Apply-AIOUpdateSetupDU {
             )
         }
     )
-    if ($failures.Count -gt 0) { throw 'Fallo la verificacion SHA-256 de archivos SetupDU.' }
+    if ($failures.Count -gt 0) { throw (Get-AIOString 'errors.e245') }
 
     return [pscustomobject]@{
         Applied  = $true
@@ -9026,7 +9024,7 @@ function Assert-AIOUpdateBootSignature {
         [Parameter(Mandatory = $true)] [ValidateSet('CA2011','CA2023')] [string]$Policy)
     $signature = Get-AIOUpdateBootSignature -Path $Path
     if (-not (Test-AIOUpdateBootSignerMatchesPolicy -Signer $signature.Signer -Policy $Policy)) {
-        throw "No se pudo acreditar la firma incorporada $Policy. $(Format-AIOUpdateBootSignature -Signature $signature)"
+        throw (Get-AIOString 'errors.e474' -FormatArgs @($Policy, (Format-AIOUpdateBootSignature -Signature $signature)))
     }
 }
 
@@ -9039,7 +9037,7 @@ function Assert-AIOUpdateMicrosoftBootSignature {
     $signature = Get-AIOUpdateBootSignature -Path $Path
     if ($signature.Status -ne 'Valid' -or [string]::IsNullOrWhiteSpace($signature.Thumbprint) -or
         $signature.Subject -notmatch '(?i)(?:^|,\s*)O="?Microsoft Corporation"?(?:,|$)') {
-        throw "No se pudo acreditar la firma Microsoft del archivo de arranque. $(Format-AIOUpdateBootSignature -Signature $signature)"
+        throw (Get-AIOString 'errors.e473' -FormatArgs @((Format-AIOUpdateBootSignature -Signature $signature)))
     }
 }
 
@@ -9061,11 +9059,11 @@ function Resolve-AIOUpdateBootSigningPolicy {
             $families += 'CA2011'
         }
         else {
-            throw "No se pudo verificar la firma incorporada de '$relative'. $(Format-AIOUpdateBootSignature -Signature $signature)"
+            throw (Get-AIOString 'errors.e514' -FormatArgs @($relative, (Format-AIOUpdateBootSignature -Signature $signature)))
         }
     }
     $unique = @($families | Sort-Object -Unique)
-    if ($unique.Count -ne 1) { throw 'El medio no tiene una familia UEFI unica verificable. Revisa sus cargadores EFI antes de continuar.' }
+    if ($unique.Count -ne 1) { throw (Get-AIOString 'errors.e167') }
     return [string]$unique[0]
 }
 
@@ -9077,7 +9075,7 @@ function Sync-AIOUpdateMediaBootFiles {
         [ValidateSet('Preserve','CA2023','CA2011')] [string]$BootSigningPolicy = 'Preserve')
     if (-not $CapturedFiles.Count) { return @() }
     $architectureEntry = Get-AIOUpdateArchitectureCatalogEntry -Architecture $Architecture
-    if (-not $architectureEntry -or -not $architectureEntry.EfiBootName) { throw 'Arquitectura sin nombre de arranque EFI definido.' }
+    if (-not $architectureEntry -or -not $architectureEntry.EfiBootName) { throw (Get-AIOString 'errors.e007') }
     $efiBootName = [string]$architectureEntry.EfiBootName
     $policy = Resolve-AIOUpdateBootSigningPolicy -MediaRoot $MediaRoot -EfiBootName $efiBootName -Policy $BootSigningPolicy
     $is2023 = $policy -eq 'CA2023'
@@ -9103,14 +9101,14 @@ function Sync-AIOUpdateMediaBootFiles {
         [pscustomobject]@{ Key = $mgfw; Relative = 'efi\boot\bootmgfw.efi'; Signed = $true }
     )) { if (Test-Path -LiteralPath (Join-Path $MediaRoot $pair.Relative) -PathType Leaf) { $map += $pair } }
     foreach ($entry in $map) {
-        if (-not $CapturedFiles.ContainsKey($entry.Key) -or -not (Test-Path -LiteralPath $CapturedFiles[$entry.Key] -PathType Leaf)) { throw "Falta $($entry.Key) para sincronizar el conjunto de arranque $policy." }
+        if (-not $CapturedFiles.ContainsKey($entry.Key) -or -not (Test-Path -LiteralPath $CapturedFiles[$entry.Key] -PathType Leaf)) { throw (Get-AIOString 'errors.e261' -FormatArgs @(($entry.Key), $policy)) }
         if ($entry.Signed) { Assert-AIOUpdateBootSignature -Path $CapturedFiles[$entry.Key] -Policy $policy }
         elseif ($entry.MicrosoftSigned) { Assert-AIOUpdateMicrosoftBootSignature -Path $CapturedFiles[$entry.Key] }
         if ($entry.Signed -or $entry.MicrosoftSigned) {
             $sourceVersion = Get-AIOUpdateExecutableVersion -Path $CapturedFiles[$entry.Key]
             $destination = Join-Path $MediaRoot $entry.Relative
             $targetVersion = Get-AIOUpdateExecutableVersion -Path $destination
-            if (-not $sourceVersion -or ($targetVersion -and $sourceVersion -lt $targetVersion)) { throw "El conjunto de arranque $policy tiene version desconocida o anterior al medio: $($entry.Key)." }
+            if (-not $sourceVersion -or ($targetVersion -and $sourceVersion -lt $targetVersion)) { throw (Get-AIOString 'errors.e106' -FormatArgs @($policy, ($entry.Key))) }
         }
     }
     # All checks above happen before the first replacement. Preflight covers
@@ -9615,7 +9613,7 @@ function New-AIOUpdateDiagnosticBundle {
     try {
         $diagnosticFiles = @(Get-ChildItem -LiteralPath $folder -Force -ErrorAction Stop)
         if ($diagnosticFiles.Count -eq 0) {
-            throw 'La carpeta de diagnostico no contiene archivos.'
+            throw (Get-AIOString 'errors.e300')
         }
 
         if (Get-Command Compress-Archive -ErrorAction SilentlyContinue) {
@@ -9627,7 +9625,7 @@ function New-AIOUpdateDiagnosticBundle {
         }
 
         if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf) -or (Get-Item -LiteralPath $zipPath).Length -eq 0) {
-            throw 'El archivo ZIP de diagnostico no fue creado correctamente.'
+            throw (Get-AIOString 'errors.e096')
         }
     }
     catch {
@@ -9663,7 +9661,7 @@ function Invoke-AIOUpdateMediaIntegration {
     )
 
     if (($script:AIOUpdateMountedPaths.Count -gt 0 -or $script:AIOUpdateEsuVerificationPaths.Count -gt 0 -or $script:AIOUpdateEsuLoadedHives.Count -gt 0) -and -not (Clear-AIOUpdateMountedImages)) {
-        throw "Hay montajes o colmenas pendientes de una sesion anterior: $($script:AIOUpdateMountedPaths -join ', ')."
+        throw (Get-AIOString 'errors.e281' -FormatArgs @(($script:AIOUpdateMountedPaths -join ', ')))
     }
     $media = (Resolve-Path -LiteralPath $MediaRoot -ErrorAction Stop).Path
     $installWim = Join-Path $media 'sources\install.wim'
@@ -9679,7 +9677,7 @@ function Invoke-AIOUpdateMediaIntegration {
             }
     )
     if (@($effectiveInventory | Where-Object { $_.Installable }).Count -eq 0) {
-        throw 'Ningun paquete instalable del repositorio es compatible con los indices seleccionados.'
+        throw (Get-AIOString 'errors.e382')
     }
 
     Assert-AIOUpdateEsuPrerequisites -Inventory $effectiveInventory -Compatibility $Compatibility -PrepareWindows10Esu:$PrepareWindows10Esu
@@ -9801,7 +9799,7 @@ function Invoke-AIOUpdateMediaIntegration {
                 if (-not $winreCache.ContainsKey($originalHash)) {
                     $updatedWinRE = Join-Path $stagingRoot ("winre.updated.{0}.wim" -f $originalHash)
                     $winreMetadata = @(Get-AIOUpdateImageMetadata -ImagePath $sourceWinRE)
-                    if ($winreMetadata.Count -ne 1) { throw "WinRE del indice $winreIndex no contiene una unica imagen." }
+                    if ($winreMetadata.Count -ne 1) { throw (Get-AIOString 'errors.e616' -FormatArgs @($winreIndex)) }
                     $policy = Get-AIOUpdateWinREPolicy -Build ([version]$winreMetadata[0].Version).Build -Inventory $effectiveInventory -Architecture (Convert-AIOUpdateArchitectureName -Architecture $winreMetadata[0].Architecture)
                     Write-Host (Get-AIOString 'actualizaciones.winre_policy_line' $winreIndex $policy.Reason) -ForegroundColor Gray
                     $updated = Update-AIOUpdateWinRE -SourceWinRE $sourceWinRE -DestinationWinRE $updatedWinRE -WinREMount $winreMount -ScratchPath $dismScratch -Inventory $effectiveInventory -Policy $policy -OptimizeWim ([bool]$OptimizeWims) -VerifyPrePostCommit $VerifyPrePostCommit -VerificationReports $verificationReports
@@ -9838,7 +9836,7 @@ function Invoke-AIOUpdateMediaIntegration {
         if ($UpdateBootWim) {
             $script:AIOUpdateCurrentPhase = 'Mantenimiento de boot.wim'
             if (-not (Test-Path -LiteralPath $bootWim -PathType Leaf)) {
-                throw 'Se solicito actualizar boot.wim, pero no existe sources\boot.wim.'
+                throw (Get-AIOString 'errors.e575')
             }
             $bootImages = @(Get-AIOUpdateImageMetadata -ImagePath $bootWim)
             $captured = Update-AIOUpdateBootWim -BootWim $bootWim -InstallWim $installWim -InstallIndexes $InstallIndexes -Images $bootImages -Inventory $effectiveInventory -BootMount $bootMount -ScratchPath $dismScratch -CaptureRoot $captureRoot -StagingRoot $stagingRoot -SetupDUPackages $setupPackages -IntegrateSetupDU:$ApplySetupDU -VerifyPrePostCommit $VerifyPrePostCommit -VerificationReports $verificationReports
@@ -9894,7 +9892,7 @@ function Invoke-AIOUpdateMediaIntegration {
             $localeAudit = Test-AIOUpdateMediaLocalePolicy -MediaRoot $media
             if (-not $localeAudit.Success) {
                 $details = @($localeAudit.UnexpectedLocales | ForEach-Object { "$($_.Surface):$($_.Locale)" }) -join ', '
-                throw "La auditoria final detecto idiomas fuera de la politica lang.ini: $details"
+                throw (Get-AIOString 'errors.e296' -FormatArgs @($details))
             }
             [void]$completed.Add("politica final de idiomas verificada: $(@($localeAudit.AllowedLocales) -join ', ')")
         }
@@ -9954,7 +9952,7 @@ function Invoke-AIOUpdateMediaIntegration {
         foreach ($item in $completed) { Write-Host " [OK] $item" -ForegroundColor Green }
 
         if ($failed.Count -gt 0) {
-            throw "La integracion termino con $($failed.Count) verificaciones fallidas."
+            throw (Get-AIOString 'errors.e342' -FormatArgs @(($failed.Count)))
         }
 
         $script:AIOUpdateCurrentPhase = 'Generacion del reporte final'
@@ -10190,13 +10188,13 @@ function Show-AIOUpdatePreflightRestoreMenu {
     Write-Host (Get-AIOString 'actualizaciones.manifest_files' $manifest.FileCount) -ForegroundColor White
     Write-Host (Get-AIOString 'actualizaciones.dest_lbl' $target) -ForegroundColor White
     Write-Host ''
-    Write-Host (Get-AIOString 'actualizaciones.restore_opt1') -ForegroundColor White
-    Write-Host (Get-AIOString 'actualizaciones.restore_opt2') -ForegroundColor White
-    Write-Host (Get-AIOString 'actualizaciones.restore_opt3') -ForegroundColor White
-    Write-Host (Get-AIOString 'actualizaciones.restore_opt4') -ForegroundColor White
-    Write-Host (Get-AIOString 'actualizaciones.restore_opt_back') -ForegroundColor DarkGray
-
-    $selection = (Read-MenuOption (Get-AIOString 'actualizaciones.selection_prompt')).Trim().ToUpperInvariant()
+    $restoreItems = @(
+        @{ Value = '1'; Label = (Get-AIOString 'actualizaciones.restore_opt1'); Color = 'White' }
+        @{ Value = '2'; Label = (Get-AIOString 'actualizaciones.restore_opt2'); Color = 'White' }
+        @{ Value = '3'; Label = (Get-AIOString 'actualizaciones.restore_opt3'); Color = 'White' }
+        @{ Value = '4'; Label = (Get-AIOString 'actualizaciones.restore_opt4'); Color = 'White'; SpaceAfter = $true }
+    )
+    $selection = ([string](Show-AIOConsoleMenu -Items $restoreItems -AllowBack -BackValue 'V')).Trim().ToUpperInvariant()
     $scope = switch ($selection) {
         '1' { 'All' }
         '2' { 'InstallWim' }
@@ -10207,7 +10205,7 @@ function Show-AIOUpdatePreflightRestoreMenu {
 
     $validation = Test-AIOUpdatePreflightBackup -PreflightRoot $context.Root -Scope $scope
     if (-not $validation.Success) {
-        throw "El respaldo no es valido: $($validation.Errors -join ' ')"
+        throw (Get-AIOString 'errors.e208' -FormatArgs @(($validation.Errors -join ' ')))
     }
 
     Write-Host (Get-AIOString 'actualizaciones.restore_replace_warn') -ForegroundColor Yellow
@@ -10260,14 +10258,23 @@ function Show-UpdatesIntegrator-Menu {
         return
     }
 
-    Write-Host (Get-AIOString 'actualizaciones.menu_opt1') -ForegroundColor Green
-    Write-Host (Get-AIOString 'actualizaciones.menu_opt1_desc') -ForegroundColor Gray
-    Write-Host ''
-    Write-Host (Get-AIOString 'actualizaciones.menu_opt2') -ForegroundColor Yellow
-    Write-Host (Get-AIOString 'actualizaciones.menu_opt2_desc') -ForegroundColor Gray
-    Write-Host ''
-    Write-Host (Get-AIOString 'common.back_previous') -ForegroundColor Red
-    $operationMode = (Read-MenuOption (Get-AIOString 'actualizaciones.selection_prompt')).Trim().ToUpperInvariant()
+    $updItems = @(
+        @{
+            Value      = '1'
+            Label      = (Get-AIOString 'actualizaciones.menu_opt1')
+            Color      = 'Green'
+            Details    = @(@{ Text = (Get-AIOString 'actualizaciones.menu_opt1_desc'); Color = 'Gray' })
+            SpaceAfter = $true
+        }
+        @{
+            Value      = '2'
+            Label      = (Get-AIOString 'actualizaciones.menu_opt2')
+            Color      = 'Yellow'
+            Details    = @(@{ Text = (Get-AIOString 'actualizaciones.menu_opt2_desc'); Color = 'Gray' })
+            SpaceAfter = $true
+        }
+    )
+    $operationMode = ([string](Show-AIOConsoleMenu -Items $updItems -AllowBack -BackValue 'V')).Trim().ToUpperInvariant()
     if ($operationMode -eq '2') {
         try {
             $adkInfo = Initialize-AIOUpdateServicingEnvironment
@@ -10306,13 +10313,13 @@ function Show-UpdatesIntegrator-Menu {
         $bootWim = Join-Path $mediaRoot 'sources\boot.wim'
         if (-not (Test-Path -LiteralPath $installWim -PathType Leaf)) {
             if (Test-Path -LiteralPath $installEsd -PathType Leaf) {
-                throw 'El medio contiene install.esd. Conviertelo a install.wim antes de usar este modulo.'
+                throw (Get-AIOString 'errors.e164')
             }
-            throw 'No se encontro sources\install.wim.'
+            throw (Get-AIOString 'errors.e446')
         }
         $bootWimAvailable = Test-Path -LiteralPath $bootWim -PathType Leaf
         if (-not (Test-AIOUpdateMediaWritable -MediaRoot $mediaRoot)) {
-            throw 'El medio es de solo lectura. Extrae la ISO a una carpeta local escribible.'
+            throw (Get-AIOString 'errors.e166')
         }
 
         $repositoryRoot = $null
@@ -10343,7 +10350,7 @@ function Show-UpdatesIntegrator-Menu {
 
         $validPackages = @($inventory | Where-Object { $_.Installable })
         if ($validPackages.Count -eq 0) {
-            throw 'No se encontraron paquetes CAB/MSU utilizables.'
+            throw (Get-AIOString 'errors.e428')
         }
 
         $installImages = @(Get-AIOUpdateImageMetadata -ImagePath $installWim)
@@ -10498,7 +10505,10 @@ function Show-UpdatesIntegrator-Menu {
         Write-Host (Get-AIOString 'actualizaciones.plan_backup') -ForegroundColor White
         Write-Host ''
 
-        $start = (Read-MenuOption (Get-AIOString 'actualizaciones.start_prompt')).Trim().ToUpperInvariant()
+        $startItems = @(
+            @{ Value = 'I'; Label = (Get-AIOString 'actualizaciones.start_opt'); Color = 'Green'; SpaceAfter = $true }
+        )
+        $start = ([string](Show-AIOConsoleMenu -Items $startItems -AllowBack -BackValue 'V')).Trim().ToUpperInvariant()
         if ($start -ne 'I') {
             $script:AIOUpdateLastTerminalState.Status = 'Cancelled'
             $script:AIOUpdateLastTerminalState.Phase = 'Confirmacion del plan'

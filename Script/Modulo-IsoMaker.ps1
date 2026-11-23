@@ -232,7 +232,7 @@ function Show-IsoMaker-GUI {
 
     try {
         $oscdimgItem = Get-Item -LiteralPath $oscdimgExe -ErrorAction Stop
-        if ($oscdimgItem.Length -le 0) { throw "El ejecutable esta vacio." }
+        if ($oscdimgItem.Length -le 0) { throw (Get-AIOString 'errors.e123') }
         $oscdimgExe = $oscdimgItem.FullName
     } catch {
         Write-IsoMakerLog -LogLevel ERROR -Message "ISO_Maker: oscdimg.exe no es valido: $($_.Exception.Message)"
@@ -887,7 +887,7 @@ namespace IsoMaker
     $script:IsoMaker_QuoteWindowsArgument = {
         param([Parameter(Mandatory=$true)][string]$Value)
         if ($Value.IndexOf([char]34) -ge 0) {
-            throw "La ruta contiene un caracter de comillas no valido: $Value"
+            throw (Get-AIOString 'errors.e356' -FormatArgs @($Value))
         }
         $escaped = [regex]::Replace($Value, '(\\+)$', '$1$1')
         return '"' + $escaped + '"'
@@ -935,7 +935,7 @@ namespace IsoMaker
             }
         )
         if ($orderedFiles.Count -eq 0) {
-            throw "No se encontraron archivos de arranque para generar BootOrder.txt."
+            throw (Get-AIOString 'errors.e419')
         }
 
         # Oscdimg documenta -yo<archivo> sin espacios. Para maximizar la
@@ -963,7 +963,7 @@ namespace IsoMaker
             } catch {}
         }
         if (-not $tempRoot) {
-            throw "No se encontró una carpeta temporal escribible y sin espacios para BootOrder.txt."
+            throw (Get-AIOString 'errors.e454')
         }
 
         $tempName = "IsoMaker_BootOrder_$([guid]::NewGuid().ToString('N')).txt"
@@ -1310,12 +1310,12 @@ $script:IsoMaker_TestIsoImage = {
     }
 
     try {
-        if (-not (Test-Path -LiteralPath $IsoPath -PathType Leaf)) { throw 'La ISO que se intentara verificar no existe.' }
-        if ((Get-Item -LiteralPath $IsoPath -ErrorAction Stop).Length -le 0) { throw 'La ISO que se intentara verificar esta vacia.' }
+        if (-not (Test-Path -LiteralPath $IsoPath -PathType Leaf)) { throw (Get-AIOString 'errors.e293') }
+        if ((Get-Item -LiteralPath $IsoPath -ErrorAction Stop).Length -le 0) { throw (Get-AIOString 'errors.e292') }
         if (-not (Get-Command Mount-DiskImage -ErrorAction SilentlyContinue) -or
             -not (Get-Command Get-DiskImage -ErrorAction SilentlyContinue) -or
             -not (Get-Command Get-Volume -ErrorAction SilentlyContinue)) {
-            throw 'Los cmdlets Mount-DiskImage, Get-DiskImage o Get-Volume no estan disponibles.'
+            throw (Get-AIOString 'errors.e377')
         }
 
         $diskImage = Get-DiskImage -ImagePath $IsoPath -ErrorAction SilentlyContinue
@@ -1329,7 +1329,7 @@ $script:IsoMaker_TestIsoImage = {
             $volumes = @($diskImage | Get-Volume -ErrorAction SilentlyContinue | Where-Object { $_.DriveLetter })
             if ($volumes.Count -eq 0) { Start-Sleep -Milliseconds 250 }
         }
-        if ($volumes.Count -eq 0) { throw 'La ISO se monto, pero no se obtuvo una letra de unidad.' }
+        if ($volumes.Count -eq 0) { throw (Get-AIOString 'errors.e294') }
 
         $root = "$($volumes[0].DriveLetter):\"
         $result.Root = $root
@@ -1919,7 +1919,7 @@ $script:IsoMaker_TestIsoImage = {
         param([Parameter(Mandatory=$true)][string]$TargetPath)
 
         if (Test-Path -LiteralPath $TargetPath -PathType Container) {
-            throw "No se puede reemplazar una carpeta con un archivo: $TargetPath"
+            throw (Get-AIOString 'errors.e523' -FormatArgs @($TargetPath))
         }
 
         if (Test-Path -LiteralPath $TargetPath -PathType Leaf) {
@@ -2211,12 +2211,12 @@ $script:IsoMaker_TestIsoImage = {
             $srcCompare = $src.TrimEnd([char[]]@('\','/'))
             $srcPrefix  = $srcCompare + [System.IO.Path]::DirectorySeparatorChar
             if ($iso.StartsWith($srcPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-                throw "El archivo ISO de destino no puede guardarse dentro de la carpeta origen."
+                throw (Get-AIOString 'errors.e093')
             }
 
             $dstParent = Split-Path -Parent $iso
             if ([string]::IsNullOrWhiteSpace($dstParent)) {
-                throw "No se pudo determinar la carpeta de destino."
+                throw (Get-AIOString 'errors.e485')
             }
             if (-not (Test-Path -LiteralPath $dstParent)) {
                 New-Item -Path $dstParent -ItemType Directory -Force -ErrorAction Stop | Out-Null
@@ -2512,7 +2512,7 @@ $script:IsoMaker_TestIsoImage = {
                 [xml]$unattendDocument = Get-Content -LiteralPath $xmlPath -Raw -ErrorAction Stop
                 if ($null -eq $unattendDocument.DocumentElement -or
                     $unattendDocument.DocumentElement.LocalName -ine 'unattend') {
-                    throw "El elemento raiz del XML debe ser 'unattend'."
+                    throw (Get-AIOString 'errors.e124')
                 }
             } catch {
                 Write-IsoMakerLog -LogLevel ERROR -Message "ISO_Maker: autounattend.xml no es valido: $($_.Exception.Message)"
@@ -2620,7 +2620,7 @@ $script:IsoMaker_TestIsoImage = {
             'DUAL' { "-bootdata:2#p0,e,b$biosArg#pEF,e,b$uefiArg"; break }
             'BIOS' { "-b$biosArg -p0 -e"; break }
             'UEFI' { "-b$uefiArg -pEF -e"; break }
-            default { throw "Perfil de arranque no reconocido: $bootProfile" }
+            default { throw (Get-AIOString 'errors.e539' -FormatArgs @($bootProfile)) }
         }
 
         # BootOrder solo se aplica a fuentes mayores de 4.5 GB. Se intenta en el
@@ -2743,7 +2743,7 @@ $script:IsoMaker_TestIsoImage = {
             $script:IsoMaker_isoProc.add_OutputDataReceived($script:IsoMaker_stdoutHandler)
             $script:IsoMaker_isoProc.add_ErrorDataReceived($script:IsoMaker_stderrHandler)
 
-            if (-not $script:IsoMaker_isoProc.Start()) { throw "No inicio oscdimg" }
+            if (-not $script:IsoMaker_isoProc.Start()) { throw (Get-AIOString 'errors.e410') }
             $script:IsoMaker_isoProc.BeginOutputReadLine()
             $script:IsoMaker_isoProc.BeginErrorReadLine()
 
@@ -2902,7 +2902,7 @@ $script:IsoMaker_TestIsoImage = {
                         & $script:IsoMaker_DisposeIsoProcess $false
                         if (Test-Path -LiteralPath $script:IsoMaker_iso) {
                             try { Remove-Item -LiteralPath $script:IsoMaker_iso -Force -ErrorAction Stop } catch {
-                                throw "No se pudo eliminar la ISO parcial antes del reintento: $($_.Exception.Message)"
+                                throw (Get-AIOString 'errors.e491' -FormatArgs @(($_.Exception.Message)))
                             }
                         }
 
@@ -2924,7 +2924,7 @@ $script:IsoMaker_TestIsoImage = {
                     if ($exitCode -eq 0) {
                         try {
                             $isoItem = Get-Item -LiteralPath $script:IsoMaker_iso -ErrorAction Stop
-                            if ($isoItem.Length -le 0) { throw "El archivo ISO generado esta vacio." }
+                            if ($isoItem.Length -le 0) { throw (Get-AIOString 'errors.e094') }
                         } catch {
                             $exitCode = -2
                             $script:IsoMaker_errLogBuilder.AppendLine("ISO_Maker: oscdimg finalizo sin producir una ISO valida: $($_.Exception.Message)") | Out-Null

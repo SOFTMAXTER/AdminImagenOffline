@@ -132,12 +132,11 @@ También se admite una carpeta plana. El módulo clasifica los archivos por meta
 
 Desde el menú principal de AdminImagenOffline abre el módulo de Idiomas.
 
-Menú interno:
+Menú interno (se navega con **↑/↓**, **Enter** para elegir y **Retroceso** para volver al menú principal):
 
 ```text
-[1] Integrar idiomas / crear medio multilingüe
-[2] Restaurar un respaldo Preflight
-[V] Volver al menú principal
+Integrar idiomas / crear medio multilingüe
+Restaurar un respaldo Preflight
 ```
 
 ### Flujo de integración
@@ -150,7 +149,7 @@ Menú interno:
 6. Selecciona el idioma predeterminado.
 7. Configura las opciones del asistente.
 8. Revisa el plan de ejecución.
-9. Escribe `I` para iniciar.
+9. Selecciona **Iniciar integración** y pulsa `ENTER` (con `Retroceso` se cancela sin cambios).
 10. Espera el resumen final y presiona `ENTER` para volver al menú.
 
 ## Opciones del asistente
@@ -249,11 +248,7 @@ La consola usa salida compacta. Todos los archivos se copian y verifican, aunque
 
 ### Restauración manual
 
-Selecciona:
-
-```text
-[2] Restaurar un respaldo Preflight
-```
+Selecciona **Restaurar un respaldo Preflight** en el menú interno.
 
 Después selecciona directamente la carpeta `Preflight`. El módulo valida el manifiesto y los hashes antes de restaurar.
 

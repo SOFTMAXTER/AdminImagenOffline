@@ -186,12 +186,11 @@ Archivos UUP o CompDB usados como apoyo para reconstrucción o clasificación. N
 
 Desde el menú principal de AdminImagenOffline abre el módulo de Actualizaciones.
 
-Menú interno:
+Menú interno (se navega con **↑/↓**, **Enter** para elegir y **Retroceso** para volver):
 
 ```text
-[1] Integrar actualizaciones
-[2] Restaurar un respaldo Preflight
-[V] Volver
+Integrar actualizaciones
+Restaurar un respaldo Preflight
 ```
 
 ### Flujo de integración
@@ -202,7 +201,7 @@ Menú interno:
 4. Selecciona uno, varios o todos los índices de `install.wim`.
 5. Configura WinRE, `boot.wim`, SetupDU, limpieza y optimización.
 6. Revisa el plan de ejecución.
-7. Escribe `I` para iniciar.
+7. Selecciona **Iniciar integración** y pulsa `ENTER` (con `Retroceso` se cancela sin cambios).
 8. Espera la verificación final.
 9. Revisa el resumen y presiona `ENTER` para volver al menú.
 
@@ -324,19 +323,15 @@ Todos los archivos se copian y verifican, pero la consola muestra de forma perma
 
 ### Restauración manual
 
-Selecciona:
+Selecciona **Restaurar un respaldo Preflight** en el menú interno.
+
+Ámbitos disponibles (menú con **↑/↓** y **Enter**):
 
 ```text
-[2] Restaurar un respaldo Preflight
-```
-
-Ámbitos disponibles:
-
-```text
-[1] Todo el medio respaldado
-[2] Solamente install.wim
-[3] Solamente boot.wim
-[4] Setup, sources y archivos de arranque
+Restaurar todo el medio respaldado
+Restaurar solamente install.wim
+Restaurar solamente boot.wim
+Restaurar Setup, sources y archivos de arranque
 ```
 
 Para confirmar se debe escribir exactamente:

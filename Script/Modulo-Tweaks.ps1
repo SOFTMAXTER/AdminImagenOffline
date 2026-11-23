@@ -963,7 +963,7 @@ function Show-Tweaks-Offline-GUI {
                                     } 
                                     else {
                                         if ([string]::IsNullOrWhiteSpace($t.PayloadRestore)) {
-                                            throw "El ajuste $($t.Name) no tiene definido un codigo de restauracion."
+                                            throw (Get-AIOString 'errors.e091' -FormatArgs @(($t.Name)))
                                         }
                                         $tempReg = Join-Path $Script:Scratch_DIR "payload_restore_$([Guid]::NewGuid().ToString('N')).reg"
                                         [System.IO.File]::WriteAllText($tempReg, $t.PayloadRestore, [System.Text.Encoding]::Unicode)
@@ -1089,7 +1089,7 @@ function Show-Tweaks-Offline-GUI {
                                     $keyObj.SetValue($targetRegKey, $safeVal, $type)
                                 }
                             } else {
-                                throw "CreateSubKey devolvio nulo para la ruta: $subPathNet"
+                                throw (Get-AIOString 'errors.e027' -FormatArgs @($subPathNet))
                             }
 
                             if ($Mode -eq 'Apply') {

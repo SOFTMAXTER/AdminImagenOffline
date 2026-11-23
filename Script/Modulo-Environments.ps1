@@ -63,7 +63,7 @@ if (-not (Get-Command Show-BootSetup-GUI -ErrorAction SilentlyContinue)) {
 function Invoke-AIOWinREDism {
     param([Parameter(Mandatory = $true)][string[]]$DismArguments)
     & dism.exe @DismArguments
-    if ($LASTEXITCODE -ne 0) { throw "DISM devolvio $LASTEXITCODE ($($DismArguments[0]))." }
+    if ($LASTEXITCODE -ne 0) { throw (Get-AIOString 'errors.e034' -FormatArgs @($LASTEXITCODE, ($DismArguments[0]))) }
 }
 
 function Wait-AIOWinREFile {
@@ -72,10 +72,10 @@ function Wait-AIOWinREFile {
         $stream = $null
         try {
             $stream = [IO.File]::Open($Path, 'Open', 'Read', 'None')
-            if ($stream.Length -eq 0) { throw 'El WIM esta vacio.' }
+            if ($stream.Length -eq 0) { throw (Get-AIOString 'errors.e087') }
             return
         } catch {
-            if ($attempt -eq 14) { throw "No se puede leer el WIM terminado: $Path. $($_.Exception.Message)" }
+            if ($attempt -eq 14) { throw (Get-AIOString 'errors.e520' -FormatArgs @($Path, ($_.Exception.Message))) }
             Start-Sleep -Seconds 1
         } finally { if ($null -ne $stream) { $stream.Dispose() } }
     }
@@ -138,13 +138,13 @@ function Publish-AIOWinREFile {
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $WorkRoot 'publicacion.json') -Encoding UTF8 -ErrorAction Stop
     try {
         if (-not (Test-Path -LiteralPath $parent -PathType Container -ErrorAction Stop)) {
-            if ($replaceExisting) { throw 'La carpeta de destino desaparecio durante la edicion.' }
+            if ($replaceExisting) { throw (Get-AIOString 'errors.e298') }
             [IO.Directory]::CreateDirectory($parent) | Out-Null
         }
         # La copia hermana comprueba espacio y acceso sin tocar el original.
         Copy-AIOWinREData -Source $Source -Destination $pending
         if ((Get-FileHash -LiteralPath $pending -Algorithm SHA256 -ErrorAction Stop).Hash -ne $expectedHash) {
-            throw 'La copia preparada no coincide con el WIM editado.'
+            throw (Get-AIOString 'errors.e318')
         }
         if ($replaceExisting) {
             Set-AIOWinREMetadata -Path $pending -Metadata $Metadata
@@ -152,7 +152,7 @@ function Publish-AIOWinREFile {
             $current = Get-AIOWinREMetadata -Path $Destination
             if ((Get-FileHash -LiteralPath $Destination -Algorithm SHA256 -ErrorAction Stop).Hash -ne $OriginalHash -or
                 $current.Sddl -cne $Metadata.Sddl -or $current.Attributes -ne $Metadata.Attributes) {
-                throw 'El WinRE de destino cambio durante la edicion. No se sobrescribira.'
+                throw (Get-AIOString 'errors.e088')
             }
             $attempted = $true
             [IO.File]::SetAttributes($Destination, ($Metadata.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly)))
@@ -168,7 +168,7 @@ function Publish-AIOWinREFile {
         $after = Get-AIOWinREMetadata -Path $Destination
         if ((Get-FileHash -LiteralPath $Destination -Algorithm SHA256 -ErrorAction Stop).Hash -ne $expectedHash -or
             $after.Sddl -cne $Metadata.Sddl -or $after.Attributes -ne $Metadata.Attributes) {
-            throw 'La verificacion final de contenido, propietario, ACL o atributos fallo.'
+            throw (Get-AIOString 'errors.e366')
         }
         $verified = $true
     } catch {
@@ -176,19 +176,19 @@ function Publish-AIOWinREFile {
         if ($publishedNew) {
             try {
                 if ((Get-FileHash -LiteralPath $Destination -Algorithm SHA256 -ErrorAction Stop).Hash -ne $expectedHash) {
-                    throw 'El archivo nuevo cambio despues de publicarse; se conserva para revision.'
+                    throw (Get-AIOString 'errors.e104')
                 }
                 [IO.File]::Move($Destination, $rejected)
                 Write-Warning (Get-AIOString 'environments.winre_pub_cancelled' $rejected)
             } catch {
-                throw "Fallo al publicar: $publishError. RECUPERACION REQUERIDA: $($_.Exception.Message). Consulta $WorkRoot\publicacion.json."
+                throw (Get-AIOString 'errors.e234' -FormatArgs @($publishError, ($_.Exception.Message), $WorkRoot))
             }
         }
         if ($attempted) {
             try {
                 if (Test-Path -LiteralPath $backup -PathType Leaf -ErrorAction Stop) {
                     if ((Get-FileHash -LiteralPath $backup -Algorithm SHA256 -ErrorAction Stop).Hash -ne $OriginalHash) {
-                        throw "El respaldo no coincide con el original: $backup"
+                        throw (Get-AIOString 'errors.e206' -FormatArgs @($backup))
                     }
                     if (Test-Path -LiteralPath $Destination -PathType Leaf -ErrorAction Stop) {
                         [IO.File]::SetAttributes($Destination, [IO.FileAttributes]::Normal)
@@ -199,14 +199,14 @@ function Publish-AIOWinREFile {
                 $restored = Get-AIOWinREMetadata -Path $Destination
                 if ((Get-FileHash -LiteralPath $Destination -Algorithm SHA256 -ErrorAction Stop).Hash -ne $OriginalHash -or
                     $restored.Sddl -cne $Metadata.Sddl -or $restored.Attributes -ne $Metadata.Attributes) {
-                    throw 'No se pudo verificar la restauracion del original.'
+                    throw (Get-AIOString 'errors.e515')
                 }
                 Write-Warning (Get-AIOString 'environments.winre_save_cancelled')
             } catch {
-                throw "Fallo al publicar: $publishError. RECUPERACION REQUERIDA: $($_.Exception.Message). Consulta $WorkRoot\publicacion.json."
+                throw (Get-AIOString 'errors.e234' -FormatArgs @($publishError, ($_.Exception.Message), $WorkRoot))
             }
         }
-        throw "No se publico WinRE: $publishError. Se conserva el trabajo en $WorkRoot."
+        throw (Get-AIOString 'errors.e463' -FormatArgs @($publishError, $WorkRoot))
     } finally {
         if ($verified) {
             # Un error al borrar el respaldo no invalida una publicacion ya verificada.
@@ -227,16 +227,16 @@ function Get-AIOWinRECandidates {
     if ($Script:IMAGE_MOUNTED -eq 2) {
         # Resolver siempre el disco desde el VHD conectado, nunca desde un disco fisico arbitrario.
         $vhd = Get-VHD -Path $Script:WIM_FILE_PATH -ErrorAction Stop
-        if (-not $vhd.Attached) { throw 'El VHD de la sesion no esta conectado.' }
+        if (-not $vhd.Attached) { throw (Get-AIOString 'errors.e084') }
         $disks = @($vhd | Get-Disk -ErrorAction Stop)
-        if ($disks.Count -ne 1) { throw 'No se pudo identificar un unico disco para este VHD.' }
+        if ($disks.Count -ne 1) { throw (Get-AIOString 'errors.e497') }
         $parts = @(Get-Partition -DiskNumber $disks[0].Number -ErrorAction Stop)
         $windowsRoot = $Script:MOUNT_DIR.TrimEnd('\', '/')
         $windowsParts = @($parts | Where-Object {
             $paths = @($_.AccessPaths | ForEach-Object { ([string]$_).TrimEnd('\', '/') })
             ($paths -contains $windowsRoot) -or ($_.DriveLetter -and $windowsRoot -eq "$($_.DriveLetter):")
         })
-        if ($windowsParts.Count -ne 1) { throw 'El volumen Windows montado no se pudo vincular al VHD de la sesion.' }
+        if ($windowsParts.Count -ne 1) { throw (Get-AIOString 'errors.e214') }
         $roots[0].Label = Get-AIOString 'environments.disk_part_windows' $disks[0].Number $windowsParts[0].PartitionNumber
         foreach ($part in $parts) {
             if ($part.PartitionNumber -eq $windowsParts[0].PartitionNumber) { continue }
@@ -314,7 +314,7 @@ function Manage-WinRE-Menu {
 
     try {
         if (-not (Test-Path -LiteralPath (Join-Path $Script:MOUNT_DIR 'Windows\System32\config\SYSTEM') -PathType Leaf)) {
-            throw 'El punto de montaje no contiene una instalacion de Windows reconocible.'
+            throw (Get-AIOString 'errors.e186')
         }
 
         Write-Host (Get-AIOString 'environments.winre_step1') -ForegroundColor Yellow
@@ -323,41 +323,35 @@ function Manage-WinRE-Menu {
 
         $candidates = @(Get-AIOWinRECandidates -WorkRoot $workRoot -TemporaryAccessPaths $temporaryAccessPaths)
         if ($candidates.Count -eq 0) {
-            throw 'No se encontro winre.wim en Windows ni en las particiones Recovery del mismo VHD.'
+            throw (Get-AIOString 'errors.e452')
         }
 
         $selected = $candidates[0]
         if ($candidates.Count -gt 1) {
             Write-Host (Get-AIOString 'environments.winre_multi_found') -ForegroundColor Cyan
             Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
+            $candItems = @()
             for ($i = 0; $i -lt $candidates.Count; $i++) {
                 $candItem = Get-Item -LiteralPath $candidates[$i].Path -Force -ErrorAction SilentlyContinue
                 $candSizeMB = if ($candItem) { "{0:N2} MB" -f ($candItem.Length / 1MB) } else { "N/D" }
-                Write-Host "   [$($i + 1)] $($candidates[$i].Label)" -ForegroundColor White -NoNewline
-                Write-Host " ($candSizeMB)" -ForegroundColor Yellow
-                Write-Host (Get-AIOString 'environments.winre_path_label' $candidates[$i].Path) -ForegroundColor Gray
+                $candItems += @{
+                    Value       = $i
+                    Label       = $candidates[$i].Label
+                    Color       = 'White'
+                    Suffix      = " ($candSizeMB)"
+                    SuffixColor = 'Yellow'
+                    Details     = @(@{ Text = (Get-AIOString 'environments.winre_path_label' $candidates[$i].Path); Color = 'Gray' })
+                }
             }
-            Write-Host ""
-            Write-Host (Get-AIOString 'environments.cancel_back_enter') -ForegroundColor Red
-            Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
+            $candItems += @{ Type = 'Blank' }
 
-            $choice = 0
-            do {
-                $answer = if (Get-Command Read-MenuOption -ErrorAction SilentlyContinue) {
-                    ([string](Read-MenuOption (Get-AIOString 'environments.winre_select_prompt'))).Trim()
-                } else {
-                    ([string](Read-Host (Get-AIOString 'environments.winre_select_prompt_fb'))).Trim()
-                }
-                if ([string]::IsNullOrWhiteSpace($answer) -or $answer.ToUpperInvariant() -eq 'V') {
-                    Write-Log -LogLevel INFO -Message "WinRE_Manager: Seleccion de candidato WinRE cancelada por el usuario."
-                    $cleanWork = $true
-                    return
-                }
-                if (-not ([int]::TryParse($answer, [ref]$choice) -and $choice -ge 1 -and $choice -le $candidates.Count)) {
-                    Write-Warning (Get-AIOString 'environments.winre_select_invalid' $candidates.Count)
-                }
-            } until ($choice -ge 1 -and $choice -le $candidates.Count)
-            $selected = $candidates[$choice - 1]
+            $candChoice = Show-AIOConsoleMenu -Items $candItems -AllowBack -BackValue 'V'
+            if ($null -eq $candChoice -or [string]$candChoice -eq 'V') {
+                Write-Log -LogLevel INFO -Message "WinRE_Manager: Seleccion de candidato WinRE cancelada por el usuario."
+                $cleanWork = $true
+                return
+            }
+            $selected = $candidates[[int]$candChoice]
         }
 
         $winrePath = $selected.Path
@@ -403,11 +397,11 @@ function Manage-WinRE-Menu {
         Copy-Item -LiteralPath $winrePath -Destination $tempWinrePath -ErrorAction Stop
         [IO.File]::SetAttributes($tempWinrePath, [IO.FileAttributes]::Normal)
         if ((Get-FileHash -LiteralPath $tempWinrePath -Algorithm SHA256 -ErrorAction Stop).Hash -ne $originalHash) {
-            throw 'La copia de trabajo no coincide con el WinRE original.'
+            throw (Get-AIOString 'errors.e314')
         }
 
         $images = @(Get-WindowsImage -ImagePath $tempWinrePath -ErrorAction Stop)
-        if ($images.Count -ne 1 -or $images[0].ImageIndex -ne 1) { throw 'Se esperaba un WinRE con un unico indice (1).' }
+        if ($images.Count -ne 1 -or $images[0].ImageIndex -ne 1) { throw (Get-AIOString 'errors.e566') }
         $winreImgName = if ($images[0].ImageName) { $images[0].ImageName } else { 'Microsoft Windows Recovery Environment' }
         $winreImgVer  = if ($images[0].Version)   { $images[0].Version }   else { 'N/D' }
         Write-Host (Get-AIOString 'environments.winre_copy_verified' $winreImgName $winreImgVer) -ForegroundColor Green
@@ -421,7 +415,7 @@ function Manage-WinRE-Menu {
         $activeMount = $true
         Invoke-AIOWinREDism -DismArguments @('/Mount-Image', "/ImageFile:$tempWinrePath", '/Index:1', "/MountDir:$winreMount", '/CheckIntegrity')
         foreach ($relative in @('Windows\System32\config\SYSTEM', 'Windows\System32\config\SOFTWARE', 'Windows\System32\winpeshl.exe')) {
-            if (-not (Test-Path -LiteralPath (Join-Path $winreMount $relative) -PathType Leaf)) { throw "La imagen WinRE no contiene $relative." }
+            if (-not (Test-Path -LiteralPath (Join-Path $winreMount $relative) -PathType Leaf)) { throw (Get-AIOString 'errors.e339' -FormatArgs @($relative)) }
         }
         Write-Host (Get-AIOString 'environments.winre_mounted_ok') -ForegroundColor Green
         Write-Host (Get-AIOString 'environments.winre_isolating_reg') -ForegroundColor DarkGray
@@ -456,17 +450,30 @@ function Manage-WinRE-Menu {
             Write-Host (Get-AIOString 'environments.winre_edit_dst') -NoNewline -ForegroundColor Gray; Write-Host $destinationPath -ForegroundColor Cyan
             Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
             Write-Host ""
-            Write-Host (Get-AIOString 'environments.opt_inject_addons') -ForegroundColor White
-            Write-Host (Get-AIOString 'environments.winre_opt1_desc') -ForegroundColor Gray
-            Write-Host ""
-            Write-Host (Get-AIOString 'environments.opt_inject_drivers') -ForegroundColor Cyan
-            Write-Host (Get-AIOString 'environments.winre_opt2_desc') -ForegroundColor Gray
-            Write-Host ""
-            Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
-            Write-Host (Get-AIOString 'environments.opt_finish_save') -ForegroundColor Green
-            Write-Host ""
-
-            $option = ([string](Read-Host (Get-AIOString 'common.select_option_spaced'))).Trim().ToUpperInvariant()
+            $winreEditItems = @(
+                @{
+                    Value      = '1'
+                    Label      = (Get-AIOString 'environments.opt_inject_addons')
+                    Color      = 'White'
+                    Details    = @(@{ Text = (Get-AIOString 'environments.winre_opt1_desc'); Color = 'Gray' })
+                    SpaceAfter = $true
+                }
+                @{
+                    Value      = '2'
+                    Label      = (Get-AIOString 'environments.opt_inject_drivers')
+                    Color      = 'Cyan'
+                    Details    = @(@{ Text = (Get-AIOString 'environments.winre_opt2_desc'); Color = 'Gray' })
+                    SpaceAfter = $true
+                }
+                @{ Type = 'Separator'; Text = '-------------------------------------------------------'; Color = 'DarkGray' }
+                @{
+                    Value      = 'T'
+                    Label      = (Get-AIOString 'environments.opt_finish_save')
+                    Color      = 'Green'
+                    SpaceAfter = $true
+                }
+            )
+            $option = ([string](Show-AIOConsoleMenu -Items $winreEditItems -AllowBack -BackValue 'T')).Trim().ToUpperInvariant()
             switch ($option) {
                 '1' {
                     try {
@@ -502,18 +509,11 @@ function Manage-WinRE-Menu {
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host (Get-AIOString 'environments.winre_finish_title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
-        Write-Host (Get-AIOString 'environments.winre_finish_yes') -ForegroundColor Green
-        Write-Host (Get-AIOString 'environments.winre_finish_no') -ForegroundColor Yellow
-        Write-Host ""
-
-        $save = $null
-        do {
-            $rawSave = ([string](Read-Host (Get-AIOString 'environments.winre_save_prompt'))).Trim()
-            $save = if (Test-AIOYesResponse $rawSave) { 'S' } elseif (Test-AIONoResponse $rawSave) { 'N' } else { '' }
-            if ($save -notin @('S', 'N')) {
-                Write-Warning (Get-AIOString 'environments.save_invalid_sn')
-            }
-        } until ($save -in @('S', 'N'))
+        $winreSaveItems = @(
+            @{ Value = 'S'; Label = (Get-AIOString 'environments.winre_finish_yes'); Color = 'Green' }
+            @{ Value = 'N'; Label = (Get-AIOString 'environments.winre_finish_no');  Color = 'Yellow'; SpaceAfter = $true }
+        )
+        $save = [string](Show-AIOConsoleMenu -Items $winreSaveItems)
 
         # Los hives deben quedar descargados antes de CUALQUIER desmontaje DISM.
         $step4Label = if ($save -eq 'N') { Get-AIOString 'environments.winre_step4_discard' } else { Get-AIOString 'environments.winre_step4_commit' }
@@ -543,7 +543,7 @@ function Manage-WinRE-Menu {
             $activeMount = $true
             Invoke-AIOWinREDism -DismArguments @('/Mount-Image', "/ImageFile:$finalPath", '/Index:1', "/MountDir:$winreMount", '/ReadOnly', '/CheckIntegrity')
             foreach ($relative in @('Windows\System32\config\SYSTEM', 'Windows\System32\config\SOFTWARE', 'Windows\System32\winpeshl.exe')) {
-                if (-not (Test-Path -LiteralPath (Join-Path $winreMount $relative) -PathType Leaf)) { throw "El WinRE final no contiene $relative." }
+                if (-not (Test-Path -LiteralPath (Join-Path $winreMount $relative) -PathType Leaf)) { throw (Get-AIOString 'errors.e090' -FormatArgs @($relative)) }
             }
             Invoke-AIOWinREDism -DismArguments @('/Unmount-Image', "/MountDir:$winreMount", '/Discard')
             $activeMount = $false
@@ -674,21 +674,29 @@ function Manage-BootWim-Menu {
     $peLabel = if ($null -ne $idxPE) { Get-AIOString 'environments.idx_fmt' $idxPE } else { Get-AIOString 'environments.not_auto_detected' }
     $setupLabel = if ($null -ne $idxSetup) { Get-AIOString 'environments.idx_fmt' $idxSetup } else { Get-AIOString 'environments.not_auto_detected' }
 
-    Write-Host (Get-AIOString 'environments.boot_opt1_pe' $peLabel) -ForegroundColor White
-    Write-Host (Get-AIOString 'environments.boot_opt1_desc') -ForegroundColor Gray
-    Write-Host ""
-    Write-Host (Get-AIOString 'environments.boot_opt2_setup' $setupLabel) -ForegroundColor White
-    Write-Host (Get-AIOString 'environments.boot_opt2_desc') -ForegroundColor Gray
-    Write-Host ""
-    Write-Host (Get-AIOString 'environments.boot_opt_manual') -ForegroundColor DarkGray
-    Write-Host (Get-AIOString 'environments.cancel_back_enter') -ForegroundColor Red
-    Write-Host ""
-
-    $sel = if (Get-Command Read-MenuOption -ErrorAction SilentlyContinue) {
-        ([string](Read-MenuOption (Get-AIOString 'environments.boot_select_prompt'))).Trim().ToUpperInvariant()
-    } else {
-        ([string](Read-Host (Get-AIOString 'environments.boot_select_prompt_fb'))).Trim().ToUpperInvariant()
-    }
+    $bootIdxItems = @(
+        @{
+            Value      = '1'
+            Label      = (Get-AIOString 'environments.boot_opt1_pe' $peLabel)
+            Color      = 'White'
+            Details    = @(@{ Text = (Get-AIOString 'environments.boot_opt1_desc'); Color = 'Gray' })
+            SpaceAfter = $true
+        }
+        @{
+            Value      = '2'
+            Label      = (Get-AIOString 'environments.boot_opt2_setup' $setupLabel)
+            Color      = 'White'
+            Details    = @(@{ Text = (Get-AIOString 'environments.boot_opt2_desc'); Color = 'Gray' })
+            SpaceAfter = $true
+        }
+        @{
+            Value      = 'M'
+            Label      = (Get-AIOString 'environments.boot_opt_manual')
+            Color      = 'DarkGray'
+            SpaceAfter = $true
+        }
+    )
+    $sel = ([string](Show-AIOConsoleMenu -Items $bootIdxItems -AllowBack -BackValue 'V')).Trim().ToUpperInvariant()
 
     if ([string]::IsNullOrWhiteSpace($sel) -or $sel -eq 'V') {
         Write-Log -LogLevel INFO -Message "BootWimManager: Seleccion de indice cancelada por el usuario."
@@ -756,29 +764,49 @@ function Manage-BootWim-Menu {
                 Write-Host (Get-AIOString 'environments.winre_edit_mnt') -NoNewline -ForegroundColor Gray; Write-Host $Script:MOUNT_DIR -ForegroundColor Yellow
                 Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
                 Write-Host ""
-                Write-Host (Get-AIOString 'environments.opt_inject_addons') -ForegroundColor White
-                Write-Host (Get-AIOString 'environments.boot_opt1_edit_desc') -ForegroundColor Gray
-                Write-Host ""
-                Write-Host (Get-AIOString 'environments.opt_inject_drivers') -ForegroundColor Cyan
-                Write-Host (Get-AIOString 'environments.boot_opt2_edit_desc') -ForegroundColor Gray
+                $bootEditItems = @(
+                    @{
+                        Value      = '1'
+                        Label      = (Get-AIOString 'environments.opt_inject_addons')
+                        Color      = 'White'
+                        Details    = @(@{ Text = (Get-AIOString 'environments.boot_opt1_edit_desc'); Color = 'Gray' })
+                        SpaceAfter = $true
+                    }
+                    @{
+                        Value      = '2'
+                        Label      = (Get-AIOString 'environments.opt_inject_drivers')
+                        Color      = 'Cyan'
+                        Details    = @(@{ Text = (Get-AIOString 'environments.boot_opt2_edit_desc'); Color = 'Gray' })
+                        SpaceAfter = $true
+                    }
+                )
                 if ($isSetupIndex) {
-                    Write-Host ""
-                    Write-Host (Get-AIOString 'environments.boot_opt3_setup') -ForegroundColor Yellow
-                    Write-Host (Get-AIOString 'environments.boot_opt3_desc') -ForegroundColor Gray
+                    $setupDetails = @(@{ Text = (Get-AIOString 'environments.boot_opt3_desc'); Color = 'Gray' })
                     $summaryText = Get-AIOBootSetupSessionSummary -Session $setupSession
                     foreach ($sLine in ($summaryText -split "\r?\n")) {
                         if (-not [string]::IsNullOrWhiteSpace($sLine)) {
-                            $sColor = if ($sLine -match '^ERROR') { [System.ConsoleColor]::Red } else { [System.ConsoleColor]::Cyan }
-                            Write-Host "       -> $sLine" -ForegroundColor $sColor
+                            $sColor = if ($sLine -match '^ERROR') { 'Red' } else { 'Cyan' }
+                            $setupDetails += @{ Text = "       -> $sLine"; Color = $sColor }
                         }
                     }
+                    $bootEditItems += @{
+                        Value      = '3'
+                        Label      = (Get-AIOString 'environments.boot_opt3_setup')
+                        Color      = 'Yellow'
+                        Details    = $setupDetails
+                        SpaceAfter = $true
+                    }
                 }
-                Write-Host ""
-                Write-Host "-------------------------------------------------------" -ForegroundColor DarkGray
-                Write-Host (Get-AIOString 'environments.opt_finish_save') -ForegroundColor Green
-                Write-Host ""
-                
-                $opcionBoot = ([string](Read-Host (Get-AIOString 'common.select_option_spaced'))).Trim().ToUpperInvariant()
+                $bootEditItems += @(
+                    @{ Type = 'Separator'; Text = '-------------------------------------------------------'; Color = 'DarkGray' }
+                    @{
+                        Value      = 'T'
+                        Label      = (Get-AIOString 'environments.opt_finish_save')
+                        Color      = 'Green'
+                        SpaceAfter = $true
+                    }
+                )
+                $opcionBoot = ([string](Show-AIOConsoleMenu -Items $bootEditItems -AllowBack -BackValue 'T')).Trim().ToUpperInvariant()
                 switch ($opcionBoot) {
                     "1" {
                         try {
@@ -815,18 +843,11 @@ function Manage-BootWim-Menu {
                         Write-Host "=======================================================" -ForegroundColor Cyan
                         Write-Host (Get-AIOString 'environments.boot_finish_title') -ForegroundColor Cyan
                         Write-Host "=======================================================" -ForegroundColor Cyan
-                        Write-Host (Get-AIOString 'environments.boot_finish_yes') -ForegroundColor Green
-                        Write-Host (Get-AIOString 'environments.boot_finish_no') -ForegroundColor Yellow
-                        Write-Host ""
-
-                        $saveBoot = $null
-                        do {
-                            $rawSaveBoot = ([string](Read-Host (Get-AIOString 'environments.boot_save_prompt'))).Trim()
-                            $saveBoot = if (Test-AIOYesResponse $rawSaveBoot) { 'S' } elseif (Test-AIONoResponse $rawSaveBoot) { 'N' } else { '' }
-                            if ($saveBoot -notin @('S', 'N')) {
-                                Write-Warning (Get-AIOString 'environments.save_invalid_sn')
-                            }
-                        } until ($saveBoot -in @('S', 'N'))
+                        $bootSaveItems = @(
+                            @{ Value = 'S'; Label = (Get-AIOString 'environments.boot_finish_yes'); Color = 'Green' }
+                            @{ Value = 'N'; Label = (Get-AIOString 'environments.boot_finish_no');  Color = 'Yellow'; SpaceAfter = $true }
+                        )
+                        $saveBoot = [string](Show-AIOConsoleMenu -Items $bootSaveItems)
 
                         Write-Host (Get-AIOString 'environments.boot_step4') -ForegroundColor Yellow
                         $unmountCalled = $false
@@ -836,7 +857,7 @@ function Manage-BootWim-Menu {
                                 Write-Log -LogLevel ACTION -Message 'BootWimManager: Guardando boot.wim; Setup, bypass y fondos comprobados antes del Commit.'
                                 $unmountCalled = $true
                                 Unmount-Image -Commit
-                                if ($Script:IMAGE_MOUNTED -ne 0) { throw 'DISM no completo el guardado. El montaje sigue activo.' }
+                                if ($Script:IMAGE_MOUNTED -ne 0) { throw (Get-AIOString 'errors.e038') }
                                 try { Complete-AIOBootSetupCommit -Session $setupSession }
                                 catch {
                                     Write-Warning (Get-AIOString 'environments.boot_external_warn' $_.Exception.Message)

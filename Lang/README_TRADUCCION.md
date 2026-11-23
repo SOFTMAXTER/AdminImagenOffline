@@ -31,6 +31,13 @@ AdminImagenOffline detecta automáticamente el idioma del sistema anfitrión (`[
 Write-Host (Get-AIOString 'menu.main.title') -ForegroundColor Cyan
 Write-Host (Get-AIOString 'save.commit_start' $Script:MOUNTED_INDEX) -ForegroundColor Yellow
 
+# Mensajes de error con marcadores {0}, {1}: se pasan con -FormatArgs
+throw (Get-AIOString 'errors.e024' -FormatArgs @($partes, $encontradas))
+
+# Menús de consola (↑/↓, Enter y Retroceso); el pie de teclas usa las claves common.nav_hint_*
+$items = @(@{ Value = 'A'; Label = (Get-AIOString 'menu.main.opt1') })
+$opcion = [string](Show-AIOConsoleMenu -Items $items -AllowBack -BackValue 'V')
+
 # Validación de respuestas S/N o Y/N
 if (Test-AIOYesResponse $respuesta) { ... }
 ```

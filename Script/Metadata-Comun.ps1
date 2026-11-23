@@ -104,14 +104,14 @@ function Get-AIOWimEditionChoices {
 function Get-AIOWimMetadataTemplate {
     param([object]$Image, [string]$EditionId)
     if (@(Get-AIOWimEditionChoices $Image) -inotcontains $EditionId) {
-        throw 'La plantilla no corresponde a la familia de Windows de esta imagen.'
+        throw (Get-AIOString 'errors.e346')
     }
     $catalogPath = $null
     foreach ($relativePath in @('Catalogos\Ediciones.ps1', 'Modulo-Ediciones.ps1', 'Ediciones.ps1')) {
         $candidate = Join-Path $PSScriptRoot $relativePath
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { $catalogPath = $candidate; break }
     }
-    if (-not $catalogPath) { throw 'Falta el catalogo de ediciones. Puedes introducir los metadatos manualmente.' }
+    if (-not $catalogPath) { throw (Get-AIOString 'errors.e256') }
     . $catalogPath
     $meta = Get-WindowsEditionMetadata -QueryString $EditionId
     $profile = Get-AIOWimImageProfile $Image
@@ -131,11 +131,11 @@ function Get-AIOWimMetadataTemplate {
 function Assert-AIOWimMetadata {
     param([object]$Metadata)
     if ([string]::IsNullOrWhiteSpace([string]$Metadata.Name) -or $Metadata.Name -match '[\x00-\x1F]') {
-        throw 'El nombre es obligatorio y no puede contener saltos de linea ni caracteres de control.'
+        throw (Get-AIOString 'errors.e171')
     }
     foreach ($field in @('Name', 'Description', 'DisplayName', 'DisplayDescription', 'Edition')) {
         try { [void][Xml.XmlConvert]::VerifyXmlChars([string]$Metadata.$field) }
-        catch { throw "El campo $field contiene caracteres no validos para XML." }
+        catch { throw (Get-AIOString 'errors.e105' -FormatArgs @($field)) }
     }
 }
 

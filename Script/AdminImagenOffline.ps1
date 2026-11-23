@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.16
+    1.5.17
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.16"
+$script:Version = "1.5.17"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -163,7 +163,7 @@ function Invoke-FullRepoUpdater {
         }
 
         if ([string]::IsNullOrWhiteSpace($remoteVersionStr)) {
-            throw "El servidor devolvio un archivo de version vacio o no valido."
+            throw (Get-AIOString 'errors.e210')
         }
 
         try {
@@ -252,7 +252,7 @@ function Invoke-FullRepoUpdater {
         # AdminImagenOffline.ps1 y sus modulos viven en \Script; la instalacion es su carpeta padre.
         $installPath = Split-Path -Path $updaterScriptRoot -Parent
         if ([string]::IsNullOrWhiteSpace($installPath) -or -not (Test-Path -LiteralPath $installPath -PathType Container)) {
-            throw "No se pudo determinar una ruta de instalacion valida. ScriptRoot: '$updaterScriptRoot'"
+            throw (Get-AIOString 'errors.e486' -FormatArgs @($updaterScriptRoot))
         }
 
         $tempZip = Join-Path -Path $installPath -ChildPath "update.zip"
@@ -280,10 +280,10 @@ function Invoke-FullRepoUpdater {
         Invoke-WebRequest -Uri $zipUrl -OutFile $tempZip -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
 
         if (-not (Test-Path -LiteralPath $tempZip -PathType Leaf)) {
-            throw "La descarga finalizo sin crear el archivo '$tempZip'."
+            throw (Get-AIOString 'errors.e321' -FormatArgs @($tempZip))
         }
         $downloadSize = (Get-Item -LiteralPath $tempZip -ErrorAction Stop).Length
-        if ($downloadSize -le 0) { throw "El paquete descargado esta vacio." }
+        if ($downloadSize -le 0) { throw (Get-AIOString 'errors.e182') }
         Write-Log -LogLevel INFO -Message "UPDATER: Descarga completada. Tamano: $downloadSize bytes."
 
         Write-Host (Get-AIOString 'updater.extracting') -ForegroundColor Cyan
@@ -292,7 +292,7 @@ function Invoke-FullRepoUpdater {
 
         $repoExtractedPath = Join-Path -Path $tempExtract -ChildPath "AdminImagenOffline-main"
         if (-not (Test-Path -LiteralPath $repoExtractedPath -PathType Container)) {
-            throw "La estructura esperada del paquete no existe: '$repoExtractedPath'."
+            throw (Get-AIOString 'errors.e329' -FormatArgs @($repoExtractedPath))
         }
         Write-Log -LogLevel INFO -Message "UPDATER: Extraccion completada correctamente."
 
@@ -386,7 +386,7 @@ del "%~f0"
 
         [System.IO.File]::WriteAllText($batPath, $batContent, [System.Text.Encoding]::ASCII)
         if (-not (Test-Path -LiteralPath $batPath -PathType Leaf)) {
-            throw "No se pudo generar '$batPath'."
+            throw (Get-AIOString 'errors.e493' -FormatArgs @($batPath))
         }
         Write-Log -LogLevel INFO -Message "UPDATER: Instalador diferido generado correctamente."
 
@@ -521,7 +521,7 @@ function Get-UnusedDriveLetter {
         }
     }
 
-    throw "Excepcion de Montaje: No hay letras de unidad disponibles (rango Z: a F:) para adjuntar particiones temporales."
+    throw (Get-AIOString 'errors.e227')
 }
 
 # --- Carga la configuracion desde el archivo JSON ---
@@ -586,11 +586,13 @@ function Ensure-WorkingDirectories {
         Write-Warning (Get-AIOString 'core.mount_dir_missing')
         Write-Host $Script:MOUNT_DIR -ForegroundColor Yellow
         Write-Host ""
-        Write-Host (Get-AIOString 'core.dir_opt_create')
-        Write-Host (Get-AIOString 'core.dir_opt_select')
-        Write-Host (Get-AIOString 'core.dir_opt_exit')
-        $choice = Read-Host ("`n" + (Get-AIOString 'common.select_option'))
-        
+        $dirItems = @(
+            @{ Value = 'C'; Label = (Get-AIOString 'core.dir_opt_create'); Color = 'Green' }
+            @{ Value = 'S'; Label = (Get-AIOString 'core.dir_opt_select'); Color = 'Yellow' }
+            @{ Value = 'N'; Label = (Get-AIOString 'core.dir_opt_exit'); Color = 'Red' }
+        )
+        $choice = [string](Show-AIOConsoleMenu -Items $dirItems)
+
         switch ($choice.ToUpper()) {
             'C' {
                 Write-Host (Get-AIOString 'core.dir_creating' $Script:MOUNT_DIR) -ForegroundColor Yellow
@@ -630,11 +632,13 @@ function Ensure-WorkingDirectories {
         Write-Warning (Get-AIOString 'core.scratch_dir_missing')
         Write-Host $Script:Scratch_DIR -ForegroundColor Yellow
         Write-Host ""
-        Write-Host (Get-AIOString 'core.dir_opt_create')
-        Write-Host (Get-AIOString 'core.dir_opt_select_perm')
-        Write-Host (Get-AIOString 'core.dir_opt_exit')
-        $choice = Read-Host ("`n" + (Get-AIOString 'common.select_option'))
-        
+        $scratchItems = @(
+            @{ Value = 'C'; Label = (Get-AIOString 'core.dir_opt_create'); Color = 'Green' }
+            @{ Value = 'S'; Label = (Get-AIOString 'core.dir_opt_select_perm'); Color = 'Yellow' }
+            @{ Value = 'N'; Label = (Get-AIOString 'core.dir_opt_exit'); Color = 'Red' }
+        )
+        $choice = [string](Show-AIOConsoleMenu -Items $scratchItems)
+
         switch ($choice.ToUpper()) {
             'C' {
                 Write-Host (Get-AIOString 'core.dir_creating' $Script:Scratch_DIR) -ForegroundColor Yellow
@@ -1062,23 +1066,39 @@ function Show-ConfigMenu {
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host (Get-AIOString 'config.menu_subtitle')
         Write-Host ""
-        Write-Host (Get-AIOString 'config.opt_mount_dir')
-        Write-Host (Get-AIOString 'config.current_path') -NoNewline; Write-Host $Script:MOUNT_DIR -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'config.opt_mount_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'config.opt_scratch_dir')
-        Write-Host (Get-AIOString 'config.current_path') -NoNewline; Write-Host $Script:Scratch_DIR -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'config.opt_scratch_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'config.opt_language')
-        Write-Host (Get-AIOString 'config.current_language') -NoNewline; Write-Host (Get-AIOLanguageDisplaySummary) -ForegroundColor Cyan
-        Write-Host (Get-AIOString 'config.opt_language_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host ""
-        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
-        Write-Host ""
-        $opcionC = Read-MenuOption (Get-AIOString 'common.select_option')
+        $configItems = @(
+            @{
+                Value      = '1'
+                Label      = (Get-AIOString 'config.opt_mount_dir')
+                Color      = 'White'
+                Details    = @(
+                    @{ Prefix = (Get-AIOString 'config.current_path'); PrefixColor = 'White'; Text = $Script:MOUNT_DIR; Color = 'Yellow' }
+                    @{ Text = (Get-AIOString 'config.opt_mount_desc'); Color = 'Gray' }
+                )
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '2'
+                Label      = (Get-AIOString 'config.opt_scratch_dir')
+                Color      = 'White'
+                Details    = @(
+                    @{ Prefix = (Get-AIOString 'config.current_path'); PrefixColor = 'White'; Text = $Script:Scratch_DIR; Color = 'Yellow' }
+                    @{ Text = (Get-AIOString 'config.opt_scratch_desc'); Color = 'Gray' }
+                )
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '3'
+                Label      = (Get-AIOString 'config.opt_language')
+                Color      = 'White'
+                Details    = @(
+                    @{ Prefix = (Get-AIOString 'config.current_language'); PrefixColor = 'White'; Text = (Get-AIOLanguageDisplaySummary); Color = 'Cyan' }
+                    @{ Text = (Get-AIOString 'config.opt_language_desc'); Color = 'Gray' }
+                )
+                SpaceAfter = $true
+            }
+        )
+        $opcionC = [string](Show-AIOConsoleMenu -Items $configItems -AllowBack -BackValue 'V')
 
         switch ($opcionC.ToUpper()) {
             "1" {
@@ -1130,41 +1150,73 @@ function Mount-Save-Menu {
         Write-Host (Get-AIOString 'menu.mount_save.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host (Get-AIOString 'menu.mount_save.sec_mount') -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'menu.mount_save.opt1')
-        Write-Host (Get-AIOString 'menu.mount_save.opt1_desc' $Script:MOUNT_DIR) -ForegroundColor Gray
-        Write-Host ""
+        $msItems = @(
+            @{ Type = 'Header'; Text = (Get-AIOString 'menu.mount_save.sec_mount'); Color = 'Yellow' }
+            @{
+                Value      = '1'
+                Label      = (Get-AIOString 'menu.mount_save.opt1')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.mount_save.opt1_desc' $Script:MOUNT_DIR); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+        )
         if ($Script:IMAGE_MOUNTED -eq 1) {
-            Write-Host (Get-AIOString 'menu.mount_save.opt2')
-            Write-Host ""
+            $msItems += @{
+                Value      = '2'
+                Label      = (Get-AIOString 'menu.mount_save.opt2')
+                Color      = 'White'
+                SpaceAfter = $true
+            }
         }
         if ($Script:IMAGE_MOUNTED -gt 0) {
-            Write-Host (Get-AIOString 'menu.mount_save.sec_save') -ForegroundColor Yellow
-            Write-Host (Get-AIOString 'menu.mount_save.opt3' $Script:MOUNTED_INDEX)
-            Write-Host (Get-AIOString 'menu.mount_save.opt3_desc') -ForegroundColor Gray
-            Write-Host ""
-            Write-Host (Get-AIOString 'menu.mount_save.opt4')
-            Write-Host (Get-AIOString 'menu.mount_save.opt4_desc') -ForegroundColor Gray
-            Write-Host ""
-            Write-Host (Get-AIOString 'menu.mount_save.opt5') -ForegroundColor Green
-            Write-Host (Get-AIOString 'menu.mount_save.opt5_desc') -ForegroundColor Gray
-            Write-Host ""
-            Write-Host (Get-AIOString 'menu.mount_save.sec_unmount') -ForegroundColor Yellow
-            Write-Host (Get-AIOString 'menu.mount_save.opt6') -ForegroundColor Green
-            Write-Host (Get-AIOString 'menu.mount_save.opt6_desc') -ForegroundColor Gray
-            Write-Host ""
-            Write-Host (Get-AIOString 'menu.mount_save.opt7')
-            Write-Host (Get-AIOString 'menu.mount_save.opt7_desc') -ForegroundColor Gray
-            Write-Host ""
+            $msItems += @(
+                @{ Type = 'Header'; Text = (Get-AIOString 'menu.mount_save.sec_save'); Color = 'Yellow' }
+                @{
+                    Value      = '3'
+                    Label      = (Get-AIOString 'menu.mount_save.opt3' $Script:MOUNTED_INDEX)
+                    Color      = 'White'
+                    Details    = @(@{ Text = (Get-AIOString 'menu.mount_save.opt3_desc'); Color = 'Gray' })
+                    SpaceAfter = $true
+                }
+                @{
+                    Value      = '4'
+                    Label      = (Get-AIOString 'menu.mount_save.opt4')
+                    Color      = 'White'
+                    Details    = @(@{ Text = (Get-AIOString 'menu.mount_save.opt4_desc'); Color = 'Gray' })
+                    SpaceAfter = $true
+                }
+                @{
+                    Value      = '5'
+                    Label      = (Get-AIOString 'menu.mount_save.opt5')
+                    Color      = 'Green'
+                    Details    = @(@{ Text = (Get-AIOString 'menu.mount_save.opt5_desc'); Color = 'Gray' })
+                    SpaceAfter = $true
+                }
+                @{ Type = 'Header'; Text = (Get-AIOString 'menu.mount_save.sec_unmount'); Color = 'Yellow' }
+                @{
+                    Value      = '6'
+                    Label      = (Get-AIOString 'menu.mount_save.opt6')
+                    Color      = 'Green'
+                    Details    = @(@{ Text = (Get-AIOString 'menu.mount_save.opt6_desc'); Color = 'Gray' })
+                    SpaceAfter = $true
+                }
+                @{
+                    Value      = '7'
+                    Label      = (Get-AIOString 'menu.mount_save.opt7')
+                    Color      = 'White'
+                    Details    = @(@{ Text = (Get-AIOString 'menu.mount_save.opt7_desc'); Color = 'Gray' })
+                    SpaceAfter = $true
+                }
+            )
         }
-        Write-Host (Get-AIOString 'menu.mount_save.opt_clean') -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'menu.mount_save.opt_clean_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host ""
-        Write-Host (Get-AIOString 'common.back_previous') -ForegroundColor Red
-        Write-Host ""
-        $opcionMS = Read-MenuOption (Get-AIOString 'common.select_option')
+        $msItems += @{
+            Value      = 'L'
+            Label      = (Get-AIOString 'menu.mount_save.opt_clean')
+            Color      = 'Yellow'
+            Details    = @(@{ Text = (Get-AIOString 'menu.mount_save.opt_clean_desc'); Color = 'Gray' })
+            SpaceAfter = $true
+        }
+        $opcionMS = [string](Show-AIOConsoleMenu -Items $msItems -AllowBack -BackValue 'V')
 
         if ($opcionMS.ToUpper() -in @("3","4","5","6","7") -and $Script:IMAGE_MOUNTED -eq 0) {
             Write-Warning (Get-AIOString 'menu.mount_save.not_mounted_warn')
@@ -1230,20 +1282,30 @@ function Edit-Indexes-Menu {
         Write-Host (Get-AIOString 'menu.edit_indexes.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host (Get-AIOString 'menu.edit_indexes.opt1')
-        Write-Host (Get-AIOString 'menu.edit_indexes.opt1_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.edit_indexes.opt2')
-        Write-Host (Get-AIOString 'menu.edit_indexes.opt2_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.edit_indexes.opt3')
-        Write-Host (Get-AIOString 'menu.edit_indexes.opt3_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host ""
-        Write-Host (Get-AIOString 'common.back_previous') -ForegroundColor Red
-        Write-Host ""
-        $opcionEI = Read-MenuOption (Get-AIOString 'common.select_option')
+        $eiItems = @(
+            @{
+                Value      = '1'
+                Label      = (Get-AIOString 'menu.edit_indexes.opt1')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.edit_indexes.opt1_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '2'
+                Label      = (Get-AIOString 'menu.edit_indexes.opt2')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.edit_indexes.opt2_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '3'
+                Label      = (Get-AIOString 'menu.edit_indexes.opt3')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.edit_indexes.opt3_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+        )
+        $opcionEI = [string](Show-AIOConsoleMenu -Items $eiItems -AllowBack -BackValue 'V')
                 
         switch ($opcionEI.ToUpper()) {
             "1" { 
@@ -1276,28 +1338,51 @@ function Convert-Image-Menu {
         Write-Host (Get-AIOString 'menu.convert.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host (Get-AIOString 'menu.convert.sec_wim_esd') -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'menu.convert.opt1')
-        Write-Host (Get-AIOString 'menu.convert.opt1_desc') -ForegroundColor Gray
-        Write-Host (Get-AIOString 'menu.convert.opt2')
-        Write-Host (Get-AIOString 'menu.convert.opt2_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.convert.sec_swm') -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'menu.convert.opt3')
-        Write-Host (Get-AIOString 'menu.convert.opt3_desc') -ForegroundColor Gray
-        Write-Host (Get-AIOString 'menu.convert.opt4')
-        Write-Host (Get-AIOString 'menu.convert.opt4_desc') -ForegroundColor Gray
-        Write-Host (Get-AIOString 'menu.convert.opt5')
-        Write-Host (Get-AIOString 'menu.convert.opt5_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.convert.sec_vhd') -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'menu.convert.opt6')
-        Write-Host (Get-AIOString 'menu.convert.opt6_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host (Get-AIOString 'common.back_previous') -ForegroundColor Red
-        Write-Host ""
-        $opcionCI = Read-MenuOption (Get-AIOString 'common.select_option')
+        $ciItems = @(
+            @{ Type = 'Header'; Text = (Get-AIOString 'menu.convert.sec_wim_esd'); Color = 'Yellow' }
+            @{
+                Value   = '1'
+                Label   = (Get-AIOString 'menu.convert.opt1')
+                Color   = 'White'
+                Details = @(@{ Text = (Get-AIOString 'menu.convert.opt1_desc'); Color = 'Gray' })
+            }
+            @{
+                Value      = '2'
+                Label      = (Get-AIOString 'menu.convert.opt2')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.convert.opt2_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{ Type = 'Header'; Text = (Get-AIOString 'menu.convert.sec_swm'); Color = 'Yellow' }
+            @{
+                Value   = '3'
+                Label   = (Get-AIOString 'menu.convert.opt3')
+                Color   = 'White'
+                Details = @(@{ Text = (Get-AIOString 'menu.convert.opt3_desc'); Color = 'Gray' })
+            }
+            @{
+                Value   = '4'
+                Label   = (Get-AIOString 'menu.convert.opt4')
+                Color   = 'White'
+                Details = @(@{ Text = (Get-AIOString 'menu.convert.opt4_desc'); Color = 'Gray' })
+            }
+            @{
+                Value      = '5'
+                Label      = (Get-AIOString 'menu.convert.opt5')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.convert.opt5_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{ Type = 'Header'; Text = (Get-AIOString 'menu.convert.sec_vhd'); Color = 'Yellow' }
+            @{
+                Value      = '6'
+                Label      = (Get-AIOString 'menu.convert.opt6')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.convert.opt6_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+        )
+        $opcionCI = [string](Show-AIOConsoleMenu -Items $ciItems -AllowBack -BackValue 'V')
 
         switch ($opcionCI.ToUpper()) {
             "1" {
@@ -1331,20 +1416,30 @@ function Image-Management-Menu {
         Write-Host (Get-AIOString 'menu.image_mgmt.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host (Get-AIOString 'menu.image_mgmt.opt1') -ForegroundColor White
-        Write-Host (Get-AIOString 'menu.image_mgmt.opt1_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.image_mgmt.opt2') -ForegroundColor Green
-        Write-Host (Get-AIOString 'menu.image_mgmt.opt2_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.image_mgmt.opt3') -ForegroundColor White
-        Write-Host (Get-AIOString 'menu.image_mgmt.opt3_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host ""
-        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
-        Write-Host ""
-        $opcionIM = Read-MenuOption (Get-AIOString 'common.select_option')
+        $imItems = @(
+            @{
+                Value      = '1'
+                Label      = (Get-AIOString 'menu.image_mgmt.opt1')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.image_mgmt.opt1_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '2'
+                Label      = (Get-AIOString 'menu.image_mgmt.opt2')
+                Color      = 'Green'
+                Details    = @(@{ Text = (Get-AIOString 'menu.image_mgmt.opt2_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '3'
+                Label      = (Get-AIOString 'menu.image_mgmt.opt3')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.image_mgmt.opt3_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+        )
+        $opcionIM = [string](Show-AIOConsoleMenu -Items $imItems -AllowBack -BackValue 'V')
 
         switch ($opcionIM.ToUpper()) {
             "1" {
@@ -1503,61 +1598,18 @@ function Cambio-Edicion-Menu {
         return
     }
 
-    # Calculamos cuantas filas necesitamos para 2 columnas
-    $totalItems = $targetEditions.Count
-    $rowCount = [math]::Ceiling($totalItems / 2)
-
-    # Iteramos por FILAS, no por items linealmente
-    for ($row = 0; $row -lt $rowCount; $row++) {
-        
-        # --- COLUMNA IZQUIERDA ---
-        $indexLeft = $row
-        if ($indexLeft -lt $totalItems) {
-            $editionRaw = $targetEditions[$indexLeft]
-            $displayNum = $indexLeft + 1 # Mostramos base 1
-            
-            # Traducción usando el catálogo
-            $editionName = Get-FriendlyEditionName $editionRaw
-
-            # Formato: [1 ] Nombre... (Relleno a 60 caracteres)
-            $leftText = "   [{0,-2}] {1}" -f $displayNum, $editionName
-            Write-Host $leftText.PadRight(60) -NoNewline -ForegroundColor White
-        }
-
-        # --- COLUMNA DERECHA ---
-        $indexRight = $row + $rowCount
-        
-        if ($indexRight -lt $totalItems) {
-            $editionRaw = $targetEditions[$indexRight]
-            $displayNum = $indexRight + 1
-            
-            # Traducción usando el catálogo
-            $editionName = Get-FriendlyEditionName $editionRaw
-
-            $rightText = "   [{0,-2}] {1}" -f $displayNum, $editionName
-            Write-Host $rightText -ForegroundColor White
-        } else {
-            Write-Host ""
+    $editionItems = @()
+    foreach ($editionRaw in $targetEditions) {
+        $editionName = Get-FriendlyEditionName $editionRaw
+        $editionItems += @{
+            Value = $editionRaw
+            Label = $editionName
+            Color = 'White'
         }
     }
 
-    Write-Host ""
-    Write-Host "-------------------------------------------------------"
-    Write-Host ""
-    Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
-    Write-Host ""
-    $opcionEdicion = Read-MenuOption (Get-AIOString 'edition.select_prompt' $targetEditions.Count)
-
-    if ($opcionEdicion.ToUpper() -eq "V") { return }
-
-    $opcionIndex = 0
-    if (-not [int]::TryParse($opcionEdicion, [ref]$opcionIndex) -or $opcionIndex -lt 1 -or $opcionIndex -gt $targetEditions.Count) {
-        Write-Warning (Get-AIOString 'common.invalid_option')
-        Pause
-        return
-    }
-
-    $selectedEdition = $targetEditions[$opcionIndex - 1] 
+    $selectedEdition = [string](Show-AIOConsoleMenu -Items $editionItems -AllowBack -BackValue 'V' -Columns 2)
+    if ([string]::IsNullOrWhiteSpace($selectedEdition) -or $selectedEdition -eq 'V') { return }
 
     Write-Host (Get-AIOString 'edition.changing_to' $DISPLAY_EDITION $selectedEdition) -ForegroundColor Yellow
     Write-Host (Get-AIOString 'edition.wait_minutes') -ForegroundColor Gray
@@ -1585,16 +1637,23 @@ function Drivers-Menu {
         Write-Host (Get-AIOString 'menu.drivers.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host (Get-AIOString 'menu.drivers.opt1')
-        Write-Host (Get-AIOString 'menu.drivers.opt1_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.drivers.opt2')
-        Write-Host (Get-AIOString 'menu.drivers.opt2_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host (Get-AIOString 'common.back_short') -ForegroundColor Red
-        
-        $opcionD = Read-MenuOption ("`n" + (Get-AIOString 'common.select_option'))
+        $drvItems = @(
+            @{
+                Value      = '1'
+                Label      = (Get-AIOString 'menu.drivers.opt1')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.drivers.opt1_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '2'
+                Label      = (Get-AIOString 'menu.drivers.opt2')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.drivers.opt2_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+        )
+        $opcionD = [string](Show-AIOConsoleMenu -Items $drvItems -AllowBack -BackValue 'V')
         
         switch ($opcionD.ToUpper()) {
             "1" { 
@@ -1641,20 +1700,30 @@ function Content-Menu {
             Default { Write-Host (Get-AIOString 'common.status_not_mounted') -ForegroundColor Red }
         }
         Write-Host ""
-        Write-Host (Get-AIOString 'menu.content.opt1') -ForegroundColor White
-        Write-Host (Get-AIOString 'menu.content.opt1_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.content.opt2') -ForegroundColor Green
-        Write-Host (Get-AIOString 'menu.content.opt2_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.content.opt3') -ForegroundColor Magenta
-        Write-Host (Get-AIOString 'menu.content.opt3_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
-        Write-Host ""
-
-        $opcionCont = Read-MenuOption (Get-AIOString 'common.select_option')
+        $contentItems = @(
+            @{
+                Value      = '1'
+                Label      = (Get-AIOString 'menu.content.opt1')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.content.opt1_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '2'
+                Label      = (Get-AIOString 'menu.content.opt2')
+                Color      = 'Green'
+                Details    = @(@{ Text = (Get-AIOString 'menu.content.opt2_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '3'
+                Label      = (Get-AIOString 'menu.content.opt3')
+                Color      = 'Magenta'
+                Details    = @(@{ Text = (Get-AIOString 'menu.content.opt3_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+        )
+        $opcionCont = [string](Show-AIOConsoleMenu -Items $contentItems -AllowBack -BackValue 'V')
 
         if ($opcionCont.ToUpper() -ne "V" -and $Script:IMAGE_MOUNTED -eq 0) {
             Write-Log -LogLevel WARN -Message "MenuContent: Acceso denegado a la opcion [$opcionCont]. No hay ninguna imagen montada."
@@ -1689,20 +1758,30 @@ function System-Tweaks-Menu {
             Default { Write-Host (Get-AIOString 'common.status_not_mounted') -ForegroundColor Red }
         }
         Write-Host ""
-        Write-Host (Get-AIOString 'menu.system_tweaks.opt1') -ForegroundColor White
-        Write-Host (Get-AIOString 'menu.system_tweaks.opt1_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.system_tweaks.opt2') -ForegroundColor White
-        Write-Host (Get-AIOString 'menu.system_tweaks.opt2_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.system_tweaks.opt3') -ForegroundColor White
-        Write-Host (Get-AIOString 'menu.system_tweaks.opt3_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
-        Write-Host ""
-
-        $opcionSys = Read-MenuOption (Get-AIOString 'common.select_option')
+        $sysItems = @(
+            @{
+                Value      = '1'
+                Label      = (Get-AIOString 'menu.system_tweaks.opt1')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.system_tweaks.opt1_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '2'
+                Label      = (Get-AIOString 'menu.system_tweaks.opt2')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.system_tweaks.opt2_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '3'
+                Label      = (Get-AIOString 'menu.system_tweaks.opt3')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.system_tweaks.opt3_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+        )
+        $opcionSys = [string](Show-AIOConsoleMenu -Items $sysItems -AllowBack -BackValue 'V')
 
         if ($opcionSys.ToUpper() -ne "V" -and $Script:IMAGE_MOUNTED -eq 0) {
             Write-Log -LogLevel WARN -Message "MenuSystemTweaks: Acceso denegado a la opcion [$opcionSys]. No hay ninguna imagen montada."
@@ -1737,17 +1816,23 @@ function OOBE-Branding-Menu {
             Default { Write-Host (Get-AIOString 'common.status_not_mounted') -ForegroundColor Red }
         }
         Write-Host ""
-        Write-Host (Get-AIOString 'menu.oobe.opt1') -ForegroundColor White
-        Write-Host (Get-AIOString 'menu.oobe.opt1_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.oobe.opt2') -ForegroundColor Cyan
-        Write-Host (Get-AIOString 'menu.oobe.opt2_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
-        Write-Host ""
-
-        $opcionOOBE = Read-MenuOption (Get-AIOString 'common.select_option')
+        $oobeItems = @(
+            @{
+                Value      = '1'
+                Label      = (Get-AIOString 'menu.oobe.opt1')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.oobe.opt1_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '2'
+                Label      = (Get-AIOString 'menu.oobe.opt2')
+                Color      = 'Cyan'
+                Details    = @(@{ Text = (Get-AIOString 'menu.oobe.opt2_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+        )
+        $opcionOOBE = [string](Show-AIOConsoleMenu -Items $oobeItems -AllowBack -BackValue 'V')
 
         if ($opcionOOBE.ToUpper() -ne "V" -and $Script:IMAGE_MOUNTED -eq 0) {
             Write-Log -LogLevel WARN -Message "MenuOOBEBranding: Acceso denegado a la opcion [$opcionOOBE]. No hay ninguna imagen montada."
@@ -1775,17 +1860,23 @@ function Updates-Languages-Menu {
         Write-Host (Get-AIOString 'menu.updates_lang.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host (Get-AIOString 'menu.updates_lang.opt1') -ForegroundColor Green
-        Write-Host (Get-AIOString 'menu.updates_lang.opt1_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.updates_lang.opt2') -ForegroundColor Cyan
-        Write-Host (Get-AIOString 'menu.updates_lang.opt2_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
-        Write-Host ""
-
-        $opcionUL = (Read-MenuOption (Get-AIOString 'common.select_option')).Trim().ToUpper()
+        $ulItems = @(
+            @{
+                Value      = '1'
+                Label      = (Get-AIOString 'menu.updates_lang.opt1')
+                Color      = 'Green'
+                Details    = @(@{ Text = (Get-AIOString 'menu.updates_lang.opt1_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '2'
+                Label      = (Get-AIOString 'menu.updates_lang.opt2')
+                Color      = 'Cyan'
+                Details    = @(@{ Text = (Get-AIOString 'menu.updates_lang.opt2_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+        )
+        $opcionUL = ([string](Show-AIOConsoleMenu -Items $ulItems -AllowBack -BackValue 'V')).Trim().ToUpper()
         switch ($opcionUL) {
             "1" { Write-Log -LogLevel INFO -Message "MenuUpdatesLang: Accediendo a 'WindowsUpdate-Menu'"; WindowsUpdate-Menu }
             "2" { Write-Log -LogLevel INFO -Message "MenuUpdatesLang: Accediendo a 'LanguagePack-Menu'"; LanguagePack-Menu }
@@ -1858,7 +1949,7 @@ function Invoke-AIOImageHealthCheck {
     $sw = [Diagnostics.Stopwatch]::StartNew()
     Write-Log -LogLevel ACTION -Message "LIMPIEZA: DISM /$Mode; Imagen='$MountDir'; Log='$healthLog'."
     try {
-        if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw 'SystemRoot no disponible.' }
+        if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw (Get-AIOString 'errors.e595') }
         $systemFolder = if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { 'Sysnative' } else { 'System32' }
         $exe = Join-Path $env:SystemRoot "$systemFolder\dism.exe"
         $argsDism = @("/Image:$MountDir", '/Cleanup-Image', "/$Mode", '/English', "/LogPath:$healthLog")
@@ -1897,7 +1988,7 @@ function Invoke-AIOImageHealthCheck {
             }
         }
         $exitCode = $global:LASTEXITCODE
-        if ($null -eq $exitCode) { throw 'DISM no proporciono codigo de salida.' }
+        if ($null -eq $exitCode) { throw (Get-AIOString 'errors.e048') }
         if ($exitCode -in @(0, 3010)) { $healthState = Get-AIODismHealthState -Text ($lines -join "`n") }
     } catch {
         $runError = $_.Exception.Message
@@ -1929,7 +2020,7 @@ function Invoke-AIOComponentStoreAnalysis {
     $progressLine = @{ Active = $false; Width = 0 }
     $exitCode = $null; $cleanupRecommended = 'Unknown'; $runError = ''
     try {
-        if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw 'SystemRoot no disponible.' }
+        if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw (Get-AIOString 'errors.e595') }
         $systemFolder = if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { 'Sysnative' } else { 'System32' }
         $exe = Join-Path $env:SystemRoot "$systemFolder\dism.exe"
         $argsDism = @("/Image:$MountDir", '/Cleanup-Image', '/AnalyzeComponentStore', '/English', "/LogPath:$analysisLog")
@@ -1968,13 +2059,13 @@ function Invoke-AIOComponentStoreAnalysis {
             }
         }
         $exitCode = $global:LASTEXITCODE
-        if ($null -eq $exitCode) { throw 'DISM no proporciono codigo de salida.' }
-        if ($exitCode -notin @(0, 3010)) { throw "DISM /AnalyzeComponentStore termino con codigo $exitCode." }
+        if ($null -eq $exitCode) { throw (Get-AIOString 'errors.e048') }
+        if ($exitCode -notin @(0, 3010)) { throw (Get-AIOString 'errors.e029' -FormatArgs @($exitCode)) }
 
         # Un resultado ausente, ambiguo o no reconocido nunca equivale a "No".
         $recommendations = [regex]::Matches(($lines -join "`n"), '(?im)^[ \t]*Component Store Cleanup Recommended\b([^\r\n]*)')
         if ($recommendations.Count -ne 1 -or $recommendations[0].Groups[1].Value -notmatch '^[ \t]*:[ \t]*(Yes|No)[ \t]*$') {
-            throw 'No se pudo interpretar una recomendacion unica de limpieza (Yes/No).'
+            throw (Get-AIOString 'errors.e503')
         }
         $cleanupRecommended = $Matches[1]
     } catch {
@@ -2032,7 +2123,7 @@ function Limpieza-Menu {
                     try {
                         $sourceInfo = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments @('/Get-WimInfo', "/WimFile:$sourceWimPath")
                         if ($null -eq $sourceInfo.ExitCode -or $sourceInfo.ExitCode -notin @(0, 3010)) {
-                            throw "No se pudieron consultar los indices del WIM (Codigo: $($sourceInfo.ExitCode))."
+                            throw (Get-AIOString 'errors.e465' -FormatArgs @(($sourceInfo.ExitCode)))
                         }
 
                         [int]$sourceIndex = 0
@@ -2242,7 +2333,7 @@ function Limpieza-Menu {
             $sfcProc.StartInfo.UseShellExecute = $false
             $sfcProc.StartInfo.CreateNoWindow = $false
             $sfcStarted = $sfcProc.Start()
-            if (-not $sfcStarted) { throw 'No se pudo iniciar sfc.exe.' }
+            if (-not $sfcStarted) { throw (Get-AIOString 'errors.e499') }
 
             # Esperar a que sfc.exe imprima su encabezado y cree el log antes de dibujar el indicador (evita lineas de actividad huerfanas)
             $startWait = [System.Diagnostics.Stopwatch]::StartNew()
@@ -2332,7 +2423,7 @@ function Limpieza-Menu {
             Write-Host (Get-AIOString 'limpieza.sfc_finished' ($sw.Elapsed.ToString('mm\:ss'))) -ForegroundColor Cyan
             $sfcProc.WaitForExit()
             $sfcExit = $sfcProc.ExitCode
-            if ($null -eq $sfcExit) { throw 'SFC no proporciono codigo de salida.' }
+            if ($null -eq $sfcExit) { throw (Get-AIOString 'errors.e564') }
         }
         catch {
             $sfcExecutionError = $_.Exception.Message
@@ -2501,19 +2592,16 @@ function Limpieza-Menu {
         Write-Host (Get-AIOString 'limpieza.menu_title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host (Get-AIOString 'limpieza.opt1') -NoNewline; Write-Host " (DISM /CheckHealth)" -ForegroundColor Gray
-        Write-Host (Get-AIOString 'limpieza.opt2') -NoNewline; Write-Host " (DISM /ScanHealth)" -ForegroundColor Gray
-        Write-Host (Get-AIOString 'limpieza.opt3') -NoNewline; Write-Host "           (DISM /RestoreHealth)" -ForegroundColor Gray
-        Write-Host (Get-AIOString 'limpieza.opt4') -NoNewline; Write-Host " (SFC /Scannow /OffWindir)" -ForegroundColor Gray
-        Write-Host (Get-AIOString 'limpieza.opt5') -NoNewline; Write-Host "   (DISM /AnalyzeComponentStore)" -ForegroundColor Gray
-        Write-Host (Get-AIOString 'limpieza.opt6') -NoNewline; Write-Host "    (DISM /StartComponentCleanup)" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'limpieza.opt7') -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "-------------------------------------------------------"
-        Write-Host (Get-AIOString 'common.back_short') -ForegroundColor Red
-
-        $opcionL = Read-MenuOption ("`n" + (Get-AIOString 'common.select_option'))
+        $limpItems = @(
+            @{ Value = '1'; Label = (Get-AIOString 'limpieza.opt1'); Color = 'White'; Suffix = ' (DISM /CheckHealth)'; SuffixColor = 'Gray' }
+            @{ Value = '2'; Label = (Get-AIOString 'limpieza.opt2'); Color = 'White'; Suffix = ' (DISM /ScanHealth)'; SuffixColor = 'Gray' }
+            @{ Value = '3'; Label = (Get-AIOString 'limpieza.opt3'); Color = 'White'; Suffix = '           (DISM /RestoreHealth)'; SuffixColor = 'Gray' }
+            @{ Value = '4'; Label = (Get-AIOString 'limpieza.opt4'); Color = 'White'; Suffix = ' (SFC /Scannow /OffWindir)'; SuffixColor = 'Gray' }
+            @{ Value = '5'; Label = (Get-AIOString 'limpieza.opt5'); Color = 'White'; Suffix = '   (DISM /AnalyzeComponentStore)'; SuffixColor = 'Gray' }
+            @{ Value = '6'; Label = (Get-AIOString 'limpieza.opt6'); Color = 'White'; Suffix = '    (DISM /StartComponentCleanup)'; SuffixColor = 'Gray'; SpaceAfter = $true }
+            @{ Value = '7'; Label = (Get-AIOString 'limpieza.opt7'); Color = 'Yellow'; SpaceAfter = $true }
+        )
+        $opcionL = [string](Show-AIOConsoleMenu -Items $limpItems -AllowBack -BackValue 'V')
         Write-Log -LogLevel INFO -Message "MENU_LIMPIEZA: Usuario selecciono '$opcionL'."
 
         switch ($opcionL.ToUpper()) {
@@ -2567,7 +2655,7 @@ function Limpieza-Menu {
                 try {
                     $cleanupResult = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments $cleanupArgs
                     if ($null -eq $cleanupResult.ExitCode -or $cleanupResult.ExitCode -notin @(0, 3010)) {
-                        throw "DISM /StartComponentCleanup termino con codigo $($cleanupResult.ExitCode)."
+                        throw (Get-AIOString 'errors.e031' -FormatArgs @(($cleanupResult.ExitCode)))
                     }
                     Write-Host (Get-AIOString 'limpieza.cleanup_ok') -ForegroundColor Green
                     Write-Log -LogLevel INFO -Message "LIMPIEZA: Limpieza manual completada (ExitCode=$($cleanupResult.ExitCode))."
@@ -2661,7 +2749,7 @@ function Limpieza-Menu {
                     try {
                         $cleanupResult = Invoke-AIOConsoleSystemTool -Tool 'dism.exe' -Arguments $cleanupArgs
                         if ($null -eq $cleanupResult.ExitCode -or $cleanupResult.ExitCode -notin @(0, 3010)) {
-                            throw "DISM /StartComponentCleanup termino con codigo $($cleanupResult.ExitCode)."
+                            throw (Get-AIOString 'errors.e031' -FormatArgs @(($cleanupResult.ExitCode)))
                         }
                         Write-Log -LogLevel INFO -Message "LIMPIEZA: StartComponentCleanup completado (ExitCode=$($cleanupResult.ExitCode))."
                         $sequenceRestartRequired = $sequenceRestartRequired -or ($cleanupResult.ExitCode -eq 3010)
@@ -2724,7 +2812,7 @@ function Import-OfflineReg {
         param([string]$HexData, [string]$TypeCode)
         $hexClean = $HexData.Trim() -replace '\s', ''
         if ($hexClean -notmatch '^(?:[0-9a-fA-F]{1,2}(?:,[0-9a-fA-F]{1,2})*,?)?$') {
-            throw 'Datos hexadecimales invalidos: se esperaban bytes separados por comas.'
+            throw (Get-AIOString 'errors.e054')
         }
         $byteList = [System.Collections.Generic.List[byte]]::new()
         if ($hexClean -ne '') {
@@ -2732,11 +2820,11 @@ function Import-OfflineReg {
         }
         $bytes = $byteList.ToArray()
         if ($TypeCode -in @('1', '2', '7') -and ($bytes.Length % 2) -ne 0) {
-            throw 'Cadena UTF-16 incompleta: la cantidad de bytes debe ser par.'
+            throw (Get-AIOString 'errors.e012')
         }
         if (($TypeCode -eq '4' -and $bytes.Length -ne 4) -or
             ($TypeCode -eq 'b' -and $bytes.Length -ne 8)) {
-            throw "Longitud invalida para hex($TypeCode): $($bytes.Length) bytes."
+            throw (Get-AIOString 'errors.e375' -FormatArgs @($TypeCode, ($bytes.Length)))
         }
         return ,$bytes
     }
@@ -2938,7 +3026,7 @@ function Import-OfflineReg {
             }
         }
         if ($parseErrors -gt 0) {
-            throw "Import-OfflineReg: $parseErrors errores de formato. Archivo rechazado antes de escribir claves o valores. Revisa las lineas indicadas en el log."
+            throw (Get-AIOString 'errors.e287' -FormatArgs @($parseErrors))
         }
     } catch {
         Write-Log -LogLevel ERROR -Message "Import-OfflineReg (Fase 1): Fallo parseo en '$logSource' - $($_.Exception.Message)"
@@ -3037,7 +3125,7 @@ function Import-OfflineReg {
     
     if ($errors -gt 0) { 
         Write-Log -LogLevel WARN -Message "Import-OfflineReg: $errors advertencias de inyeccion."
-        throw "Import-OfflineReg: $errors errores durante inyeccion. Revisa el log para detalle."
+        throw (Get-AIOString 'errors.e288' -FormatArgs @($errors))
     }
     
     $importStatus = if ($componentsBlocked -gt 0) { 'CompletedWithOmissions' } else { 'Completed' }
@@ -3156,7 +3244,7 @@ function Mount-Hives {
 
                 $tempKeyName = "_TempEmptyHive_$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
                 $softwareRoot = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("OfflineSoftware", $true)
-                if ($null -eq $softwareRoot) { throw "No se pudo abrir OfflineSoftware para crear la key de andamiaje." }
+                if ($null -eq $softwareRoot) { throw (Get-AIOString 'errors.e472') }
                 $tempKey = $softwareRoot.CreateSubKey($tempKeyName, $true)
                 if ($null -ne $tempKey) { $tempKey.Dispose() }
                 $softwareRoot.Dispose()
@@ -3169,7 +3257,7 @@ function Mount-Hives {
                     $softwareRoot2.Dispose()
                 }
 
-                if ($pSave.ExitCode -ne 0) { throw "reg.exe save fallo (Codigo: $($pSave.ExitCode))" }
+                if ($pSave.ExitCode -ne 0) { throw (Get-AIOString 'errors.e629' -FormatArgs @(($pSave.ExitCode))) }
                 Write-Log -LogLevel INFO -Message "HIVES: UsrClass.dat no existia para el perfil Default; se creo un hive vacio (igual que el primer inicio de sesion de Windows)."
             } catch {
                 Write-Log -LogLevel WARN -Message "HIVES: No se pudo crear UsrClass.dat vacio para Default -> $($_.Exception.Message)"
@@ -3511,7 +3599,7 @@ function Enable-Privileges {
     $Script:GlobalPrivilegesEnabled = @($defaults | Where-Object {
         -not $Script:AIOEnabledPrivileges.ContainsKey($_)
     }).Count -eq 0
-    if ($failures.Count -gt 0) { throw ('No se pudieron activar los privilegios: ' + ($failures -join '; ')) }
+    if ($failures.Count -gt 0) { throw (Get-AIOString 'errors.e_priv_enable' -FormatArgs @(($failures -join '; '))) }
 }
 
 # Diccionario global en RAM para almacenar los permisos exactos de fabrica
@@ -3810,7 +3898,7 @@ function Unlock-Single-File {
                 Write-Log -LogLevel WARN -Message "FileUnlocker: No se pudieron quitar atributos de '$($fileInfo.Name)' - $($_.Exception.Message)"
             }
         } else {
-            throw "takeown (Exit: $($p1.ExitCode)) o icacls (Exit: $($p2.ExitCode)) devolvieron errores de ejecución."
+            throw (Get-AIOString 'errors.e632' -FormatArgs @(($p1.ExitCode), ($p2.ExitCode)))
         }
     } catch {
         Write-Log -LogLevel ERROR -Message "FileUnlocker: Falla critica intentando tomar control del archivo '$FilePath' - $($_.Exception.Message)"
@@ -3970,15 +4058,15 @@ function Check-And-Repair-Mounts {
     }
     try {
         if ($null -eq $updated -or $updated.Status -ne 'OK' -or -not (Test-Path -LiteralPath $updated.MountDir -PathType Container)) {
-            throw 'DISM finalizo, pero el punto solicitado todavia no figura como OK y accesible.'
+            throw (Get-AIOString 'errors.e036')
         }
         if ($updated.ReadWrite -ne 'Yes' -or [string]::IsNullOrWhiteSpace($updated.ImageFile) -or $updated.ImageIndex -lt 1) {
-            throw 'La sesion no se puede usar para edicion: es de solo lectura o sus metadatos estan incompletos.'
+            throw (Get-AIOString 'errors.e360')
         }
         if (($current.ImageIndex -gt 0 -and $current.ImageIndex -ne $updated.ImageIndex) -or
             ($current.ImageFile -and (ConvertTo-AIOMountPath $current.ImageFile) -ne (ConvertTo-AIOMountPath $updated.ImageFile)) -or
             (Test-AIOHostWinREProtectedMount -Path $Script:MOUNT_DIR -Mount $updated)) {
-            throw 'La imagen o el indice del montaje cambio o esta protegido.'
+            throw (Get-AIOString 'errors.e341')
         }
         $Script:IMAGE_MOUNTED = 1
         $Script:WIM_FILE_PATH = $updated.ImageFile
@@ -4017,22 +4105,37 @@ function Boot-Tools-Menu {
         Write-Host (Get-AIOString 'menu.boot_tools.title') -ForegroundColor Cyan
         Write-Host "=======================================================" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host (Get-AIOString 'menu.boot_tools.opt1') -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'menu.boot_tools.opt1_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.boot_tools.opt2') -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'menu.boot_tools.opt2_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.boot_tools.opt3') -ForegroundColor White
-        Write-Host (Get-AIOString 'menu.boot_tools.opt3_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.boot_tools.opt4') -ForegroundColor White
-        Write-Host (Get-AIOString 'menu.boot_tools.opt4_desc') -ForegroundColor Gray
-        Write-Host ""
-        Write-Host (Get-AIOString 'common.back_main') -ForegroundColor Red
-        Write-Host ""
-
-        $bootOpt = (Read-MenuOption (Get-AIOString 'common.select_option_spaced')).Trim().ToUpper()
+        $bootItems = @(
+            @{
+                Value      = '1'
+                Label      = (Get-AIOString 'menu.boot_tools.opt1')
+                Color      = 'Yellow'
+                Details    = @(@{ Text = (Get-AIOString 'menu.boot_tools.opt1_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '2'
+                Label      = (Get-AIOString 'menu.boot_tools.opt2')
+                Color      = 'Yellow'
+                Details    = @(@{ Text = (Get-AIOString 'menu.boot_tools.opt2_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '3'
+                Label      = (Get-AIOString 'menu.boot_tools.opt3')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.boot_tools.opt3_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+            @{
+                Value      = '4'
+                Label      = (Get-AIOString 'menu.boot_tools.opt4')
+                Color      = 'White'
+                Details    = @(@{ Text = (Get-AIOString 'menu.boot_tools.opt4_desc'); Color = 'Gray' })
+                SpaceAfter = $true
+            }
+        )
+        $bootOpt = ([string](Show-AIOConsoleMenu -Items $bootItems -AllowBack -BackValue 'V')).Trim().ToUpper()
         switch ($bootOpt) {
             "1" { Write-Log -LogLevel INFO -Message "MenuBoot: Accediendo a 'Manage-BootWim-Menu'"; Manage-BootWim-Menu }
             "2" { Invoke-IfMounted "Manage-WinRE-Menu" { Manage-WinRE-Menu } }
@@ -4105,40 +4208,28 @@ function Main-Menu {
         }
 
         # Menu de Opciones
-        Write-Host (Get-AIOString 'menu.main.section_image') -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'menu.main.opt1')
-        Write-Host (Get-AIOString 'menu.main.opt2')
-        Write-Host (Get-AIOString 'menu.main.opt3')
-        Write-Host (Get-AIOString 'menu.main.opt4') -ForegroundColor Green
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.main.section_engineering') -ForegroundColor Yellow
-        if ($Script:IMAGE_MOUNTED -gt 0) {
-            Write-Host (Get-AIOString 'menu.main.opt5_on')  -ForegroundColor White
-            Write-Host (Get-AIOString 'menu.main.opt6_on')  -ForegroundColor White
-            Write-Host (Get-AIOString 'menu.main.opt7_on')  -ForegroundColor White
-            Write-Host (Get-AIOString 'menu.main.opt8_on')  -ForegroundColor White
-            Write-Host (Get-AIOString 'menu.main.opt9_on')  -ForegroundColor White
-            Write-Host (Get-AIOString 'menu.main.opt10_on') -ForegroundColor White
-        } else {
-            # Opciones deshabilitadas visualmente
-            Write-Host (Get-AIOString 'menu.main.opt5_off')  -ForegroundColor DarkGray
-            Write-Host (Get-AIOString 'menu.main.opt6_off')  -ForegroundColor DarkGray
-            Write-Host (Get-AIOString 'menu.main.opt7_off')  -ForegroundColor DarkGray
-            Write-Host (Get-AIOString 'menu.main.opt8_off')  -ForegroundColor DarkGray
-            Write-Host (Get-AIOString 'menu.main.opt9_off')  -ForegroundColor DarkGray
-            Write-Host (Get-AIOString 'menu.main.opt10_off') -ForegroundColor DarkGray
-        }
-        Write-Host ""
-        Write-Host (Get-AIOString 'menu.main.section_system') -ForegroundColor Yellow
-        Write-Host (Get-AIOString 'menu.main.opt_config')
-        Write-Host ""
-        Write-Host $separatorMid
-        Write-Host (Get-AIOString 'menu.main.footer') -ForegroundColor Gray
-        Write-Host ""
+        $isMounted = ($Script:IMAGE_MOUNTED -gt 0)
+        $mainItems = @(
+            @{ Type = 'Header'; Text = (Get-AIOString 'menu.main.section_image'); Color = 'Yellow' }
+            @{ Value = '1'; Label = (Get-AIOString 'menu.main.opt1'); Color = 'White' }
+            @{ Value = '2'; Label = (Get-AIOString 'menu.main.opt2'); Color = 'White' }
+            @{ Value = '3'; Label = (Get-AIOString 'menu.main.opt3'); Color = 'White' }
+            @{ Value = '4'; Label = (Get-AIOString 'menu.main.opt4'); Color = 'Green'; SpaceAfter = $true }
+            @{ Type = 'Header'; Text = (Get-AIOString 'menu.main.section_engineering'); Color = 'Yellow' }
+            @{ Value = '5';  Label = (Get-AIOString $(if ($isMounted) { 'menu.main.opt5_on' } else { 'menu.main.opt5_off' }));   Color = 'White'; Disabled = (-not $isMounted) }
+            @{ Value = '6';  Label = (Get-AIOString $(if ($isMounted) { 'menu.main.opt6_on' } else { 'menu.main.opt6_off' }));   Color = 'White'; Disabled = (-not $isMounted) }
+            @{ Value = '7';  Label = (Get-AIOString $(if ($isMounted) { 'menu.main.opt7_on' } else { 'menu.main.opt7_off' }));   Color = 'White'; Disabled = (-not $isMounted) }
+            @{ Value = '8';  Label = (Get-AIOString $(if ($isMounted) { 'menu.main.opt8_on' } else { 'menu.main.opt8_off' }));   Color = 'White'; Disabled = (-not $isMounted) }
+            @{ Value = '9';  Label = (Get-AIOString $(if ($isMounted) { 'menu.main.opt9_on' } else { 'menu.main.opt9_off' }));   Color = 'White'; Disabled = (-not $isMounted) }
+            @{ Value = '10'; Label = (Get-AIOString $(if ($isMounted) { 'menu.main.opt10_on' } else { 'menu.main.opt10_off' })); Color = 'White'; Disabled = (-not $isMounted); SpaceAfter = $true }
+            @{ Type = 'Header'; Text = (Get-AIOString 'menu.main.section_system'); Color = 'Yellow' }
+            @{ Value = 'C'; Label = (Get-AIOString 'menu.main.opt_config'); Color = 'White' }
+            @{ Value = 'L'; Label = (Get-AIOString 'menu.main.opt_logs');   Color = 'Gray' }
+            @{ Value = 'H'; Label = (Get-AIOString 'menu.main.opt_about');  Color = 'Gray' }
+            @{ Value = 'S'; Label = (Get-AIOString 'menu.main.opt_exit');   Color = 'Red'; SpaceAfter = $true }
+        )
 
-        # [FIX] .Trim() antes de .ToUpper() para tolerar espacios accidentales en el input
-        $prompt  = if ($Script:IMAGE_MOUNTED -gt 0) { Get-AIOString 'menu.main.prompt_ready' } else { Get-AIOString 'menu.main.prompt_idle' }
-        $opcionM = (Read-Host " $prompt").Trim().ToUpper()
+        $opcionM = ([string](Show-AIOConsoleMenu -Items $mainItems -SeparatorText $separatorMid)).Trim().ToUpper()
         
         # Manejo de Errores y Navegacion
         switch ($opcionM) {
@@ -4221,7 +4312,7 @@ function Invoke-AIOConsoleSystemTool {
         [Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][string[]]$Arguments,
         [switch]$WaitForToolOnly
     )
-    if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw 'No se conoce SystemRoot del anfitrion.' }
+    if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw (Get-AIOString 'errors.e417') }
     $systemFolder = 'System32'
     if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) { $systemFolder = 'Sysnative' }
     $exe = Join-Path $env:SystemRoot "$systemFolder\$Tool"
@@ -4243,7 +4334,7 @@ function Invoke-AIOConsoleSystemTool {
         $start.Arguments = $commandLine
         $start.UseShellExecute = $false
         $process = [Diagnostics.Process]::Start($start)
-        if ($null -eq $process) { throw "No se pudo iniciar $Tool." }
+        if ($null -eq $process) { throw (Get-AIOString 'errors.e502' -FormatArgs @($Tool)) }
         if ($WaitForToolOnly) {
             Write-Log -LogLevel INFO -Message "ConsoleTool: $Tool iniciado, PID=$($process.Id)."
             while (-not $process.WaitForExit(30000)) {
@@ -4252,7 +4343,7 @@ function Invoke-AIOConsoleSystemTool {
         } else {
             $process.WaitForExit()
         }
-        if ($null -eq $process -or $null -eq $process.ExitCode) { throw "No se obtuvo el codigo de salida de $Tool." }
+        if ($null -eq $process -or $null -eq $process.ExitCode) { throw (Get-AIOString 'errors.e460' -FormatArgs @($Tool)) }
         [pscustomobject]@{ ExitCode = [int]$process.ExitCode }
     } finally {
         if ($null -ne $process) { $process.Dispose() }
@@ -4338,7 +4429,7 @@ function Invoke-AIOHostWinREReAgent {
     $global:LASTEXITCODE = $null
     $lines = @(& $exe @Arguments 2>&1 | ForEach-Object { $_.ToString() })
     $exitCode = $global:LASTEXITCODE
-    if ($null -eq $exitCode) { throw 'No se pudo ejecutar reagentc.exe del anfitrion.' }
+    if ($null -eq $exitCode) { throw (Get-AIOString 'errors.e489') }
     [pscustomobject]@{ ExitCode=[int]$exitCode; Lines=$lines }
 }
 
@@ -4348,7 +4439,7 @@ function Get-AIOHostWinREAgentDocument {
     $document = New-Object System.Xml.XmlDocument
     $document.XmlResolver = $null
     $document.LoadXml((Get-Content -LiteralPath $xmlPath -Raw -ErrorAction Stop))
-    if ($null -eq $document.SelectSingleNode('/WindowsRE')) { throw 'ReAgent.xml no contiene la configuracion WindowsRE esperada.' }
+    if ($null -eq $document.SelectSingleNode('/WindowsRE')) { throw (Get-AIOString 'errors.e547') }
     return ,$document
 }
 
@@ -4390,14 +4481,14 @@ function Get-AIOHostWinRELocationPaths {
             ([string]$_.PartitionStyle -in @('MBR','1')) -and $_.Signature -eq $signature
         })
     }
-    if ($disks.Count -gt 1) { throw 'Varios discos coinciden con ReAgent.xml. No se puede confirmar el origen de WinRE.' }
+    if ($disks.Count -gt 1) { throw (Get-AIOString 'errors.e607') }
     if ($disks.Count -eq 0) { return }
     $diskNumber = [uint32]0
     if (-not [uint32]::TryParse([string]$disks[0].Number, [ref]$diskNumber)) { return }
     $partitions = @(Get-Partition -DiskNumber $diskNumber -ErrorAction Stop | Where-Object {
         $_.DiskNumber -eq $diskNumber -and $_.Offset -eq $offset
     })
-    if ($partitions.Count -gt 1) { throw 'Varias particiones coinciden con ReAgent.xml. No se puede confirmar el origen de WinRE.' }
+    if ($partitions.Count -gt 1) { throw (Get-AIOString 'errors.e606') }
     if ($partitions.Count -eq 0) { return }
     $roots = @($partitions[0].AccessPaths)
     # GLOBALROOT permite consultar una particion sin asignarle letra ni montarla.
@@ -4414,9 +4505,9 @@ function Get-AIOHostWinRELocationPaths {
 }
 
 function Get-AIOHostWinREConfiguration {
-    if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw 'No se conoce SystemRoot del anfitrion.' }
+    if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { throw (Get-AIOString 'errors.e417') }
     $query = Invoke-AIOHostWinREReAgent -Arguments @('/info')
-    if ($query.ExitCode -ne 0) { throw "reagentc /info fallo (codigo $($query.ExitCode))." }
+    if ($query.ExitCode -ne 0) { throw (Get-AIOString 'errors.e628' -FormatArgs @(($query.ExitCode))) }
     $locations = @($query.Lines | ForEach-Object {
         # Acepta, entre otros, Windows RE location / Ubicacion de Windows RE.
         # No confundir Recovery image location (otra imagen) con Windows RE.
@@ -4425,7 +4516,7 @@ function Get-AIOHostWinREConfiguration {
             if ($path) { $path }
         }
     } | Sort-Object -Unique)
-    if ($locations.Count -gt 1) { throw 'reagentc /info devolvio varias ubicaciones de Windows RE; no se elegira una por suposicion.' }
+    if ($locations.Count -gt 1) { throw (Get-AIOString 'errors.e627') }
     $registeredPath = ''
     if ($locations.Count -eq 1) {
         $registeredPath = $locations[0]
@@ -4444,11 +4535,11 @@ function Get-AIOHostWinREConfiguration {
         $mountHint = ConvertTo-AIOHostWinREPath ([string]$document.WindowsRE.WinreMount.path)
         foreach ($name in @('WinreLocation', 'ImageLocation')) {
             $nodes = @($document.SelectNodes("/WindowsRE/$name"))
-            if ($nodes.Count -gt 1) { throw "ReAgent.xml contiene varios nodos $name; el origen es ambiguo." }
+            if ($nodes.Count -gt 1) { throw (Get-AIOString 'errors.e546' -FormatArgs @($name)) }
             if ($nodes.Count -eq 0) { continue }
             $paths = @(Get-AIOHostWinRELocationPaths -Location $nodes[0])
             $keys = @($paths | ForEach-Object { Get-AIOHostWinREPathIdentity $_ } | Where-Object { $_ } | Sort-Object -Unique)
-            if ($keys.Count -gt 1) { throw "Las rutas de la particion de $name resuelven a archivos diferentes. Se conserva el montaje." }
+            if ($keys.Count -gt 1) { throw (Get-AIOString 'errors.e370' -FormatArgs @($name)) }
             $registeredPaths += $paths
             $registeredKeys += $keys
         }
@@ -4497,23 +4588,19 @@ function Test-AIOHostWinREProtectedMount {
 
 function Read-AIOHostWinREUnmountChoice {
     param([Parameter(Mandatory=$true)]$Mount)
+    $winreChoiceItems = @()
     if ($Mount.ReadWrite -eq 'Yes') {
-        Write-Host (Get-AIOString 'host_winre.opt_commit') -ForegroundColor Green
-        Write-Host (Get-AIOString 'host_winre.opt_discard') -ForegroundColor Yellow
+        $winreChoiceItems += @{ Value = 'Commit';  Label = (Get-AIOString 'host_winre.opt_commit');  Color = 'Green' }
+        $winreChoiceItems += @{ Value = 'Discard'; Label = (Get-AIOString 'host_winre.opt_discard'); Color = 'Yellow' }
     } else {
-        Write-Host (Get-AIOString 'host_winre.opt_readonly') -ForegroundColor Green
+        # DISM exige Discard para cerrar una imagen de solo lectura.
+        $winreChoiceItems += @{ Value = 'Discard'; Label = (Get-AIOString 'host_winre.opt_readonly'); Color = 'Green' }
     }
-    Write-Host (Get-AIOString 'host_winre.opt_keep') -ForegroundColor Cyan
-    while ($true) {
-        $choice = ([string](Read-Host (Get-AIOString 'common.select_option') -ErrorAction Stop)).Trim()
-        if ($choice -eq '' -or $choice -eq '3') { return 'Keep' }
-        if ($choice -eq '1') {
-            if ($Mount.ReadWrite -eq 'Yes') { return 'Commit' }
-            return 'Discard' # DISM exige Discard para cerrar una imagen de solo lectura.
-        }
-        if ($choice -eq '2' -and $Mount.ReadWrite -eq 'Yes') { return 'Discard' }
-        Write-Host (Get-AIOString 'host_winre.invalid_unchanged') -ForegroundColor Yellow
-    }
+    $winreChoiceItems += @{ Value = 'Keep'; Label = (Get-AIOString 'host_winre.opt_keep'); Color = 'Cyan'; SpaceAfter = $true }
+    $defaultKeepIdx = $winreChoiceItems.Count - 1
+    $selectedChoice = [string](Show-AIOConsoleMenu -Items $winreChoiceItems -DefaultIndex $defaultKeepIdx)
+    if ($selectedChoice -in @('Commit', 'Discard', 'Keep')) { return $selectedChoice }
+    return 'Keep'
 }
 
 function Dismount-AIOHostWinREBeforeMenu {
@@ -4536,7 +4623,7 @@ function Dismount-AIOHostWinREBeforeMenu {
         try {
             $match = Get-AIOHostWinREMountMatch -Mount $mount -Configuration $configuration
             if (-not $match.Confirmed -and -not $match.Suspected) { continue }
-            if (-not $match.MountPath) { throw 'DISM devolvio una carpeta de montaje no valida.' }
+            if (-not $match.MountPath) { throw (Get-AIOString 'errors.e032') }
             $Script:AIOHostWinREProtectedMounts += $match.MountPath
             if (-not $match.Confirmed) {
                 $Script:AIOHostWinREAttentionRequired = $true
@@ -4573,7 +4660,7 @@ function Dismount-AIOHostWinREBeforeMenu {
                 $fresh.MountPath -ine $match.MountPath -or $fresh.UseReAgent -ne $match.UseReAgent -or
                 $current.ImageIndex -ne $mount.ImageIndex -or $current.ReadWrite -ne $mount.ReadWrite -or
                 $current.Status -ne 'OK' -or -not (Test-Path -LiteralPath $current.MountDir -PathType Container)) {
-                throw 'El montaje o la configuracion de WinRE cambio. Se cancelo el desmontaje para no actuar sobre otra imagen.'
+                throw (Get-AIOString 'errors.e170')
             }
 
             Write-Host (Get-AIOString 'host_winre.unmounting' $choice) -ForegroundColor Cyan
@@ -4588,10 +4675,10 @@ function Dismount-AIOHostWinREBeforeMenu {
 
             # El codigo de salida no reemplaza a la comprobacion del inventario.
             $remaining = Get-AIOMountForPath -Mounts @(Get-AIOMountedImages) -Path $current.MountDir
-            if ($result.ExitCode -ne 0) { throw "El desmontaje devolvio el codigo $($result.ExitCode). No se reintentara con otro metodo ni se descartaran cambios automaticamente." }
-            if ($null -ne $remaining) { throw 'DISM sigue registrando la carpeta. El desmontaje no se considera confirmado.' }
+            if ($result.ExitCode -ne 0) { throw (Get-AIOString 'errors.e107' -FormatArgs @(($result.ExitCode))) }
+            if ($null -ne $remaining) { throw (Get-AIOString 'errors.e052') }
             if ($fresh.UseReAgent -and (Get-AIOHostWinREMountHint) -ieq $match.MountPath) {
-                throw 'DISM ya no registra la carpeta, pero ReAgent.xml conserva el montaje. Se requiere revision manual.'
+                throw (Get-AIOString 'errors.e053')
             }
             # Liberar solo esta ruta una vez verificadas todas las condiciones.
             # Los montajes conservados o pendientes siguen protegidos.

@@ -334,7 +334,7 @@ public static class AIOAppxIdentityNative {
     function Get-AppxFamilyName {
         param([string]$Name, [string]$Publisher)
         if ([string]::IsNullOrWhiteSpace($Name) -or [string]::IsNullOrWhiteSpace($Publisher)) {
-            throw 'La identidad requiere Name y Publisher.'
+            throw (Get-AIOString 'errors.e338')
         }
         Initialize-AppxIdentityNative
         return [AIOAppxIdentityNative]::GetFamily($Name, $Publisher)
@@ -354,7 +354,7 @@ public static class AIOAppxIdentityNative {
             $xml.XmlResolver = $null
             $xml.Load($reader)
             $id = $xml.SelectSingleNode("/*[local-name()='Package' or local-name()='Bundle']/*[local-name()='Identity']")
-            if (-not $id) { throw 'No se encontro Identity en el manifiesto.' }
+            if (-not $id) { throw (Get-AIOString 'errors.e435') }
             return Get-AppxFamilyName $id.GetAttribute('Name') $id.GetAttribute('Publisher')
         } finally {
             if ($reader) { $reader.Dispose() }
@@ -367,7 +367,7 @@ public static class AIOAppxIdentityNative {
         $cache = @{}
         foreach ($app in Get-AppxProvisionedPackage -Path $Script:MOUNT_DIR -ErrorAction Stop) {
             if ($app.PackageName -notmatch '^([^_]+)_(\d+\.\d+\.\d+\.\d+)_[^_]+_[^_]*_([0-9a-hjkmnp-tv-z]{13})$') {
-                throw "No se pudo identificar la familia aprovisionada: $($app.PackageName)."
+                throw (Get-AIOString 'errors.e496' -FormatArgs @(($app.PackageName)))
             }
             $familyName = $matches[1] + '_' + $matches[3]
             $version = [version]$matches[2]
@@ -475,7 +475,7 @@ public static class AIOAppxIdentityNative {
             # Tambien detenerse si la funcion emite errores no terminantes o False.
             $ErrorActionPreference = 'Stop'
             $result = @(Unmount-Hives)
-            if (@($result | Where-Object { $_ -is [bool] -and -not $_ }).Count) { throw 'Unmount-Hives devolvio False.' }
+            if (@($result | Where-Object { $_ -is [bool] -and -not $_ }).Count) { throw (Get-AIOString 'errors.e605') }
         } catch { $failure = $_.Exception.Message }
         try { $remaining = @(Get-AppxMountedHivePaths) }
         catch { $failure = "No se pudo verificar el estado de las colmenas: $($_.Exception.Message). $failure" }
@@ -496,14 +496,14 @@ public static class AIOAppxIdentityNative {
         if ($families.Count -eq 0) { return 0 }
         foreach ($family in $families) {
             if ($family -notmatch '^[^_]+_[0-9a-hjkmnp-tv-z]{13}$') {
-                throw "Se requiere la familia completa (nombre + hash de editor): $family."
+                throw (Get-AIOString 'errors.e571' -FormatArgs @($family))
             }
         }
 
         $mountedHere = $false
         if (-not (Mount-Hives)) {
             Write-Log -LogLevel WARN -Message "AppxInjector: No se pudieron montar hives para limpiar marcas Deprovisioned."
-            if ($StopOnFailure) { throw "No se pudieron montar hives para reparar la marca Deprovisioned." }
+            if ($StopOnFailure) { throw (Get-AIOString 'errors.e469') }
             return 0
         }
         $mountedHere = $true
@@ -1563,7 +1563,7 @@ public static class AIOAppxIdentityNative {
                     $script:currentDismProcess = Start-Process "dism.exe" `
                         -ArgumentList $argLine -WindowStyle Hidden -PassThru
 
-                    if ($null -eq $script:currentDismProcess) { throw "No se pudo iniciar dism.exe." }
+                    if ($null -eq $script:currentDismProcess) { throw (Get-AIOString 'errors.e498') }
 
                     while (-not $script:currentDismProcess.HasExited) {
                         [System.Windows.Forms.Application]::DoEvents()

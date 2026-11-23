@@ -66,7 +66,7 @@ function Set-AIOBootEditableAttributes {
     Set-AIOBootFileAttributesRaw -Path $Path -Attributes $value
     $observed = Get-AIOBootFileAttributes $Path
     if (($observed -band $mask) -ne $requested) {
-        throw "Atributos editables de '$Path': esperados=$([IO.FileAttributes]$requested) (0x$('{0:X}' -f $requested)); actuales=$([IO.FileAttributes]$observed) (0x$('{0:X}' -f $observed))."
+        throw (Get-AIOString 'errors.e008' -FormatArgs @($Path, ([IO.FileAttributes]$requested), ('{0:X}' -f $requested), ([IO.FileAttributes]$observed), ('{0:X}' -f $observed)))
     }
 }
 
@@ -93,7 +93,7 @@ function Assert-AIOBootFileState {
             } | ConvertTo-Json -Compress
             Write-Log -LogLevel ERROR -Message "BootFileVerify: $detail"
         } catch { }
-        throw "${Context}: '$Path'. Diferencias: $($differences -join '; ')."
+        throw (Get-AIOString 'errors.e648' -FormatArgs @(${Context}, $Path, ($differences -join '; ')))
     }
 }
 
@@ -120,7 +120,7 @@ function Restore-AIOBootFileMetadata {
             }
         } catch { $failures += "Seguridad: $($_.Exception.Message)" }
     }
-    if ($failures.Count -gt 0) { throw "No se recuperaron los metadatos de '$Path': $($failures -join '; ')" }
+    if ($failures.Count -gt 0) { throw (Get-AIOString 'errors.e526' -FormatArgs @($Path, ($failures -join '; '))) }
 }
 
 function Initialize-AIOBootFileReparseNative {
@@ -210,7 +210,7 @@ function Get-AIOBootSetupFileState {
     if (-not (Test-Path -LiteralPath $Path)) {
         return [pscustomobject]@{ Exists = $false; Base64 = ''; Hash = ''; Attributes = 0; Sddl = '' }
     }
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Se esperaba un archivo: $Path" }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw (Get-AIOString 'errors.e568' -FormatArgs @($Path)) }
     # Validar el tipo de reparse antes de seguir el archivo. WIM/WOF son filtros
     # de almacenamiento; symlinks/junctions y tags desconocidos no se escriben.
     $attributes = Get-AIOBootFileAttributes $Path
@@ -218,7 +218,7 @@ function Get-AIOBootSetupFileState {
         $storage = Get-AIOBootFileReparseInfo -Path $Path
         if ($storage.TagHex -notin @('0x00000000', '0x80000008', '0x80000017') -or
             ($storage.AttributesValue -band [int][IO.FileAttributes]::Directory) -ne 0) {
-            throw "Punto de reanalisis no admitido en '$Path': $($storage.TagHex)."
+            throw (Get-AIOString 'errors.e543' -FormatArgs @($Path, ($storage.TagHex)))
         }
     }
     $bytes = [IO.File]::ReadAllBytes($Path)
@@ -275,12 +275,12 @@ function Assert-AIOBootSetupAvailable {
         $file = Join-Path $MountPath $relative
         if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or
             (Get-Item -LiteralPath $file -Force -ErrorAction Stop).Length -eq 0) {
-            throw "Este indice no contiene el entorno Setup requerido ($relative). Selecciona el indice de instalacion de boot.wim."
+            throw (Get-AIOString 'errors.e226' -FormatArgs @($relative))
         }
     }
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $MountPath 'setup.exe'))
     if ($version.FileMajorPart -ne 10 -or $version.FileBuildPart -lt 10240) {
-        throw 'Esta opcion requiere el Setup de Windows 10/11 (build 10240+). No se reconocio esa version en setup.exe de la raiz del montaje.'
+        throw (Get-AIOString 'errors.e225')
     }
 }
 
@@ -329,21 +329,21 @@ function Get-AIOBootSetupBackup {
     param([Parameter(Mandatory=$true)][string]$Path)
     $backup = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
     if ($backup.Schema -ne 3) {
-        throw 'Respaldo de Setup incompatible: esta revision solo admite el formato 3. Conserva el archivo; restaura con la version que lo creo o utiliza un medio sin personalizaciones anteriores.'
+        throw (Get-AIOString 'errors.e554')
     }
     if ($backup.Owner -cne 'AdminImagenOffline.SetupLegacy' -or
         $null -eq $backup.Original -or $backup.Original.Exists -isnot [bool]) {
-        throw 'Respaldo de Setup no reconocido. No se modificara la imagen.'
+        throw (Get-AIOString 'errors.e555')
     }
     if ($backup.Original.Exists) {
         $bytes = [Convert]::FromBase64String($backup.Original.Base64)
         if ((Get-AIOBootSetupHash -Bytes $bytes) -cne $backup.Original.Hash -or
             [string]::IsNullOrWhiteSpace($backup.Original.Sddl) -or
             $null -eq $backup.Original.Attributes) {
-            throw 'El respaldo original de winpeshl.ini esta incompleto o no coincide con su SHA-256.'
+            throw (Get-AIOString 'errors.e209')
         }
     } elseif ($backup.Original.Base64 -ne '' -or $backup.Original.Hash -ne '' -or $backup.Original.Sddl -ne '') {
-        throw 'El respaldo de la ausencia original de winpeshl.ini no es valido.'
+        throw (Get-AIOString 'errors.e201')
     }
     return $backup
 }
@@ -358,10 +358,10 @@ function Assert-AIOBootSetupConfiguration {
         Assert-AIOBootSetupAvailable -MountPath $MountPath
         $backup = Get-AIOBootSetupBackup -Path $backupPath
         if ((Get-FileHash -LiteralPath $backupPath -Algorithm SHA256 -ErrorAction Stop).Hash -ne $Expected.BackupHash) {
-            throw 'El respaldo de Setup cambio durante la sesion.'
+            throw (Get-AIOString 'errors.e198')
         }
     } elseif (Test-Path -LiteralPath $backupPath) {
-        throw 'La restauracion no termino: todavia existe el respaldo de Setup.'
+        throw (Get-AIOString 'errors.e355')
     }
 }
 
@@ -374,7 +374,7 @@ function Set-AIOBootSetupMode {
     $backupPath = Join-Path $MountPath 'Windows\System32\AdminImagenOffline.SetupLegacy.json'
     # Detectar un respaldo obsoleto sin interpretarlo, migrarlo ni borrarlo.
     if (Test-Path -LiteralPath (Join-Path $MountPath 'Windows\System32\AdminImagenOffline.SetupClassic.json')) {
-        throw 'Respaldo anterior de Setup no compatible. Utiliza un medio limpio o restaura con la version que lo creo.'
+        throw (Get-AIOString 'errors.e552')
     }
     $legacyBytes = [Text.Encoding]::ASCII.GetBytes("[LaunchApps]`r`n%SYSTEMDRIVE%\setup.exe, /legacy`r`n")
     $legacyHash = Get-AIOBootSetupHash -Bytes $legacyBytes
@@ -386,11 +386,11 @@ function Set-AIOBootSetupMode {
         $createdBackup = $false
         if ($null -ne $backup) {
             if (-not $current.Exists -or $current.Hash -ne $legacyHash) {
-                throw 'Existe un respaldo, pero el inicio actual no coincide con el Setup Legacy administrado. Restaura primero la configuracion original.'
+                throw (Get-AIOString 'errors.e228')
             }
         } else {
             if (-not (Test-AIOBootStandardShell -Path $ini)) {
-                throw 'winpeshl.ini contiene un inicio personalizado o no reconocido. Se conserva sin cambios para proteger sus scripts y herramientas.'
+                throw (Get-AIOString 'errors.e639')
             }
             $backup = [pscustomobject]@{ Schema = 3; Owner = 'AdminImagenOffline.SetupLegacy'; Original = $current }
             $jsonBytes = [Text.Encoding]::UTF8.GetBytes(($backup | ConvertTo-Json -Depth 4))
@@ -413,17 +413,17 @@ function Set-AIOBootSetupMode {
                 Set-AIOBootSetupFileState -Path $ini -State $current
                 if ($createdBackup) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction Stop }
             } catch {
-                throw "Fallo la activacion ($failure) y la reversion ($($_.Exception.Message)). Descarta este montaje; se conserva el respaldo disponible."
+                throw (Get-AIOString 'errors.e242' -FormatArgs @($failure, ($_.Exception.Message)))
             }
-            throw "No se activo Setup Legacy; se restauro el estado anterior. $failure"
+            throw (Get-AIOString 'errors.e412' -FormatArgs @($failure))
         }
     } else {
-        if ($null -eq $backup) { throw 'No hay un respaldo creado por esta opcion. No se eliminara ni modificara winpeshl.ini.' }
+        if ($null -eq $backup) { throw (Get-AIOString 'errors.e408') }
         # Acepta el estado original para reintentar una limpieza interrumpida.
         $isOriginal = $current.Exists -eq $backup.Original.Exists -and
             (-not $current.Exists -or $current.Hash -eq $backup.Original.Hash)
         if (-not $isOriginal -and (-not $current.Exists -or $current.Hash -ne $legacyHash)) {
-            throw 'winpeshl.ini fue modificado por otra herramienta. Se conservan el archivo y el respaldo; no se sobrescribiran esos cambios.'
+            throw (Get-AIOString 'errors.e640')
         }
         $backupState = Get-AIOBootSetupFileState -Path $backupPath
         Set-AIOBootSetupFileState -Path $ini -State $backup.Original
@@ -460,31 +460,31 @@ function Get-AIOBootBackgroundBackup {
     $owner = if ($Media) { 'AdminImagenOffline.SetupMediaBackground' } else { 'AdminImagenOffline.SetupBackground' }
     $seen = @{}
     if ($backup.Schema -ne 3) {
-        throw 'Respaldo de fondo incompatible: esta revision solo admite el formato 3. Conserva el archivo; restaura con la version que lo creo o utiliza un medio sin personalizaciones anteriores.'
+        throw (Get-AIOString 'errors.e557')
     }
     if ($backup.Owner -cne $owner -or
         @($backup.Files).Count -eq 0 -or @($backup.Files).Count -gt $allowed.Count) {
-        throw 'Respaldo de fondo no reconocido.'
+        throw (Get-AIOString 'errors.e558')
     }
     foreach ($entry in @($backup.Files)) {
         if ($entry.RelativePath -cnotin $allowed -or $seen.ContainsKey([string]$entry.RelativePath)) {
-            throw 'El respaldo de fondo contiene rutas no permitidas o duplicadas.'
+            throw (Get-AIOString 'errors.e199')
         }
         $seen[$entry.RelativePath] = $true
         if ($entry.Original.Exists -isnot [bool] -or -not $entry.Original.Exists -or
             (-not $Media -and [string]::IsNullOrWhiteSpace($entry.Original.Sddl)) -or $null -eq $entry.Original.Attributes -or
             -not $entry.PSObject.Properties['SkipReason'] -or
             $entry.AppliedHash -notmatch '^[A-Fa-f0-9]{64}$' -or $entry.PreviousHash -notmatch '^[A-Fa-f0-9]{64}$') {
-            throw 'El respaldo de fondo esta incompleto.'
+            throw (Get-AIOString 'errors.e200')
         }
         $skipReason = Get-AIOBootBackgroundSkipReason $entry
         if ($skipReason -and ($skipReason -cne 'MissingBackground517' -or
             $entry.RelativePath -notmatch '(?i)(?:^|\\)spwizimg\.dll$' -or $entry.AppliedHash -cne $entry.PreviousHash)) {
-            throw 'El respaldo contiene una omision de fondo no reconocida o incoherente.'
+            throw (Get-AIOString 'errors.e197')
         }
         $bytes = [Convert]::FromBase64String($entry.Original.Base64)
         if ((Get-AIOBootSetupHash -Bytes $bytes) -cne $entry.Original.Hash) {
-            throw "El respaldo de $($entry.RelativePath) no coincide con su SHA-256."
+            throw (Get-AIOString 'errors.e202' -FormatArgs @(($entry.RelativePath)))
         }
     }
     return $backup
@@ -734,7 +734,7 @@ function ConvertTo-AIOBootWizardBackgroundState {
                 $converted = @(ConvertTo-AIOBootBackgroundStates -ImagePath $ImagePath -Files @($virtualFile))
                 $bytes = [Convert]::FromBase64String($converted[0].State.Base64)
                 if ($kind -eq 'BITMAP') {
-                    if ($bytes.Length -lt 54 -or $bytes[0] -ne 66 -or $bytes[1] -ne 77) { throw 'La conversion no produjo un BMP valido.' }
+                    if ($bytes.Length -lt 54 -or $bytes[0] -ne 66 -or $bytes[1] -ne 77) { throw (Get-AIOString 'errors.e310') }
                     $payload = New-Object byte[] ($bytes.Length - 14)
                     [Array]::Copy($bytes, 14, $payload, 0, $payload.Length)
                 } else {
@@ -751,16 +751,16 @@ function ConvertTo-AIOBootWizardBackgroundState {
         foreach ($item in $probes) {
             $after = [AIOSetupBackgroundResourcesR5]::Probe($dll, $item.Kind)
             if ($after.Inventory -cne $item.Result.Inventory -or $after.MissingError -ne $item.Result.MissingError) {
-                throw "Cambio el inventario de recursos $($item.Kind) del asistente."
+                throw (Get-AIOString 'errors.e019' -FormatArgs @(($item.Kind)))
             }
             if ($item.Result.MissingError -ne 0) { continue }
             $plan = $plans | Where-Object { $_.Kind -ceq $item.Kind } | Select-Object -First 1
             $verified = $after.Images
-            if ($verified.Count -ne $plan.Images.Count) { throw 'Cambio el inventario de idiomas del fondo del asistente.' }
+            if ($verified.Count -ne $plan.Images.Count) { throw (Get-AIOString 'errors.e018') }
             foreach ($language in $plan.Images.Keys) {
                 if (-not $verified.ContainsKey($language) -or
                     (Get-AIOBootSetupHash $verified[$language]) -ne (Get-AIOBootSetupHash $plan.Images[$language])) {
-                    throw "No se verifico $($plan.Kind)/517, idioma $language."
+                    throw (Get-AIOString 'errors.e529' -FormatArgs @(($plan.Kind), $language))
                 }
                 Write-Log -LogLevel INFO -Message "BootBackground: $origin; recurso $($plan.Kind)/517/$language verificado tras la sustitucion."
             }
@@ -775,7 +775,7 @@ function ConvertTo-AIOBootWizardBackgroundState {
         }
     } catch {
         $origin = if ($Entry.PSObject.Properties['SourcePath']) { $Entry.SourcePath } else { $Entry.RelativePath }
-        throw "No se pudo preparar $origin. $($_.Exception.GetBaseException().Message)"
+        throw (Get-AIOString 'errors.e506' -FormatArgs @($origin, ($_.Exception.GetBaseException().Message)))
     } finally { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction Stop }
 }
 
@@ -789,7 +789,7 @@ function Get-AIOBootBackgroundSkipReason {
 function Assert-AIOBootBackgroundHasChanges {
     param([Parameter(Mandatory=$true)][object[]]$Files)
     if (@($Files | Where-Object { -not (Get-AIOBootBackgroundSkipReason $_) }).Count -eq 0) {
-        throw 'No se encontraron recursos de fondo compatibles. Las DLL inspeccionadas se conservan; revisa el inventario BITMAP/IMAGE del registro.'
+        throw (Get-AIOString 'errors.e431')
     }
 }
 
@@ -804,7 +804,7 @@ function ConvertTo-AIOBootBackgroundStates {
             [Drawing.Imaging.ImageFormat]::Bmp.Guid)
         if ($source.RawFormat.Guid -notin $formats -or
             ([long]$source.Width * $source.Height) -gt 64000000) {
-            throw 'Selecciona una imagen JPG, PNG o BMP de hasta 64 megapixeles.'
+            throw (Get-AIOString 'errors.e586')
         }
         foreach ($entry in $Files) {
             if ($entry.RelativePath -match '(?i)(?:^|\\)spwizimg\.dll$') {
@@ -821,7 +821,7 @@ function ConvertTo-AIOBootBackgroundStates {
                 # Mantener el formato real del archivo, no inferirlo por extension.
                 $format = $original.RawFormat
                 if ($format.Guid -notin $formats -or ([long]$width * $height) -gt 64000000) {
-                    throw "Formato o dimensiones de fondo no admitidos: $($entry.RelativePath)."
+                    throw (Get-AIOString 'errors.e273' -FormatArgs @(($entry.RelativePath)))
                 }
                 # Un recurso de color solido puede medir pocos pixeles. No destruir
                 # el detalle de la imagen elegida al reducirla a ese tamano.
@@ -849,7 +849,7 @@ function ConvertTo-AIOBootBackgroundStates {
                 $output.Position = 0
                 $verified = [Drawing.Image]::FromStream($output)
                 if ($verified.Width -ne $width -or $verified.Height -ne $height -or $verified.RawFormat.Guid -ne $format.Guid) {
-                    throw "La conversion no se verifico: $($entry.RelativePath)."
+                    throw (Get-AIOString 'errors.e311' -FormatArgs @(($entry.RelativePath)))
                 }
                 $results += [pscustomobject]@{
                     RelativePath = $entry.RelativePath
@@ -879,9 +879,9 @@ function Assert-AIOBootBackgroundConfiguration {
     if ($Expected.Mode -eq 'Custom') {
         $null = Get-AIOBootBackgroundBackup -Path $path
         if ((Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash -ne $Expected.BackupHash) {
-            throw 'El respaldo del fondo cambio despues de la operacion.'
+            throw (Get-AIOString 'errors.e203')
         }
-    } elseif (Test-Path -LiteralPath $path) { throw 'La restauracion del fondo no termino de retirar su respaldo.' }
+    } elseif (Test-Path -LiteralPath $path) { throw (Get-AIOString 'errors.e354') }
 }
 
 function Set-AIOBootBackground {
@@ -893,14 +893,14 @@ function Set-AIOBootBackground {
     # Defensa adicional al filtro del menu. No requiere activar Setup clasico.
     foreach ($relative in @('sources\setup.exe', 'Windows\System32\winpeshl.exe')) {
         if (-not (Test-Path -LiteralPath (Join-Path $MountPath $relative) -PathType Leaf)) {
-            throw 'Selecciona un indice Windows Setup que conserve sus archivos de instalacion.'
+            throw (Get-AIOString 'errors.e584')
         }
     }
     $backupPath = Join-Path $MountPath 'Windows\System32\AdminImagenOffline.SetupBackground.json'
     $backupBefore = Get-AIOBootSetupFileState -Path $backupPath
     $backup = $null
     if ($backupBefore.Exists) { $backup = Get-AIOBootBackgroundBackup -Path $backupPath }
-    if ($Mode -eq 'Original' -and $null -eq $backup) { throw 'No hay un respaldo de fondo creado por esta opcion.' }
+    if ($Mode -eq 'Original' -and $null -eq $backup) { throw (Get-AIOString 'errors.e409') }
     $paths = @(Get-AIOBootBackgroundPaths | Where-Object {
         Test-Path -LiteralPath (Join-Path $MountPath $_) -PathType Leaf
     })
@@ -908,29 +908,29 @@ function Set-AIOBootBackground {
         $recorded = @($backup.Files | ForEach-Object { $_.RelativePath })
         if ($Mode -eq 'Custom' -and ($paths.Count -ne $recorded.Count -or
             @($paths | Where-Object { $_ -notin $recorded }).Count -gt 0)) {
-            throw 'Cambio el inventario de fondos. Restaura el original antes de aplicar otra imagen.'
+            throw (Get-AIOString 'errors.e017')
         }
         if ($Mode -eq 'Original') { $paths = $recorded }
     }
-    if ($paths.Count -eq 0) { throw 'No se encontraron archivos de fondo compatibles en este indice.' }
+    if ($paths.Count -eq 0) { throw (Get-AIOString 'errors.e420') }
     $before = @()
     foreach ($relative in $paths) {
         $state = Get-AIOBootSetupFileState -Path (Join-Path $MountPath $relative)
         if ($null -ne $backup) {
             $record = $backup.Files | Where-Object { $_.RelativePath -ceq $relative } | Select-Object -First 1
-            if ($null -eq $record) { throw 'El inventario del respaldo interno esta incompleto.' }
+            if ($null -eq $record) { throw (Get-AIOString 'errors.e138') }
             $validHashes = if ($Mode -eq 'Original') {
                 @($record.AppliedHash, $record.PreviousHash, $record.Original.Hash)
             } else { @($record.AppliedHash) }
             if (-not $state.Exists -or $state.Hash -notin $validHashes) {
-                throw "El fondo $relative cambio fuera del administrador o falta. Se conserva el respaldo sin sobrescribir cambios externos."
+                throw (Get-AIOString 'errors.e126' -FormatArgs @($relative))
             }
         }
         $before += [pscustomobject]@{ RelativePath = $relative; State = $state; SourcePath = Join-Path $MountPath $relative }
     }
     if ($Mode -eq 'Custom') {
         if ([string]::IsNullOrWhiteSpace($ImagePath) -or -not (Test-Path -LiteralPath $ImagePath -PathType Leaf)) {
-            throw 'No se encontro la imagen seleccionada.'
+            throw (Get-AIOString 'errors.e442')
         }
         # Completar toda la conversion antes de escribir el primer archivo.
         $desired = @(ConvertTo-AIOBootBackgroundStates -ImagePath $ImagePath -Files $before)
@@ -1006,9 +1006,9 @@ function Set-AIOBootBackground {
             catch { $rollbackErrors += $_.Exception.Message }
         }
         if ($rollbackErrors.Count -gt 0) {
-            throw "Fallo el cambio de fondo ($failure) y la reversion no termino: $($rollbackErrors -join '; '). Descarta este montaje con T y N."
+            throw (Get-AIOString 'errors.e237' -FormatArgs @($failure, ($rollbackErrors -join '; ')))
         }
-        throw "No se completo el cambio de fondo; el estado previo se conserva. $failure"
+        throw (Get-AIOString 'errors.e415' -FormatArgs @($failure))
     }
     $skipped = @($desired | Where-Object { Get-AIOBootBackgroundSkipReason $_ })
     $prepared = @($desired | Where-Object { -not (Get-AIOBootBackgroundSkipReason $_) })
@@ -1040,9 +1040,9 @@ function Get-AIOBootMediaFileState {
     if (-not (Test-Path -LiteralPath $Path)) {
         return [pscustomobject]@{ Exists = $false; Base64 = ''; Hash = ''; Attributes = 0; Sddl = '' }
     }
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Se esperaba un archivo del medio: $Path" }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw (Get-AIOString 'errors.e567' -FormatArgs @($Path)) }
     if (([IO.File]::GetAttributes($Path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "No se admiten enlaces para los fondos externos: $Path"
+        throw (Get-AIOString 'errors.e413' -FormatArgs @($Path))
     }
     $bytes = [IO.File]::ReadAllBytes($Path)
     # Escritura in situ sin cambiar propietarios/ACL; funciona tambien en FAT32/exFAT.
@@ -1083,7 +1083,7 @@ function Set-AIOBootMediaFileState {
     $after = Get-AIOBootMediaFileState $Path
     if ($after.Exists -ne $State.Exists -or ($State.Exists -and
         ($after.Hash -ne $State.Hash -or $after.Attributes -ne $State.Attributes))) {
-        throw "No se verifico el archivo externo: $Path"
+        throw (Get-AIOString 'errors.e528' -FormatArgs @($Path))
     }
 }
 
@@ -1100,7 +1100,7 @@ function New-AIOBootMediaBackgroundPlan {
         $recorded = @($backup.Files | ForEach-Object { $_.RelativePath })
         if ($Mode -eq 'Custom' -and ($paths.Count -ne $recorded.Count -or
             @($paths | Where-Object { $_ -notin $recorded }).Count -gt 0)) {
-            throw 'Cambio el inventario de fondos externos. Restaura los originales antes de elegir otra imagen.'
+            throw (Get-AIOString 'errors.e016')
         }
         if ($Mode -eq 'Original') { $paths = $recorded }
     }
@@ -1110,10 +1110,10 @@ function New-AIOBootMediaBackgroundPlan {
         $state = Get-AIOBootMediaFileState (Join-Path $SourcesPath $relative)
         if ($null -ne $backup) {
             $record = $backup.Files | Where-Object { $_.RelativePath -ceq $relative } | Select-Object -First 1
-            if ($null -eq $record) { throw 'El inventario del respaldo externo esta incompleto.' }
+            if ($null -eq $record) { throw (Get-AIOString 'errors.e137') }
             $valid = if ($Mode -eq 'Original') { @($record.AppliedHash, $record.PreviousHash, $record.Original.Hash) } else { @($record.AppliedHash) }
             if (-not $state.Exists -or $state.Hash -notin $valid) {
-                throw "El fondo externo $relative falta o cambio fuera del administrador. Se conserva sin sobrescribir."
+                throw (Get-AIOString 'errors.e125' -FormatArgs @($relative))
             }
         }
         $before += [pscustomobject]@{ RelativePath = $relative; State = $state; SourcePath = Join-Path $SourcesPath $relative }
@@ -1150,13 +1150,13 @@ function New-AIOBootMediaBackgroundPlan {
 function Assert-AIOBootMediaBackgroundPlan {
     param([Parameter(Mandatory=$true)]$Plan)
     $inventory = @(Get-AIOBootBackgroundPaths -Media | Where-Object { Test-Path -LiteralPath (Join-Path $Plan.SourcesPath $_) -PathType Leaf })
-    if (Compare-Object $inventory $Plan.Inventory) { throw 'Cambio el inventario del medio externo. Repite la opcion de fondo.' }
+    if (Compare-Object $inventory $Plan.Inventory) { throw (Get-AIOString 'errors.e020') }
     $entries = @($Plan.Before) + @([pscustomobject]@{ RelativePath = $Plan.BackupName; State = $Plan.BackupBefore })
     foreach ($entry in $entries) {
         $current = Get-AIOBootMediaFileState (Join-Path $Plan.SourcesPath $entry.RelativePath)
         if ($current.Exists -ne $entry.State.Exists -or ($current.Exists -and
             ($current.Hash -ne $entry.State.Hash -or $current.Attributes -ne $entry.State.Attributes))) {
-            throw "El archivo externo $($entry.RelativePath) cambio desde la seleccion. Repite la opcion de fondo."
+            throw (Get-AIOString 'errors.e101' -FormatArgs @(($entry.RelativePath)))
         }
     }
 }
@@ -1179,20 +1179,20 @@ function Undo-AIOBootMediaBackgroundPlan {
             if ($null -eq $written -or ($current.Exists -ne $written.Exists -or $current.Hash -ne $written.Hash)) {
                 # Una reversion previa puede haber recuperado este archivo.
                 if ($current.Exists -ne $prior.Exists -or $current.Hash -ne $prior.Hash) {
-                    throw "El archivo externo $relative cambio durante el guardado; no se sobrescribira."
+                    throw (Get-AIOString 'errors.e102' -FormatArgs @($relative))
                 }
             }
             Set-AIOBootMediaFileState -Path $path -State $prior
         } catch { $errors += $_.Exception.Message }
     }
-    if ($errors.Count -gt 0) { throw "No se pudo revertir el medio externo. Conserva el respaldo y reconecta el medio para reintentar: $($errors -join '; ')" }
+    if ($errors.Count -gt 0) { throw (Get-AIOString 'errors.e509' -FormatArgs @(($errors -join '; '))) }
     $Plan.NeedsRollback = $false
     $Plan.Touched = @(); $Plan.Written = @{}
 }
 
 function Invoke-AIOBootMediaBackgroundPlan {
     param([Parameter(Mandatory=$true)]$Plan)
-    if ($Plan.NeedsRollback) { throw 'Recupera primero la operacion externa pendiente antes de guardar otra vez.' }
+    if ($Plan.NeedsRollback) { throw (Get-AIOString 'errors.e548') }
     Assert-AIOBootMediaBackgroundPlan $Plan
     $writes = @()
     if ($Plan.Mode -eq 'Custom') { $writes += [pscustomobject]@{ RelativePath = $Plan.BackupName; State = $Plan.BackupDesired } }
@@ -1218,7 +1218,7 @@ function Invoke-AIOBootMediaBackgroundPlan {
     } catch {
         $failure = $_.Exception.Message
         Undo-AIOBootMediaBackgroundPlan $Plan
-        throw "No se guardo el fondo externo; se recupero su estado anterior. $failure"
+        throw (Get-AIOString 'errors.e458' -FormatArgs @($failure))
     }
 }
 
@@ -1232,7 +1232,7 @@ function Complete-AIOBootMediaBackgroundPlan {
     }
     $backupPath = Join-Path $Plan.SourcesPath $Plan.BackupName
     if ((Get-AIOBootMediaFileState $backupPath).Hash -ne $Plan.BackupDesired.Hash) {
-        throw 'El respaldo externo cambio durante el Commit. Se conserva para revision.'
+        throw (Get-AIOString 'errors.e205')
     }
     if ($Plan.Mode -eq 'Original') {
         Remove-AIOBootOperationBackup -Path $backupPath -Expected $Plan.BackupDesired -Media
@@ -1276,7 +1276,7 @@ function Remove-AIOBootOperationBackup {
 function New-AIOBootWin10Plan {
     param([string]$SourcesPath, [ValidateSet('Classic','Original')][string]$Mode, [switch]$Media)
     if ([string]::IsNullOrWhiteSpace($SourcesPath)) { return $null }
-    if (-not (Test-Path -LiteralPath $SourcesPath -PathType Container)) { throw "No existe la carpeta sources: $SourcesPath" }
+    if (-not (Test-Path -LiteralPath $SourcesPath -PathType Container)) { throw (Get-AIOString 'errors.e401' -FormatArgs @($SourcesPath)) }
     $names = @('setupprep.exe', 'setupprep.exe.aio.bak', 'AdminImagenOffline.SetupWin10.json')
     $before = @{}
     foreach ($name in $names) { $before[$name] = Get-AIOBootOptionFileState -Path (Join-Path $SourcesPath $name) -Media:$Media }
@@ -1285,14 +1285,14 @@ function New-AIOBootWin10Plan {
         $record = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($manifest.Base64)) | ConvertFrom-Json -ErrorAction Stop
         if ($record.Schema -ne 3 -or $record.Owner -cne 'AdminImagenOffline.SetupWin10' -or
             $record.Original.Hash -notmatch '^[A-Fa-f0-9]{64}$' -or $null -eq $record.Original.Attributes -or
-            (-not $Media -and [string]::IsNullOrWhiteSpace($record.Original.Sddl))) { throw 'Respaldo de Setup estilo Windows 10 no reconocido.' }
-        if ($original.Exists -eq $renamed.Exists) { throw 'Se esperaba una sola copia de setupprep.exe. No se sobrescribira ningun archivo.' }
+            (-not $Media -and [string]::IsNullOrWhiteSpace($record.Original.Sddl))) { throw (Get-AIOString 'errors.e553') }
+        if ($original.Exists -eq $renamed.Exists) { throw (Get-AIOString 'errors.e569') }
         $binary = if ($original.Exists) { $original } else { $renamed }
         Assert-AIOBootFileState -Path $SourcesPath -Expected $record.Original -Current $binary -Context 'setupprep.exe o sus permisos cambiaron fuera del administrador'
     } else {
         if ($Mode -eq 'Original') { return $null }
-        if (-not $original.Exists) { throw "No se encontro $SourcesPath\setupprep.exe. Esta variante de Setup no admite el renombrado solicitado." }
-        if ($renamed.Exists) { throw 'Ya existe setupprep.exe.aio.bak sin un respaldo reconocido. Se conserva sin cambios.' }
+        if (-not $original.Exists) { throw (Get-AIOString 'errors.e453' -FormatArgs @($SourcesPath)) }
+        if ($renamed.Exists) { throw (Get-AIOString 'errors.e623') }
         $binary = $original
     }
     $desired = @{}
@@ -1328,7 +1328,7 @@ function Assert-AIOBootWin10Plan {
 
 function Move-AIOBootSetupPrep {
     param([string]$Source, [string]$Destination, $State, [switch]$Media)
-    if (Test-Path -LiteralPath $Destination) { throw "Ya existe el destino de renombrado: $Destination" }
+    if (Test-Path -LiteralPath $Destination) { throw (Get-AIOString 'errors.e622' -FormatArgs @($Destination)) }
     $moved = $false
     try {
         try { [IO.File]::Move($Source, $Destination); $moved = $true }
@@ -1354,17 +1354,17 @@ function Undo-AIOBootWin10Plan {
     $current = @{}
     foreach ($name in $Plan.Names) { $current[$name] = Get-AIOBootOptionFileState -Path (Join-Path $Plan.SourcesPath $name) -Media:$Plan.Media }
     # Nunca borrar o reemplazar una segunda copia o un archivo ajeno.
-    if ($current[$sourceName].Exists -eq $current[$backupName].Exists) { throw 'No se puede revertir: el inventario de setupprep.exe cambio.' }
+    if ($current[$sourceName].Exists -eq $current[$backupName].Exists) { throw (Get-AIOString 'errors.e525') }
     $present = if ($current[$sourceName].Exists) { $sourceName } else { $backupName }
     $prior = if ($Plan.Before[$sourceName].Exists) { $sourceName } else { $backupName }
-    if ($current[$present].Hash -cne $Plan.Before[$prior].Hash) { throw 'setupprep.exe cambio durante la operacion; se conserva para revision.' }
+    if ($current[$present].Hash -cne $Plan.Before[$prior].Hash) { throw (Get-AIOString 'errors.e630') }
     if ($present -ne $prior) {
         Move-AIOBootSetupPrep -Source (Join-Path $Plan.SourcesPath $present) -Destination (Join-Path $Plan.SourcesPath $prior) -State $Plan.Before[$prior] -Media:$Plan.Media
     } elseif (-not $Plan.Media) { Restore-AIOBootFileMetadata -Path (Join-Path $Plan.SourcesPath $prior) -State $Plan.Before[$prior] }
     $manifestPath = Join-Path $Plan.SourcesPath $manifestName
     $currentManifest = $current[$manifestName]
     if ($Plan.ManifestCreated) {
-        if ($currentManifest.Hash -cne $Plan.Desired[$manifestName].Hash) { throw 'El registro del renombrado cambio; no se eliminara.' }
+        if ($currentManifest.Hash -cne $Plan.Desired[$manifestName].Hash) { throw (Get-AIOString 'errors.e189') }
         Set-AIOBootOptionFileState -Path $manifestPath -State $Plan.Before[$manifestName] -Media:$Plan.Media
     } else {
         Assert-AIOBootFileState -Path $manifestPath -Expected $Plan.Before[$manifestName] -Current $currentManifest
@@ -1376,7 +1376,7 @@ function Undo-AIOBootWin10Plan {
 
 function Invoke-AIOBootWin10Plan {
     param($Plan)
-    if ($Plan.NeedsRollback) { throw 'Revierte primero el renombrado externo pendiente.' }
+    if ($Plan.NeedsRollback) { throw (Get-AIOString 'errors.e560') }
     Assert-AIOBootWin10Plan -Plan $Plan
     $Plan.NeedsRollback = $true
     try {
@@ -1398,8 +1398,8 @@ function Invoke-AIOBootWin10Plan {
     } catch {
         $failure = $_.Exception.Message
         try { Undo-AIOBootWin10Plan -Plan $Plan }
-        catch { throw "Fallo el renombrado ($failure) y la reversion ($($_.Exception.Message)). Conserva el respaldo." }
-        throw "No se completo el renombrado; estado previo recuperado. $failure"
+        catch { throw (Get-AIOString 'errors.e241' -FormatArgs @($failure, ($_.Exception.Message))) }
+        throw (Get-AIOString 'errors.e416' -FormatArgs @($failure))
     }
 }
 
@@ -1458,11 +1458,11 @@ function Test-AIOBootLabValuesEqual {
 function Assert-AIOBootLabSnapshot {
     param($Snapshot)
     $names = @(Get-AIOBootBypassNames)
-    if ($Snapshot.KeyExists -isnot [bool] -or @($Snapshot.Values).Count -ne $names.Count) { throw 'Respaldo LabConfig incompleto.' }
+    if ($Snapshot.KeyExists -isnot [bool] -or @($Snapshot.Values).Count -ne $names.Count) { throw (Get-AIOString 'errors.e551') }
     for ($i = 0; $i -lt $names.Count; $i++) {
         $entry = $Snapshot.Values[$i]
-        if ($entry.Name -cne $names[$i] -or $entry.Exists -isnot [bool]) { throw 'El respaldo LabConfig contiene valores no permitidos.' }
-        if ($entry.Exists -and $entry.Kind -notin @('DWord','QWord','String','ExpandString','MultiString','Binary','None')) { throw 'Tipo de registro LabConfig no reconocido.' }
+        if ($entry.Name -cne $names[$i] -or $entry.Exists -isnot [bool]) { throw (Get-AIOString 'errors.e192') }
+        if ($entry.Exists -and $entry.Kind -notin @('DWord','QWord','String','ExpandString','MultiString','Binary','None')) { throw (Get-AIOString 'errors.e600') }
     }
 }
 
@@ -1501,22 +1501,22 @@ function Invoke-AIOBootBypassHive {
         [IO.File]::WriteAllBytes($path, $Bytes)
         $reg = Join-Path $env:SystemRoot 'System32\reg.exe'
         $output = & $reg load "HKLM\$keyName" $path 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "No se pudo cargar la copia SYSTEM: $output" }
+        if ($LASTEXITCODE -ne 0) { throw (Get-AIOString 'errors.e477' -FormatArgs @($output)) }
         $loaded = $true
         $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Default)
         $root = $base.OpenSubKey($keyName, $true)
-        if ($null -eq $root) { throw 'No se abrio el hive temporal de Setup.' }
+        if ($null -eq $root) { throw (Get-AIOString 'errors.e411') }
         $snapshot = Get-AIOBootLabSnapshot -Root $root
-        if ($null -ne $Expected -and -not (Test-AIOBootLabValuesEqual $snapshot $Expected)) { throw 'LabConfig cambio antes de aplicar la operacion.' }
+        if ($null -ne $Expected -and -not (Test-AIOBootLabValuesEqual $snapshot $Expected)) { throw (Get-AIOString 'errors.e368') }
         if ($null -ne $Desired) {
             Set-AIOBootLabSnapshot -Root $root -Snapshot $Desired
             $snapshot = Get-AIOBootLabSnapshot -Root $root
-            if (-not (Test-AIOBootLabValuesEqual $snapshot $Desired)) { throw 'No se verificaron los valores LabConfig.' }
+            if (-not (Test-AIOBootLabValuesEqual $snapshot $Desired)) { throw (Get-AIOString 'errors.e527') }
         }
         $root.Dispose(); $root = $null
         $base.Dispose(); $base = $null
         $output = & $reg unload "HKLM\$keyName" 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "No se pudo descargar el hive temporal HKLM\${keyName}: $output" }
+        if ($LASTEXITCODE -ne 0) { throw (Get-AIOString 'errors.e483' -FormatArgs @(${keyName}, $output)) }
         $loaded = $false
         return [pscustomobject]@{ Snapshot = $snapshot; Bytes = [IO.File]::ReadAllBytes($path) }
     } finally {
@@ -1539,9 +1539,9 @@ function Get-AIOBootLabSnapshotHash {
 function Get-AIOBootBypassBackup {
     param([string]$Path)
     $record = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-    if ($record.Schema -ne 3 -or $record.Owner -cne 'AdminImagenOffline.SetupBypass') { throw 'Respaldo de bypass no reconocido.' }
+    if ($record.Schema -ne 3 -or $record.Owner -cne 'AdminImagenOffline.SetupBypass') { throw (Get-AIOString 'errors.e556') }
     Assert-AIOBootLabSnapshot $record.Original
-    if ($record.OriginalHash -cne (Get-AIOBootLabSnapshotHash $record.Original)) { throw 'El respaldo LabConfig no coincide con su SHA-256.' }
+    if ($record.OriginalHash -cne (Get-AIOBootLabSnapshotHash $record.Original)) { throw (Get-AIOString 'errors.e193') }
     return $record
 }
 
@@ -1557,7 +1557,7 @@ function Set-AIOBootBypass {
     $hivePath = Join-Path $MountPath 'Windows\System32\config\SYSTEM'
     $backupPath = Join-Path $MountPath 'Windows\System32\AdminImagenOffline.SetupBypass.json'
     $before = Get-AIOBootSetupFileState -Path $hivePath
-    if (-not $before.Exists) { throw 'No se encontro SYSTEM en el indice Setup.' }
+    if (-not $before.Exists) { throw (Get-AIOString 'errors.e437') }
     $backupBefore = Get-AIOBootSetupFileState -Path $backupPath
     $read = Invoke-AIOBootBypassHive -Bytes ([Convert]::FromBase64String($before.Base64))
     $original = $read.Snapshot
@@ -1566,8 +1566,8 @@ function Set-AIOBootBypass {
         $record = Get-AIOBootBypassBackup -Path $backupPath
         $original = $record.Original
         if (-not (Test-AIOBootLabValuesEqual $read.Snapshot $enabled) -and
-            -not (Test-AIOBootLabValuesEqual $read.Snapshot $original)) { throw 'Los bypass cambiaron fuera del administrador. Se conserva el respaldo.' }
-    } elseif ($Mode -eq 'Original') { throw 'No existe un respaldo de bypass para restaurar.' }
+            -not (Test-AIOBootLabValuesEqual $read.Snapshot $original)) { throw (Get-AIOString 'errors.e376') }
+    } elseif ($Mode -eq 'Original') { throw (Get-AIOString 'errors.e402') }
     $desired = if ($Mode -eq 'Enabled') { $enabled } else { $original }
     $edited = Invoke-AIOBootBypassHive -Bytes ([Convert]::FromBase64String($before.Base64)) -Expected $read.Snapshot -Desired $desired
     $next = [pscustomobject]@{ Exists = $true; Base64 = [Convert]::ToBase64String($edited.Bytes)
@@ -1597,8 +1597,8 @@ function Set-AIOBootBypass {
         try {
             if ($hiveTouched) { Set-AIOBootSetupFileState -Path $hivePath -State $before }
             if ($backupCreated -or ($Mode -eq 'Original' -and $hiveTouched)) { Set-AIOBootSetupFileState -Path $backupPath -State $backupBefore }
-        } catch { throw "Fallo el bypass ($failure) y la reversion ($($_.Exception.Message)). Descarta el montaje." }
-        throw "No se aplico el bypass; estado anterior recuperado. $failure"
+        } catch { throw (Get-AIOString 'errors.e236' -FormatArgs @($failure, ($_.Exception.Message))) }
+        throw (Get-AIOString 'errors.e414' -FormatArgs @($failure))
     }
     Write-Log -LogLevel INFO -Message "BootSetup: LabConfig $Mode preparado y verificado en el SYSTEM offline."
     return $expected
@@ -1608,7 +1608,7 @@ function Assert-AIOBootBypassConfiguration {
     param([string]$MountPath, $Expected)
     $bytes = [IO.File]::ReadAllBytes((Join-Path $MountPath 'Windows\System32\config\SYSTEM'))
     $read = Invoke-AIOBootBypassHive -Bytes $bytes
-    if (-not (Test-AIOBootLabValuesEqual $read.Snapshot $Expected.Values)) { throw 'LabConfig cambio despues de configurar los bypass. No se guardara.' }
+    if (-not (Test-AIOBootLabValuesEqual $read.Snapshot $Expected.Values)) { throw (Get-AIOString 'errors.e369') }
     $path = Join-Path $MountPath 'Windows\System32\AdminImagenOffline.SetupBypass.json'
     Assert-AIOBootFileState -Path $path -Expected $Expected.Backup -Current (Get-AIOBootSetupFileState -Path $path)
 }
@@ -1646,7 +1646,7 @@ function New-AIOBootSetupSession {
 function Assert-AIOBootSetupSessionEditable {
     param([Parameter(Mandatory=$true)]$Session)
     if (-not $Session.IsSetupIndex -or -not (Test-Path -LiteralPath $Session.MountPath -PathType Container)) {
-        throw 'Selecciona y monta el indice de instalacion de boot.wim desde Modulo-Environments.'
+        throw (Get-AIOString 'errors.e587')
     }
 }
 
@@ -1701,12 +1701,12 @@ function Set-AIOBootSetupSessionWin10 {
         Assert-AIOBootSetupSessionEditable -Session $Session
         Assert-AIOBootSetupAvailable -MountPath $Session.MountPath
         if ($Mode -eq 'Classic' -and -not $Session.MediaSources) {
-            throw 'Selecciona sources\boot.wim desde el medio completo para renombrar setupprep.exe en ambas ubicaciones.'
+            throw (Get-AIOString 'errors.e582')
         }
         Undo-AIOBootSetupExternalChanges -Session $Session
         $media = New-AIOBootWin10Plan -SourcesPath $Session.MediaSources -Mode $Mode -Media
         $internal = New-AIOBootWin10Plan -SourcesPath (Join-Path $Session.MountPath 'sources') -Mode $Mode
-        if ($null -eq $internal -and $null -eq $media) { throw 'No hay renombrados registrados para restaurar.' }
+        if ($null -eq $internal -and $null -eq $media) { throw (Get-AIOString 'errors.e406') }
         $expected = $null
         if ($null -ne $internal) {
             Invoke-AIOBootWin10Plan -Plan $internal
@@ -1742,7 +1742,7 @@ function Set-AIOBootSetupSessionBypass {
 function Invoke-AIOBootSetupPreCommit {
     param([Parameter(Mandatory=$true)]$Session)
     if ($Session.SetupEditFailed -or $Session.BackgroundEditFailed -or $Session.Win10EditFailed -or $Session.BypassEditFailed) {
-        throw 'Hay una operacion de Setup, bypass o fondo fallida. Abre la GUI y repite la operacion correctamente, o elige N para descartar.'
+        throw (Get-AIOString 'errors.e283')
     }
     if ($null -ne $Session.SetupExpected) { Assert-AIOBootSetupConfiguration -MountPath $Session.MountPath -Expected $Session.SetupExpected }
     if ($null -ne $Session.BackgroundExpected) { Assert-AIOBootBackgroundConfiguration -MountPath $Session.MountPath -Expected $Session.BackgroundExpected }
@@ -1757,7 +1757,7 @@ function Invoke-AIOBootSetupPreCommit {
     } catch {
         $failure = $_.Exception.Message
         try { Undo-AIOBootSetupExternalChanges -Session $Session }
-        catch { throw "No se prepararon los externos ($failure). Reversion pendiente: $($_.Exception.Message)" }
+        catch { throw (Get-AIOString 'errors.e461' -FormatArgs @($failure, ($_.Exception.Message))) }
         throw $failure
     }
 }
@@ -1849,7 +1849,7 @@ function Show-BootSetup-GUI {
     param([Parameter(Mandatory=$true)]$Session)
     Assert-AIOBootSetupSessionEditable -Session $Session
     if ($Script:IMAGE_MOUNTED -ne 1 -or $Script:MOUNT_DIR -ne $Session.MountPath -or $Script:WIM_FILE_PATH -ne $Session.BootPath) {
-        throw 'La sesion de Setup no corresponde al boot.wim actualmente montado.'
+        throw (Get-AIOString 'errors.e359')
     }
     Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
     Add-Type -AssemblyName System.Drawing -ErrorAction Stop
@@ -2055,7 +2055,7 @@ function Show-BootSetup-GUI {
             if ($Path) {
                 $source = [Drawing.Image]::FromFile($Path)
                 $formats = @([Drawing.Imaging.ImageFormat]::Jpeg.Guid,[Drawing.Imaging.ImageFormat]::Png.Guid,[Drawing.Imaging.ImageFormat]::Bmp.Guid)
-                if ($source.RawFormat.Guid -notin $formats -or ([long]$source.Width * $source.Height) -gt 64000000) { throw 'Selecciona PNG, JPG o BMP de hasta 64 megapixeles.' }
+                if ($source.RawFormat.Guid -notin $formats -or ([long]$source.Width * $source.Height) -gt 64000000) { throw (Get-AIOString 'errors.e577') }
                 $graphics.Clear([Drawing.Color]::Black)
                 $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
                 $scale = [Math]::Min(1024.0/$source.Width,768.0/$source.Height)

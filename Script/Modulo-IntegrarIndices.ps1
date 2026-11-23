@@ -60,7 +60,7 @@ function Find-AIOIndexWimlib {
     $command = Get-Command wimlib-imagex.exe -CommandType Application -ErrorAction SilentlyContinue
     if (-not $command) { $command = Get-Command wimlib-imagex -CommandType Application -ErrorAction SilentlyContinue }
     if ($command) { return $command.Source }
-    throw 'No se encontro wimlib-imagex.exe en Tools\wimlib ni en PATH.'
+    throw (Get-AIOString 'errors.e450')
 }
 
 function ConvertTo-AIOIndexArgument {
@@ -71,7 +71,7 @@ function ConvertTo-AIOIndexArgument {
 
 function Assert-AIOIndexNotCancelled {
     param([hashtable]$State)
-    if ($State -and $State.Cancel) { throw [OperationCanceledException]::new('Operacion cancelada. No se publico un WIM de salida.') }
+    if ($State -and $State.Cancel) { throw [OperationCanceledException]::new((Get-AIOString 'errors.e536')) }
 }
 
 function Write-AIOIndexLog {
@@ -188,7 +188,7 @@ function Invoke-AIOIndexNative {
             if (-not $exited) { Start-Sleep -Milliseconds 75 }
         } while (-not $exited)
         Assert-AIOIndexNotCancelled $State
-        if ($reader.ExitCode -ne 0) { throw "wimlib fallo (codigo $($reader.ExitCode)).`n$($tail -join "`n")" }
+        if ($reader.ExitCode -ne 0) { throw (Get-AIOString 'errors.e633' -FormatArgs @(($reader.ExitCode), ($tail -join "`n"))) }
         $succeeded = $true
     } finally {
         try {
@@ -205,7 +205,7 @@ function Invoke-AIOIndexNative {
 function Read-AIOIndexCatalog {
     param([string]$Path, [string]$Engine, [hashtable]$State, [string]$LogPath)
     $file = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
-    if ($file.PSIsContainer -or $file.Extension -notin @('.wim', '.esd')) { throw 'Selecciona una fuente WIM o ESD (no cifrada).' }
+    if ($file.PSIsContainer -or $file.Extension -notin @('.wim', '.esd')) { throw (Get-AIOString 'errors.e585') }
     $xmlPath = Join-Path ([IO.Path]::GetTempPath()) ('AIO-indices-' + [guid]::NewGuid().ToString('N') + '.xml')
     try {
         Invoke-AIOIndexNative $Engine @('info', $file.FullName, "--extract-xml=$xmlPath") $State $LogPath
@@ -219,7 +219,7 @@ function Read-AIOIndexCatalog {
             $xml.Load($reader)
         } finally { $reader.Dispose() }
         $nodes = @($xml.SelectNodes('/WIM/IMAGE'))
-        if ($nodes.Count -eq 0) { throw 'La fuente no contiene indices.' }
+        if ($nodes.Count -eq 0) { throw (Get-AIOString 'errors.e335') }
         foreach ($node in $nodes) {
             $arch = [string]$node.WINDOWS.ARCH
             $archName = switch ($arch) { '0' { 'x86' } '9' { 'x64' } '12' { 'ARM64' } default { $arch } }
@@ -356,7 +356,7 @@ function Assert-AIOIndexArchitectureGroups {
         $key = Get-AIOIndexArchitectureKey $entry.Architecture
         if ($null -ne $previous -and $key -eq $previous) { continue }
         if ($seen.ContainsKey($key)) {
-            throw 'Los indices de cada arquitectura deben permanecer juntos. No se pueden mezclar grupos.'
+            throw (Get-AIOString 'errors.e378')
         }
         $seen[$key] = $true
         $previous = $key
@@ -372,9 +372,9 @@ function Set-AIOIndexPlanMetadata {
     param([object]$Entry, [object]$Metadata, [object[]]$OtherEntries = @())
     Assert-AIOWimMetadata $Metadata
     $name = Format-AIOIndexOutputName $Metadata.Name $Entry.Architecture
-    if (-not $name) { throw 'El nombre no puede contener solamente la etiqueta de arquitectura.' }
+    if (-not $name) { throw (Get-AIOString 'errors.e172') }
     if (@($OtherEntries | Where-Object { $_.Name -ieq $name }).Count) {
-        throw "Nombre repetido en el resultado: '$name'. Elige otro nombre."
+        throw (Get-AIOString 'errors.e535' -FormatArgs @($name))
     }
     # Validar antes de modificar la entrada. OriginalName/OriginalEdition conservan
     # la identidad de la fuente para su verificacion y las advertencias de arranque.
@@ -415,29 +415,29 @@ function Get-AIOIndexCompatibilityWarnings {
 
 function Assert-AIOIndexPlan {
     param([object[]]$Plan, [string]$Destination)
-    if (-not $Plan -or $Plan.Count -eq 0) { throw 'Agrega al menos un indice al orden final.' }
+    if (-not $Plan -or $Plan.Count -eq 0) { throw (Get-AIOString 'errors.e001') }
     Assert-AIOIndexArchitectureGroups $Plan
-    if ([string]::IsNullOrWhiteSpace($Destination)) { throw 'Selecciona el archivo WIM de salida.' }
+    if ([string]::IsNullOrWhiteSpace($Destination)) { throw (Get-AIOString 'errors.e580') }
     $dest = [IO.Path]::GetFullPath($Destination)
-    if ([IO.Path]::GetExtension($dest) -ine '.wim') { throw 'El archivo de salida debe tener extension .wim.' }
-    if (-not [IO.Directory]::Exists([IO.Path]::GetDirectoryName($dest))) { throw 'La carpeta de salida no existe.' }
-    if (Test-Path -LiteralPath $dest) { throw 'El destino ya existe. Elige un nombre nuevo; no se sobrescriben archivos.' }
+    if ([IO.Path]::GetExtension($dest) -ine '.wim') { throw (Get-AIOString 'errors.e099') }
+    if (-not [IO.Directory]::Exists([IO.Path]::GetDirectoryName($dest))) { throw (Get-AIOString 'errors.e301') }
+    if (Test-Path -LiteralPath $dest) { throw (Get-AIOString 'errors.e118') }
     $names = @{}
     $boots = 0
     foreach ($entry in $Plan) {
-        if ($entry.Index -lt 1) { throw 'Indice de origen invalido.' }
+        if ($entry.Index -lt 1) { throw (Get-AIOString 'errors.e291') }
         Assert-AIOWimMetadata $entry
-        if ($names.ContainsKey($entry.Name)) { throw "Nombre repetido en el resultado: '$($entry.Name)'. Abre los metadatos con doble clic y cambia el nombre." }
+        if ($names.ContainsKey($entry.Name)) { throw (Get-AIOString 'errors.e534' -FormatArgs @(($entry.Name))) }
         $names[$entry.Name] = $true
         if ($entry.Boot) { $boots++ }
         $source = Get-Item -LiteralPath $entry.Source -Force -ErrorAction Stop
-        if ($source.PSIsContainer -or $source.Extension -notin @('.wim', '.esd')) { throw 'Solo se admiten fuentes WIM y ESD.' }
-        if ($source.FullName -ieq $dest) { throw 'El destino no puede ser una fuente.' }
+        if ($source.PSIsContainer -or $source.Extension -notin @('.wim', '.esd')) { throw (Get-AIOString 'errors.e592') }
+        if ($source.FullName -ieq $dest) { throw (Get-AIOString 'errors.e116') }
         if ($source.Length -ne $entry.SourceLength -or $source.LastWriteTimeUtc.Ticks -ne $entry.SourceTicks) {
-            throw "La fuente cambio desde que se leyo: $($entry.Source). Quita sus indices y vuelve a agregar la fuente."
+            throw (Get-AIOString 'errors.e332' -FormatArgs @(($entry.Source)))
         }
     }
-    if ($boots -gt 1) { throw 'Solo un indice puede marcarse como arranque WinPE.' }
+    if ($boots -gt 1) { throw (Get-AIOString 'errors.e593') }
     return $dest
 }
 
@@ -452,7 +452,7 @@ function Export-AIOIndexPlan {
         $mounted = @(Get-WindowsImage -Mounted -ErrorAction Stop)
         foreach ($mount in $mounted) {
             if ($mount.ImagePath -and $sources -icontains [IO.Path]::GetFullPath($mount.ImagePath)) {
-                throw "La fuente esta montada: $($mount.ImagePath). Guarda y desmonta antes de integrar."
+                throw (Get-AIOString 'errors.e334' -FormatArgs @(($mount.ImagePath)))
             }
         }
     }
@@ -474,7 +474,7 @@ function Export-AIOIndexPlan {
         }
         foreach ($entry in $Plan) {
             $original = @($catalogs[$entry.Source] | Where-Object { $_.Index -eq $entry.Index })
-            if ($original.Count -ne 1 -or $original[0].Name -cne $entry.OriginalName) { throw "El indice $($entry.Index) ya no coincide con la fuente: $($entry.Source)." }
+            if ($original.Count -ne 1 -or $original[0].Name -cne $entry.OriginalName) { throw (Get-AIOString 'errors.e135' -FormatArgs @(($entry.Index), ($entry.Source))) }
         }
         $position = 0
         foreach ($entry in $Plan) {
@@ -498,7 +498,7 @@ function Export-AIOIndexPlan {
         $State.Status = 'Verificando todos los datos del WIM resultante...'
         Invoke-AIOIndexNative $Engine @('verify', $pending) $State $log
         $result = @(Read-AIOIndexCatalog $pending $Engine $State $log)
-        if ($result.Count -ne $Plan.Count) { throw 'La cantidad de indices resultantes no coincide con el plan.' }
+        if ($result.Count -ne $Plan.Count) { throw (Get-AIOString 'errors.e297') }
         for ($i = 0; $i -lt $Plan.Count; $i++) {
             $expected = $Plan[$i]; $actual = $result[$i]
             if ($actual.Index -ne ($i + 1) -or $actual.Name -cne $expected.Name -or
@@ -507,7 +507,7 @@ function Export-AIOIndexPlan {
                 $actual.Architecture -ne $expected.Architecture -or $actual.Edition -cne $expected.Edition -or
                 $actual.ProductType -cne $expected.ProductType -or $actual.InstallationType -cne $expected.InstallationType -or
                 $actual.Build -ne $expected.Build -or $actual.Bytes -ne $expected.Bytes) {
-                throw "La verificacion de orden/metadatos fallo en el indice $($i + 1)."
+                throw (Get-AIOString 'errors.e363' -FormatArgs @(($i + 1)))
             }
         }
         Assert-AIOIndexNotCancelled $State
@@ -828,13 +828,19 @@ function Show-AIOIndexIntegrator {
         $ui.State = [hashtable]::Synchronized(@{ Cancel = $false; Progress = 0; Status = 'Iniciando...'; LogPath = ''; NativePercent = -1.0; NativePhase = ''; NativePhaseKey = ''; NativeActive = $false; NativeSucceeded = $false })
         $ui.Action = $Action; $ui.Started = [Diagnostics.Stopwatch]::StartNew()
         $ui.Worker = [PowerShell]::Create()
+        $workerLang = if ($Script:AIOI18nActiveLanguage) { [string]$Script:AIOI18nActiveLanguage } elseif ($Script:UI_LANGUAGE) { [string]$Script:UI_LANGUAGE } else { 'auto' }
         $workerScript = {
-            param($ModulePath, $Engine, $Action, $Payload, $State)
+            param($ModulePath, $Engine, $Action, $Payload, $State, $Lang)
             $ErrorActionPreference = 'Stop'
+            $i18nPath = Join-Path (Split-Path -Parent $ModulePath) 'I18n.ps1'
+            if (Test-Path -LiteralPath $i18nPath -PathType Leaf) {
+                . $i18nPath
+                [void](Initialize-AIOI18n -PreferredLanguage $Lang)
+            }
             . $ModulePath
             Invoke-AIOIndexWork $Engine $Action $Payload $State
         }
-        [void]$ui.Worker.AddScript($workerScript.ToString()).AddArgument($modulePath).AddArgument($engine).AddArgument($Action).AddArgument($Payload).AddArgument($ui.State)
+        [void]$ui.Worker.AddScript($workerScript.ToString()).AddArgument($modulePath).AddArgument($engine).AddArgument($Action).AddArgument($Payload).AddArgument($ui.State).AddArgument($workerLang)
         try { $ui.Handle = $ui.Worker.BeginInvoke() }
         catch { $ui.Worker.Dispose(); $ui.Worker = $null; throw }
         foreach ($control in $editableControls) { $control.Enabled = $false }
@@ -867,7 +873,7 @@ function Show-AIOIndexIntegrator {
         $timer.Stop()
         try {
             $answers = @($worker.EndInvoke($ui.Handle))
-            if ($worker.HadErrors -or $answers.Count -ne 1) { throw ('No se pudo completar el proceso. ' + ($worker.Streams.Error -join "`r`n")) }
+            if ($worker.HadErrors -or $answers.Count -ne 1) { throw (Get-AIOString 'errors.e_idx_worker_failed' -FormatArgs @(($worker.Streams.Error -join "`r`n"))) }
             $answer = $answers[0]
             if (-not $answer.Success) {
                 $status.Text = if ($answer.Cancelled) { Get-AIOString 'integrar.status_cancelled' } else { Get-AIOString 'integrar.status_not_created' }
@@ -1003,7 +1009,7 @@ function Show-AIOIndexIntegrator {
             $plan = @($ui.Plan.ToArray())
             $dest = Assert-AIOIndexPlan $plan $destination.Text.Trim()
             if ($Script:IMAGE_MOUNTED -eq 1 -and @($plan | Where-Object { $_.Source -ieq $Script:WIM_FILE_PATH }).Count) {
-                throw 'Una fuente esta montada en la aplicacion. Guarda y desmonta antes de integrar.'
+                throw (Get-AIOString 'errors.e604')
             }
             $summary = Get-AIOString 'integrar.confirm_summary' $plan.Count $dest
             $warnings = @(Get-AIOIndexCompatibilityWarnings $plan)

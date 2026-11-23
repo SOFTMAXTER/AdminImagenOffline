@@ -47,7 +47,7 @@ function Read-AIOExistingIndex {
     $indexes = @(Get-AIOWimIndexes -ImagePath $ImagePath)
     $selected = 0
     if (-not [int]::TryParse((Read-Host (Get-AIOString 'editindex.select_index_prompt')), [ref]$selected) -or $selected -notin $indexes) {
-        throw 'El indice no figura en el inventario del archivo.'
+        throw (Get-AIOString 'errors.e131')
     }
     return $selected
 }

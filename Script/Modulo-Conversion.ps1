@@ -111,10 +111,10 @@ function Convert-VHD {
     try {
         # Publicar el resultado solo cuando la captura y WinRE esten verificados.
         if ([IO.Path]::GetFullPath($DEST_WIM_PATH) -eq [IO.Path]::GetFullPath($VHD_FILE_PATH)) {
-            throw "El archivo de destino debe ser diferente del VHD de origen."
+            throw (Get-AIOString 'errors.e098')
         }
         if ((Get-VHD -Path $VHD_FILE_PATH -ErrorAction Stop).Attached) {
-            throw "El VHD ya esta conectado. Desconectalo antes de iniciar la conversion."
+            throw (Get-AIOString 'errors.e086')
         }
         $sessionId = [guid]::NewGuid().ToString('N')
         $workRoot = Join-Path $Script:Scratch_DIR "ConvertVHD_$sessionId"
@@ -173,7 +173,7 @@ function Convert-VHD {
         }
 
         if (-not $DRIVE_LETTER) {
-            throw "No se encontro ninguna instalacion de Windows valida en el VHD. Asegurese de que la imagen no esta cifrada con BitLocker."
+            throw (Get-AIOString 'errors.e444')
         }
 
         # C. Buscar WinRE dentro de Windows y en las particiones del mismo VHD.
@@ -228,7 +228,7 @@ function Convert-VHD {
                 $choice = 0
                 do {
                     $answer = Read-Host (Get-AIOString 'conversion.vhd_winre_prompt')
-                    if ([string]::IsNullOrWhiteSpace($answer)) { throw 'Conversion cancelada al seleccionar WinRE.' }
+                    if ([string]::IsNullOrWhiteSpace($answer)) { throw (Get-AIOString 'errors.e026') }
                 } until ([int]::TryParse($answer, [ref]$choice) -and $choice -ge 1 -and $choice -le $candidates.Count)
                 $winreSource = $candidates[$choice - 1].Path
             }
@@ -237,7 +237,7 @@ function Convert-VHD {
 
         if ($winreSource) {
             if ((Get-Item -LiteralPath $winreSource -Force -ErrorAction Stop).Length -eq 0) {
-                throw "El WinRE encontrado esta vacio: '$winreSource'."
+                throw (Get-AIOString 'errors.e089' -FormatArgs @($winreSource))
             }
             Write-Log -LogLevel INFO -Message "ConvertVHD: WinRE seleccionado -> $winreSource"
             Write-AIOConversionField -Label 'Origen WinRE' -Value $winreSource
@@ -326,7 +326,7 @@ function Convert-VHD {
         
         dism /capture-image /imagefile:"$pendingWim" /capturedir:"$DRIVE_LETTER`:\" /name:"$IMAGE_NAME" /description:"$IMAGE_DESC" /compress:max /checkintegrity /ScratchDir:"$Script:Scratch_DIR"
 
-        if ($LASTEXITCODE -ne 0) { throw "Fallo DISM durante la captura (Codigo: $LASTEXITCODE)." }
+        if ($LASTEXITCODE -ne 0) { throw (Get-AIOString 'errors.e230' -FormatArgs @($LASTEXITCODE)) }
 
         Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_winre_finish') -Step 5
         if ($winreSource) {
@@ -339,7 +339,7 @@ function Convert-VHD {
             Write-Host (Get-AIOString 'conversion.vhd_verifying_winre') -ForegroundColor Gray
             $embeddedHash = Get-AIOUpdateWimFileSha256 -WimPath $pendingWim -Index 1 -ImagePath 'Windows/System32/Recovery/winre.wim'
             if ($embeddedHash -ne $winreHash) {
-                throw 'WinRE no coincide con el origen tras guardar el WIM.'
+                throw (Get-AIOString 'errors.e617')
             }
             Write-Log -LogLevel INFO -Message "ConvertVHD: WinRE verificado dentro del WIM. SHA256=$winreHash"
             Write-AIOConversionField -Label 'WinRE' -Value 'Incluido y verificado (wimlib + SHA-256)' -Color Green
@@ -468,16 +468,16 @@ public static class AIOWimContainerV1 {
 function Get-AIOSwmSet {
     param([string]$FirstPart)
     $first = Get-Item -LiteralPath $FirstPart -Force -ErrorAction Stop
-    if ($first.Extension -ine '.swm') { throw 'Selecciona un archivo .swm.' }
+    if ($first.Extension -ine '.swm') { throw (Get-AIOString 'errors.e583') }
     $info = Get-AIOWimContainerInfo -Path $first.FullName
-    if ($info.PartNumber -ne 1) { throw 'Selecciona la primera parte del conjunto (por ejemplo, install.swm, no install2.swm).' }
-    if ($info.TotalParts -lt 1 -or $info.ImageCount -lt 1) { throw 'La primera parte SWM no contiene una cabecera valida.' }
+    if ($info.PartNumber -ne 1) { throw (Get-AIOString 'errors.e581') }
+    if ($info.TotalParts -lt 1 -or $info.ImageCount -lt 1) { throw (Get-AIOString 'errors.e347') }
     # El patron que se pasara a DISM debe contener exclusivamente este conjunto.
     $files = @(Get-ChildItem -LiteralPath $first.DirectoryName -File -Force -ErrorAction Stop | Where-Object {
         $_.Extension -ieq '.swm' -and $_.BaseName.StartsWith($first.BaseName, [StringComparison]::OrdinalIgnoreCase)
     })
     if ($files.Count -ne $info.TotalParts) {
-        throw "Conjunto incompleto o ambiguo: se esperaban $($info.TotalParts) partes y se encontraron $($files.Count). Coloca todas sus partes en una carpeta separada."
+        throw (Get-AIOString 'errors.e024' -FormatArgs @(($info.TotalParts), ($files.Count)))
     }
     $parts = @{}
     foreach ($file in $files) {
@@ -485,10 +485,10 @@ function Get-AIOSwmSet {
         $number = [int]$part.PartNumber
         if ($part.Guid -ne $info.Guid -or $part.TotalParts -ne $info.TotalParts -or
             $number -lt 1 -or $number -gt $info.TotalParts -or $parts.ContainsKey($number)) {
-            throw "Parte de otro conjunto, duplicada o invalida: $($file.Name)"
+            throw (Get-AIOString 'errors.e537' -FormatArgs @(($file.Name)))
         }
         $expectedName = $first.BaseName + $(if ($number -eq 1) { '' } else { [string]$number }) + '.swm'
-        if ($file.Name -ine $expectedName) { throw "Nombre de parte inesperado: $($file.Name). Se esperaba $expectedName." }
+        if ($file.Name -ine $expectedName) { throw (Get-AIOString 'errors.e532' -FormatArgs @(($file.Name), $expectedName)) }
         $parts[$number] = $file
     }
     [pscustomobject]@{
@@ -503,7 +503,7 @@ function Invoke-AIOSwmDism {
     & dism.exe @Arguments
 
     if ($LASTEXITCODE -ne 0) {
-        throw "DISM fallo en $($Arguments[0]) (codigo $LASTEXITCODE)."
+        throw (Get-AIOString 'errors.e035' -FormatArgs @(($Arguments[0]), $LASTEXITCODE))
     }
 }
 
@@ -535,14 +535,14 @@ function Assert-AIOConversionWinREIntegrity {
 
     foreach ($nombre in 'Find-AIOUpdateWimlib', 'Invoke-AIOUpdateWimlibRead', 'Get-AIOUpdateWimFileSha256', 'ConvertTo-AIOUpdateNativeArgument') {
         if (-not (Get-Command $nombre -CommandType Function -ErrorAction SilentlyContinue)) {
-            throw "Falta '$nombre' de Modulo-Actualizaciones.ps1; no se puede verificar WinRE."
+            throw (Get-AIOString 'errors.e253' -FormatArgs @($nombre))
         }
     }
     if (-not (Test-Path -LiteralPath $WinREPath -PathType Leaf)) {
-        throw "No existe el archivo WinRE que se debe verificar: '$WinREPath'."
+        throw (Get-AIOString 'errors.e394' -FormatArgs @($WinREPath))
     }
     if (-not (Find-AIOUpdateWimlib)) {
-        throw 'Se requiere wimlib-imagex.exe en Tools\wimlib o en PATH para verificar WinRE.'
+        throw (Get-AIOString 'errors.e574')
     }
 
     Write-Host (Get-AIOString 'conversion.winre_verifying_wimlib') -ForegroundColor Gray
@@ -558,7 +558,7 @@ function Assert-AIOConversionWinREIntegrity {
     }
     if (-not $result.Success -or $result.ExitCode -ne 0) {
         $detail = (@($result.Output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last 8) -join ' | ')
-        throw "wimlib verify fallo para '$WinREPath' (codigo $($result.ExitCode)). $detail"
+        throw (Get-AIOString 'errors.e638' -FormatArgs @($WinREPath, ($result.ExitCode), $detail))
     }
     Write-Log -LogLevel INFO -Message ("ConvertVHD: WinRE verificado con wimlib en {0:N2} s." -f $timer.Elapsed.TotalSeconds)
     Write-Host (Get-AIOString 'conversion.winre_verified_ok') -ForegroundColor Green
@@ -576,12 +576,12 @@ function Add-AIOConversionWinREToWim {
 
     foreach ($nombre in 'Find-AIOUpdateWimlib', 'ConvertTo-AIOUpdateNativeArgument') {
         if (-not (Get-Command $nombre -CommandType Function -ErrorAction SilentlyContinue)) {
-            throw "Falta '$nombre' de Modulo-Actualizaciones.ps1; no se puede incorporar WinRE."
+            throw (Get-AIOString 'errors.e252' -FormatArgs @($nombre))
         }
     }
     $wimlib = Find-AIOUpdateWimlib
-    if (-not $wimlib) { throw 'Se requiere wimlib-imagex.exe en Tools\wimlib o en PATH para incorporar WinRE.' }
-    if (-not (Test-Path -LiteralPath $WinREPath -PathType Leaf)) { throw "No existe el archivo WinRE: '$WinREPath'." }
+    if (-not $wimlib) { throw (Get-AIOString 'errors.e573') }
+    if (-not (Test-Path -LiteralPath $WinREPath -PathType Leaf)) { throw (Get-AIOString 'errors.e395' -FormatArgs @($WinREPath)) }
 
     # wimupdate interpreta las comillas internas por si mismo; las rutas de Windows no pueden contener comillas dobles.
     $quote = if ($WinREPath.Contains("'")) { '"' } else { "'" }
@@ -600,7 +600,7 @@ function Add-AIOConversionWinREToWim {
     $process.StartInfo = $start
     $timer = [Diagnostics.Stopwatch]::StartNew()
     try {
-        if (-not $process.Start()) { throw 'No se pudo iniciar wimlib-imagex.' }
+        if (-not $process.Start()) { throw (Get-AIOString 'errors.e501') }
         # Drenar stderr en paralelo evita bloquear la tuberia de salida.
         $errorsTask = $process.StandardError.ReadToEndAsync()
         $stdout = $process.StandardOutput.ReadToEnd()
@@ -610,7 +610,7 @@ function Add-AIOConversionWinREToWim {
         foreach ($line in $lines) { Write-Log -LogLevel INFO -Message "ConvertVHD wimlib update: $line" }
         if ($process.ExitCode -ne 0) {
             $detail = (@($lines | Select-Object -Last 8) -join ' | ')
-            throw "wimlib update fallo al incorporar WinRE (codigo $($process.ExitCode)). $detail"
+            throw (Get-AIOString 'errors.e637' -FormatArgs @(($process.ExitCode), $detail))
         }
         Write-Log -LogLevel INFO -Message ("ConvertVHD: WinRE incorporado con wimlib en {0:N2} s." -f $timer.Elapsed.TotalSeconds)
     }
@@ -677,14 +677,14 @@ function Export-AIOConversionIndices {
 function Assert-AIOConversionImages {
     param([string]$Path, [object[]]$Expected, [int]$BootIndex)
     $actual = @(Get-WindowsImage -ImagePath $Path -ErrorAction Stop)
-    if ($actual.Count -ne $Expected.Count) { throw 'La salida no contiene todos los indices seleccionados.' }
+    if ($actual.Count -ne $Expected.Count) { throw (Get-AIOString 'errors.e357') }
     for ($i = 0; $i -lt $Expected.Count; $i++) {
         if ($actual[$i].ImageIndex -ne ($i + 1) -or $actual[$i].ImageName -cne $Expected[$i].ImageName) {
-            throw 'El orden o los nombres de las imagenes de salida no coinciden.'
+            throw (Get-AIOString 'errors.e175')
         }
     }
     $info = Get-AIOWimContainerInfo -Path $Path
-    if ($info.BootIndex -ne $BootIndex) { throw 'El indice de arranque de la salida no coincide con el esperado.' }
+    if ($info.BootIndex -ne $BootIndex) { throw (Get-AIOString 'errors.e129') }
 }
 
 function Publish-AIOConversionFiles {
@@ -694,7 +694,7 @@ function Publish-AIOConversionFiles {
             Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256 -ErrorAction Stop).Hash }
     })
     foreach ($entry in $entries) {
-        if (Test-Path -LiteralPath $entry.Destination) { throw "El destino ya existe: $($entry.Destination). No se sobrescribira." }
+        if (Test-Path -LiteralPath $entry.Destination) { throw (Get-AIOString 'errors.e119' -FormatArgs @(($entry.Destination))) }
     }
     $entries | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $Journal -Encoding UTF8 -ErrorAction Stop
     $moved = New-Object 'System.Collections.Generic.List[object]'
@@ -704,7 +704,7 @@ function Publish-AIOConversionFiles {
             [IO.File]::Move($entry.Source, $entry.Destination)
             $moved.Add($entry)
             if ((Get-FileHash -LiteralPath $entry.Destination -Algorithm SHA256 -ErrorAction Stop).Hash -ne $entry.Hash) {
-                throw "Fallo de verificacion de $($entry.Destination)."
+                throw (Get-AIOString 'errors.e235' -FormatArgs @(($entry.Destination)))
             }
         }
         if ($FirstSwmName) { Get-AIOSwmSet -FirstPart (Join-Path $DestinationDirectory $FirstSwmName) | Out-Null }
@@ -713,12 +713,12 @@ function Publish-AIOConversionFiles {
         foreach ($entry in $moved) {
             try {
                 if ((Get-FileHash -LiteralPath $entry.Destination -Algorithm SHA256 -ErrorAction Stop).Hash -ne $entry.Hash) {
-                    throw 'El archivo cambio; se conserva para revision.'
+                    throw (Get-AIOString 'errors.e097')
                 }
                 [IO.File]::Move($entry.Destination, $entry.Source)
             } catch { Write-Warning (Get-AIOString 'conversion.partial_output_warn' $entry.Destination $_.Exception.Message) }
         }
-        throw "Publicacion incompleta: $failure. Consulta $Journal."
+        throw (Get-AIOString 'errors.e541' -FormatArgs @($failure, $Journal))
     }
 }
 
@@ -751,11 +751,11 @@ function Convert-ImageFormat {
         $sourceFile = Get-Item -LiteralPath $source -Force -ErrorAction Stop
         $swmPattern = $null
         if ($Mode -in @('ToSWM', 'WIMToESD', 'ESDToWIM')) {
-            if ($Mode -eq 'WIMToESD' -and $sourceFile.Extension -ine '.wim') { throw 'El origen debe ser un archivo WIM.' }
-            if ($Mode -eq 'ESDToWIM' -and $sourceFile.Extension -ine '.esd') { throw 'El origen debe ser un archivo ESD.' }
-            if ($sourceFile.Extension -notin @('.wim', '.esd')) { throw 'El origen debe ser WIM o ESD.' }
+            if ($Mode -eq 'WIMToESD' -and $sourceFile.Extension -ine '.wim') { throw (Get-AIOString 'errors.e178') }
+            if ($Mode -eq 'ESDToWIM' -and $sourceFile.Extension -ine '.esd') { throw (Get-AIOString 'errors.e177') }
+            if ($sourceFile.Extension -notin @('.wim', '.esd')) { throw (Get-AIOString 'errors.e176') }
             $sourceInfo = Get-AIOWimContainerInfo -Path $source
-            if ($sourceInfo.TotalParts -ne 1) { throw 'El origen ya esta dividido. Selecciona un WIM/ESD completo.' }
+            if ($sourceInfo.TotalParts -ne 1) { throw (Get-AIOString 'errors.e179') }
         } else {
             $set = Get-AIOSwmSet -FirstPart $source
             $swmPattern = $set.Pattern
@@ -765,7 +765,7 @@ function Convert-ImageFormat {
         Write-AIOConversionField -Label 'Archivo' -Value $source
         Write-AIOConversionField -Label 'Formato' -Value $sourceFile.Extension.TrimStart('.').ToUpperInvariant()
         $images = @(Get-WindowsImage -ImagePath $source -ErrorAction Stop)
-        if ($images.Count -eq 0) { throw 'No se encontraron indices de imagen.' }
+        if ($images.Count -eq 0) { throw (Get-AIOString 'errors.e423') }
         Write-AIOConversionField -Label 'Ediciones' -Value ([string]$images.Count)
         Write-AIOConversionSection -Title (Get-AIOString 'conversion.sec_editions') -Step 2
         $indices = @(Read-AIOConversionIndices -Images $images)
@@ -781,18 +781,18 @@ function Convert-ImageFormat {
         $destination = Select-SavePathDialog -Title (Get-AIOString 'conversion.save_dialog_title') -Filter "Imagen $extension|*$extension" -DefaultFileName $defaultPath
         if (-not $destination) { Write-Host (Get-AIOString 'conversion.cancelled_indented') -ForegroundColor Yellow; return }
         $destination = [IO.Path]::GetFullPath($destination)
-        if ([IO.Path]::GetExtension($destination) -ine $extension) { throw "El destino debe terminar en $extension." }
+        if ([IO.Path]::GetExtension($destination) -ine $extension) { throw (Get-AIOString 'errors.e114' -FormatArgs @($extension)) }
         $destinationDirectory = Split-Path -Path $destination -Parent
         $baseName = [IO.Path]::GetFileNameWithoutExtension($destination)
-        if (-not (Test-Path -LiteralPath $destinationDirectory -PathType Container)) { throw 'La carpeta de destino no existe.' }
-        if (Test-Path -LiteralPath $destination) { throw 'El destino ya existe. Elige otro nombre para conservarlo.' }
+        if (-not (Test-Path -LiteralPath $destinationDirectory -PathType Container)) { throw (Get-AIOString 'errors.e299') }
+        if (Test-Path -LiteralPath $destination) { throw (Get-AIOString 'errors.e117') }
         Write-AIOConversionField -Label 'Destino' -Value $destination
         $sizeMB = 3800
         if ($Mode -eq 'ToSWM') {
             $conflicts = @(Get-ChildItem -LiteralPath $destinationDirectory -File -Force | Where-Object {
                 $_.Extension -ieq '.swm' -and $_.BaseName.StartsWith($baseName, [StringComparison]::OrdinalIgnoreCase)
             })
-            if ($conflicts.Count) { throw 'Ya hay partes SWM con ese nombre/prefijo. Elige otra carpeta o nombre.' }
+            if ($conflicts.Count) { throw (Get-AIOString 'errors.e624') }
             do {
                 $answer = ([string](Read-Host (Get-AIOString 'conversion.swm_size_prompt'))).Trim()
                 if ($answer -eq '0') { Write-Host (Get-AIOString 'conversion.cancelled_indented') -ForegroundColor Yellow; return }
@@ -845,7 +845,7 @@ function Convert-ImageFormat {
             Write-Host (Get-AIOString 'conversion.swm_checking') -ForegroundColor Gray
             $resultSet = Get-AIOSwmSet -FirstPart $stagedOutput
             if ($sizeMB -le 4095 -and @($resultSet.Files | Where-Object Length -gt 4294967295).Count) {
-                throw 'DISM genero una parte que supera el limite de FAT32 por un recurso indivisible. No se publicara el conjunto como compatible con FAT32.'
+                throw (Get-AIOString 'errors.e037')
             }
             Assert-AIOConversionImages -Path $stagedOutput -Expected $expected -BootIndex $expectedBoot
             $filesToPublish = $resultSet.Files

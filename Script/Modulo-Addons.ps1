@@ -81,11 +81,11 @@ function Expand-AddonArchive {
         $proc = Start-Process "dism.exe" -ArgumentList "/Apply-Image /ImageFile:`"$FilePath`" /Index:$actualIndexToExtract /ApplyDir:`"$DestPath`"" -Wait -NoNewWindow -PassThru
         
         if ($proc.ExitCode -ne 0) {
-            throw "DISM /Apply-Image fallo al extraer el paquete (Codigo de salida: $($proc.ExitCode))."
+            throw (Get-AIOString 'errors.e030' -FormatArgs @(($proc.ExitCode)))
         }
     }
     else {
-        throw "Formato no reconocido (Firma: $hexSignature). No es un empaquetado valido."
+        throw (Get-AIOString 'errors.e271' -FormatArgs @($hexSignature))
     }
 }
 
@@ -143,7 +143,7 @@ function Install-OfflineAddon {
                 # Evaluamos el bitmask de Robocopy (8 o superior es fallo critico)
                 if ($proc.ExitCode -ge 8) {
                     Write-Log -LogLevel ERROR -Message "Robocopy fallo al inyectar la carga util (Codigo: $($proc.ExitCode))"
-                    throw "Robocopy fallo en $safeMountDir. Bug de sintaxis o bloqueo de archivos. (Codigo: $($proc.ExitCode))"
+                    throw (Get-AIOString 'errors.e561' -FormatArgs @($safeMountDir, ($proc.ExitCode)))
                 }
                 
                 $hasFiles = $true
@@ -168,7 +168,7 @@ function Install-OfflineAddon {
             if (Test-Path $tempExtract) { Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue }
         }
     }
-    throw "Formato no soportado para inyeccion automatica."
+    throw (Get-AIOString 'errors.e272')
 }
 
 # ============================================================================
@@ -179,24 +179,24 @@ function Get-DeltaPackManifest {
     param([Parameter(Mandatory=$true)][string]$PackagePath)
 
     $files = @(Get-ChildItem -LiteralPath $PackagePath -Filter 'manifest_*.json' -File -ErrorAction Stop)
-    if ($files.Count -gt 1) { throw 'El paquete contiene varios manifiestos.' }
+    if ($files.Count -gt 1) { throw (Get-AIOString 'errors.e180') }
     $manifestFile = $files | Select-Object -First 1
     if (-not $manifestFile) {
-        throw "No se encontro 'manifest_*.json' en '$PackagePath'. No es un paquete DeltaPack Dual-Engine valido."
+        throw (Get-AIOString 'errors.e432' -FormatArgs @($PackagePath))
     }
 
     $manifestPath = Resolve-AIODeltaChild $PackagePath $manifestFile.Name
     try {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     } catch {
-        throw "El manifest '$($manifestFile.Name)' no es un JSON valido: $($_.Exception.Message)"
+        throw (Get-AIOString 'errors.e140' -FormatArgs @(($manifestFile.Name), ($_.Exception.Message)))
     }
 
     if (-not $manifest.generatedBy -or $manifest.generatedBy -notmatch 'DeltaPack') {
-        throw "El manifest '$($manifestFile.Name)' no fue generado por DeltaPack Dual-Engine."
+        throw (Get-AIOString 'errors.e141' -FormatArgs @(($manifestFile.Name)))
     }
     if (-not $manifest.outputs) {
-        throw "El manifest '$($manifestFile.Name)' no contiene la seccion 'outputs' esperada (esquema no soportado)."
+        throw (Get-AIOString 'errors.e139' -FormatArgs @(($manifestFile.Name)))
     }
 
     Add-Member -InputObject $manifest -NotePropertyName '_ManifestPath' -NotePropertyValue $manifestFile.FullName -Force
@@ -207,24 +207,24 @@ function Get-DeltaPackManifest {
 function Resolve-AIODeltaChild {
     param([string]$Root,[string]$Relative)
     if ([string]::IsNullOrWhiteSpace($Relative) -or $Relative -match '^[\\/]|[:*?"<>|\x00-\x1f]') {
-        throw "Nombre relativo de paquete invalido: '$Relative'."
+        throw (Get-AIOString 'errors.e533' -FormatArgs @($Relative))
     }
     $current = [IO.Path]::GetFullPath($Root)
     $rootAttributes = [IO.File]::GetAttributes($current)
     if (($rootAttributes -band [IO.FileAttributes]::ReparsePoint) -or -not ($rootAttributes -band [IO.FileAttributes]::Directory)) {
-        throw "Raiz de paquete o montaje no verificable: $Root"
+        throw (Get-AIOString 'errors.e545' -FormatArgs @($Root))
     }
     $parts = @($Relative.TrimEnd('\','/') -split '[\\/]')
     if ($parts.Count -gt 1 -and $parts[0] -eq '.') { $parts = @($parts | Select-Object -Skip 1) }
     foreach ($name in $parts) {
         if (-not $name -or $name -match '[ .]$|^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³]|CONIN\$|CONOUT\$)(?:\.|$)') {
-            throw "Componente de ruta no permitido: '$Relative'."
+            throw (Get-AIOString 'errors.e023' -FormatArgs @($Relative))
         }
         $current = [IO.Path]::Combine($current,$name)
         try { $attributes = [IO.File]::GetAttributes($current) }
         catch [System.IO.FileNotFoundException] { continue }
         catch [System.IO.DirectoryNotFoundException] { continue }
-        if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Ruta redirigida en el paquete o montaje: $current" }
+        if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw (Get-AIOString 'errors.e563' -FormatArgs @($current)) }
     }
     return $current
 }
@@ -235,7 +235,7 @@ function Get-AIODeltaTree {
     $stack.Push([IO.DirectoryInfo]::new($Root))
     while ($stack.Count) {
         foreach ($entry in $stack.Pop().GetFileSystemInfos()) {
-            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Punto de reanalisis en el arbol: $($entry.FullName)" }
+            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw (Get-AIOString 'errors.e542' -FormatArgs @(($entry.FullName))) }
             $entry
             if ($entry -is [IO.DirectoryInfo]) { $stack.Push($entry) }
         }
@@ -258,25 +258,25 @@ function Assert-AIODeltaChecksums {
     $seen = @{}
     foreach ($line in (Get-Content -LiteralPath $List -Encoding UTF8 -ErrorAction Stop)) {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith('#')) { continue }
-        if ($line -notmatch '^([0-9a-f]{64})[ \t]+[*]?(.+)$') { throw "Entrada SHA-256 invalida en $List." }
+        if ($line -notmatch '^([0-9a-f]{64})[ \t]+[*]?(.+)$') { throw (Get-AIOString 'errors.e217' -FormatArgs @($List)) }
         $expected = $Matches[1]
         $file = Resolve-AIODeltaChild $Root $Matches[2]
-        if ($seen.ContainsKey($file)) { throw "Entrada SHA-256 duplicada: $file" }
+        if ($seen.ContainsKey($file)) { throw (Get-AIOString 'errors.e216' -FormatArgs @($file)) }
         $seen[$file] = $true
         if (-not [IO.File]::Exists($file) -or (Get-FileHash -LiteralPath $file -Algorithm SHA256 -ErrorAction Stop).Hash -ne $expected) {
-            throw "No se pudo verificar SHA-256 de '$file'."
+            throw (Get-AIOString 'errors.e511' -FormatArgs @($file))
         }
     }
-    if (-not $seen.Count -or ($RequiredFile -and -not $seen.ContainsKey($RequiredFile))) { throw "Lista de integridad incompleta: $List" }
+    if (-not $seen.Count -or ($RequiredFile -and -not $seen.ContainsKey($RequiredFile))) { throw (Get-AIOString 'errors.e373' -FormatArgs @($List)) }
 }
 
 function Get-AIODeltaDeletionTarget {
     param($Entry)
     $target = Resolve-AIODeltaChild $Script:MOUNT_DIR $Entry.path
-    if ($Entry.kind -notin @('file','directory')) { throw "Tipo de eliminacion no reconocido: $($Entry.kind)" }
+    if ($Entry.kind -notin @('file','directory')) { throw (Get-AIOString 'errors.e599' -FormatArgs @(($Entry.kind))) }
     if (Test-Path -LiteralPath $target -ErrorAction Stop) {
         $item = Get-Item -LiteralPath $target -Force -ErrorAction Stop
-        if ($item.PSIsContainer -ne ($Entry.kind -eq 'directory')) { throw "El tipo del destino difiere del plan: $target" }
+        if ($item.PSIsContainer -ne ($Entry.kind -eq 'directory')) { throw (Get-AIOString 'errors.e212' -FormatArgs @($target)) }
         if ($item.PSIsContainer) { Get-AIODeltaTree $target | Out-Null }
     }
     return $target
@@ -322,10 +322,10 @@ function Invoke-DeltaPackActions {
                 Write-Log -LogLevel ACTION -Message "DeltaPackActions: Registrando driver offline -> $($drv.infPath)"
                 $proc = Invoke-AIOConsoleSystemTool -Tool dism.exe -Arguments @("/Image:$Script:MOUNT_DIR",'/Add-Driver',"/Driver:$infFull",'/ForceUnsigned')
                 if ($proc.ExitCode -ne 0) {
-                    throw "DISM /Add-Driver fallo con codigo $($proc.ExitCode) para '$($drv.infPath)'."
+                    throw (Get-AIOString 'errors.e028' -FormatArgs @(($proc.ExitCode), ($drv.infPath)))
                 }
             } else {
-                throw "INF requerido ausente: $($drv.infPath)"
+                throw (Get-AIOString 'errors.e284' -FormatArgs @(($drv.infPath)))
             }
         }
         foreach ($cat in $phaseData.protectedCatalogs) {
@@ -360,7 +360,7 @@ function Install-DeltaPackPackage {
         else                                                                { "x86" }
 
     if ($manifest.compatibility.architecture -and $manifest.compatibility.architecture -ne $imgArch) {
-        throw "Arquitectura del paquete '$fullName' ($($manifest.compatibility.architecture)) no coincide con la imagen montada ($imgArch)."
+        throw (Get-AIOString 'errors.e005' -FormatArgs @($fullName, ($manifest.compatibility.architecture), $imgArch))
     }
 
     # --- Aviso no bloqueante de linea base de servicing (build de captura vs. imagen) ---
@@ -375,32 +375,32 @@ function Install-DeltaPackPackage {
         $relative = $manifest.outputs.$key
         if ($null -eq $relative -or $relative -ceq '') { continue }
         $file = Resolve-AIODeltaChild $PackagePath $relative
-        if (-not [IO.File]::Exists($file)) { throw "Recurso declarado ausente ($key): $relative" }
+        if (-not [IO.File]::Exists($file)) { throw (Get-AIOString 'errors.e549' -FormatArgs @($key, $relative)) }
         $outputs[$key] = $file
     }
     if ($outputs.artifactChecksumsFile) { Assert-AIODeltaChecksums $outputs.artifactChecksumsFile $PackagePath $outputs.wimFile }
-    if ($outputs.checksumsFile -and -not $outputs.wimFile) { throw 'Lista de payload declarada sin WIM.' }
+    if ($outputs.checksumsFile -and -not $outputs.wimFile) { throw (Get-AIOString 'errors.e374') }
 
     $entries = @()
     if ($outputs.deletionsFile) {
         $deletions = Get-Content -LiteralPath $outputs.deletionsFile -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        if ($null -eq $deletions.entries) { throw 'Lista de eliminaciones incompleta.' }
+        if ($null -eq $deletions.entries) { throw (Get-AIOString 'errors.e372') }
         $entries = @($deletions.entries | Where-Object { $_.operation -eq 'delete' })
         foreach ($entry in $entries) { $null = Get-AIODeltaDeletionTarget $entry }
     }
     if ($null -ne $manifest.deletions.actionableEntryCount -and $entries.Count -ne [int]$manifest.deletions.actionableEntryCount) {
-        throw 'El numero de eliminaciones del plan difiere del manifest.'
+        throw (Get-AIOString 'errors.e174')
     }
     $actions = $null
     $drivers = @()
     if ($outputs.actionsFile) {
         $actions = Get-Content -LiteralPath $outputs.actionsFile -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        if (-not $actions.phases) { throw 'Plan de acciones sin fases.' }
+        if (-not $actions.phases) { throw (Get-AIOString 'errors.e540') }
         $drivers = @($actions.phases.afterWimBeforeRegistry.driverPackages | Where-Object { $null -ne $_ })
         foreach ($driver in $drivers) { $null = Resolve-AIODeltaChild $Script:MOUNT_DIR $driver.infPath }
     }
     if (-not ($outputs.wimFile -or $outputs.regFile -or $outputs.actionsFile -or $outputs.deletionsFile)) {
-        throw 'El paquete no declara contenido aplicable.'
+        throw (Get-AIOString 'errors.e183')
     }
 
     $stage = $null
@@ -409,33 +409,33 @@ function Install-DeltaPackPackage {
         if ($outputs.wimFile) {
             $indexes = @(Get-AIOWimIndexes -ImagePath $outputs.wimFile)
             $index = if ($indexes.Count -eq 1) { $indexes[0] } else { $WimIndex }
-            if ($index -notin $indexes) { throw "Indice WIM ausente: $index" }
+            if ($index -notin $indexes) { throw (Get-AIOString 'errors.e290' -FormatArgs @($index)) }
             $scratch = (Get-AIOFileIdentity $Script:Scratch_DIR).Path
             $mount = (Get-AIOFileIdentity $Script:MOUNT_DIR).Path
-            if (Test-AIOPathWithin $scratch $mount) { throw 'Scratch debe estar fuera de la imagen offline.' }
+            if (Test-AIOPathWithin $scratch $mount) { throw (Get-AIOString 'errors.e565') }
             $stage = (New-Item -ItemType Directory -Path (Join-Path $Script:Scratch_DIR ('DeltaPack_' + [Guid]::NewGuid().ToString('N'))) -ErrorAction Stop).FullName
             $result = Invoke-AIOConsoleSystemTool -Tool dism.exe -Arguments @('/Apply-Image',"/ImageFile:$($outputs.wimFile)","/Index:$index","/ApplyDir:$stage")
-            if ($result.ExitCode -ne 0) { throw "Fallo al extraer el WIM (DISM $($result.ExitCode))." }
+            if ($result.ExitCode -ne 0) { throw (Get-AIOString 'errors.e233' -FormatArgs @(($result.ExitCode))) }
             if ($outputs.checksumsFile) { Assert-AIODeltaChecksums $outputs.checksumsFile $stage }
             # Verificar tanto el arbol extraido como cada ruta equivalente en el destino antes de copiar.
             Get-AIODeltaTree $stage | ForEach-Object {
                 $relative = $_.FullName.Substring($stage.Length + 1)
                 $target = Resolve-AIODeltaChild $Script:MOUNT_DIR $relative
                 if ((Test-Path -LiteralPath $target) -and ([IO.Directory]::Exists($target) -ne ($_ -is [IO.DirectoryInfo]))) {
-                    throw "Tipo de archivo incompatible en la imagen: $relative"
+                    throw (Get-AIOString 'errors.e598' -FormatArgs @($relative))
                 }
             }
         }
         foreach ($driver in $drivers) {
             $inf = Resolve-AIODeltaChild $Script:MOUNT_DIR $driver.infPath
             if (-not [IO.File]::Exists($inf) -and (-not $stage -or -not [IO.File]::Exists((Resolve-AIODeltaChild $stage $driver.infPath)))) {
-                throw "INF requerido ausente: $($driver.infPath)"
+                throw (Get-AIOString 'errors.e284' -FormatArgs @(($driver.infPath)))
             }
         }
         if ($stage) {
             Enable-Privileges
             & robocopy.exe $stage $Script:MOUNT_DIR /E /B /IS /IT /XJ /R:0 /W:0 /NJH /NJS /NDL /NC /NS /NP | Out-Host
-            if ($LASTEXITCODE -notin (0..7)) { throw "Fallo al copiar el payload (Robocopy $LASTEXITCODE)." }
+            if ($LASTEXITCODE -notin (0..7)) { throw (Get-AIOString 'errors.e232' -FormatArgs @($LASTEXITCODE)) }
         }
         if ($actions) { Invoke-DeltaPackActions -Actions $actions -Phase 'afterWimBeforeRegistry' }
         Invoke-DeltaPackDeletions -Entries $entries

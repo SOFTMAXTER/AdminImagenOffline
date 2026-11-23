@@ -376,26 +376,25 @@ function Show-AIOLanguageSelector {
     Write-Host ""
     Write-Host (Get-AIOString 'config.lang_current' (Get-AIOLanguageDisplaySummary)) -ForegroundColor Yellow
     Write-Host ""
-    Write-Host (Get-AIOString 'config.lang_opt_auto' $Script:AIOI18nHostCulture) -ForegroundColor Cyan
-
+    $langItems = @(
+        @{ Value = 'auto'; Label = (Get-AIOString 'config.lang_opt_auto' $Script:AIOI18nHostCulture); Color = 'Cyan' }
+    )
     for ($i = 0; $i -lt $available.Count; $i++) {
         $lang = $available[$i]
-        $num = $i + 1
-        Write-Host ("   [{0}] {1} ({2})" -f $num, $lang.NativeName, $lang.Code)
+        $langItems += @{
+            Value = $lang.Code
+            Label = ("{0} ({1})" -f $lang.NativeName, $lang.Code)
+            Color = 'White'
+        }
     }
+    $langItems += @{ Type = 'Blank' }
 
-    Write-Host ""
-    Write-Host "-------------------------------------------------------"
-    Write-Host (Get-AIOString 'common.back_cancel') -ForegroundColor Red
-    Write-Host ""
-
-    $rawChoice = Read-Host (Get-AIOString 'common.select_option')
-    $choice = if ($null -eq $rawChoice) { '' } else { $rawChoice.Trim().ToUpperInvariant() }
-    if ([string]::IsNullOrWhiteSpace($choice) -or $choice -eq 'V' -or $choice -eq 'B') {
+    $choice = [string](Show-AIOConsoleMenu -Items $langItems -AllowBack -BackValue 'V')
+    if ([string]::IsNullOrWhiteSpace($choice) -or $choice -eq 'V') {
         return $false
     }
 
-    if ($choice -eq '0') {
+    if ($choice -eq 'auto') {
         $Script:UI_LANGUAGE = 'auto'
         [void](Initialize-AIOI18n -PreferredLanguage 'auto')
         if (Get-Command -Name Write-Log -ErrorAction SilentlyContinue) {
@@ -404,9 +403,8 @@ function Show-AIOLanguageSelector {
         return $true
     }
 
-    $parsedIndex = 0
-    if ([int]::TryParse($choice, [ref]$parsedIndex) -and $parsedIndex -ge 1 -and $parsedIndex -le $available.Count) {
-        $selected = $available[$parsedIndex - 1]
+    $selected = $available | Where-Object { $_.Code -eq $choice } | Select-Object -First 1
+    if ($null -ne $selected) {
         $Script:UI_LANGUAGE = $selected.Code
         [void](Initialize-AIOI18n -PreferredLanguage $selected.Code)
         if (Get-Command -Name Write-Log -ErrorAction SilentlyContinue) {
@@ -415,7 +413,5 @@ function Show-AIOLanguageSelector {
         return $true
     }
 
-    Write-Warning (Get-AIOString 'common.invalid_option')
-    Start-Sleep -Seconds 1
     return $false
 }

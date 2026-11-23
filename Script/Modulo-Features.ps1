@@ -480,7 +480,7 @@ function Show-Features-GUI {
                 }
 
                 if ($neutralCount -eq 0) {
-                    throw "Se filtraron los paquetes y no quedo ningun paquete base de .NET 3.5 compatible con la arquitectura de la imagen ($imgArch)."
+                    throw (Get-AIOString 'errors.e570' -FormatArgs @($imgArch))
                 }
 
                 Write-Log -LogLevel ACTION -Message "Smart SXS: Aislados $neutralCount neutros, $langCount idioma. Omitidos $skippedCount incompatibles."

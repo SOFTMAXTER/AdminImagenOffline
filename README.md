@@ -1,5 +1,5 @@
 
-# AdminImagenOffline V1.5.16 by SOFTMAXTER
+# AdminImagenOffline V1.5.17 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -9,15 +9,11 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.16 (Changelog)
+## 🆕 Novedades en la Versión 1.5.17 (Changelog)
 
-* **Interfaz multilenguaje (español e inglés)**: Nuevo motor de internacionalización (`Script\I18n.ps1`) y paquetes `Lang\es.json` y `Lang\en.json` (1988 textos cada uno) que cubren los menús, las ventanas y sus ayudas emergentes, los estados de las colas (Appx, Addons, Tweaks y Drivers), el Dashboard, los catálogos (descripciones y categorías de ediciones, servicios y ajustes), el informe de fallos y la mayoría de los mensajes de los módulos. Los registros (logs) y parte de los mensajes técnicos de error internos, sobre todo de los módulos de Actualizaciones, Idiomas, ISO y Setup, permanecen en español. Al iniciar se detecta el idioma de Windows; si no existe un paquete exacto se usa en cascada (por ejemplo `pt-BR`, luego `pt` y por último `es`), y cualquier texto que falte en una traducción se muestra en español en lugar de quedar vacío. Las confirmaciones de sí/no aceptan `S`, `SI`, `Y` y `YES`.
-* **Selector de idioma**: En **[C] Configuración (Rutas e Idioma)** se añade **[3] Idioma de la Interfaz**, con la opción *Automático* (idioma del sistema) y cada paquete disponible en `Lang\`. La elección se guarda en `config.json` (`Language`) y se registra en el log.
-* **Traducciones propias**: Para añadir un idioma basta copiar `Lang\en.json` con el código ISO del idioma (por ejemplo `pt.json`), editar el bloque `_meta` y traducir solo los valores, sin tocar las claves ni los marcadores `{0}`. Aparece automáticamente en el selector. La guía está en `Lang\README_TRADUCCION.md`.
-* **Idioma guardado desde el arranque**: El idioma de `config.json` se aplica antes de los mensajes de inicio y, al cambiarlo, se invalidan las cachés del Dashboard y del catálogo de ediciones. Si falta `I18n.ps1`, la interfaz muestra las claves de texto en lugar de fallar.
-* **Descripción del WIM independiente del idioma**: La descripción por defecto que se guarda dentro de un WIM (*Guardar como nuevo WIM*) se toma siempre en español, sin depender del idioma de la interfaz.
-* **Addons con botón Cancelar**: El inyector de Addons incorpora un botón **Cancelar** que detiene el lote de forma segura antes del siguiente paquete e informa cuántos quedaron pendientes.
-* **Generador WiOS bilingüe**: `Tools\WiOS-Autounattend-Generator.html` ahora está disponible en español e inglés, con un botón de idioma, preferencia guardada en el navegador y detección del idioma del navegador.
+* **Menús de consola interactivos**: Nuevas funciones `Show-AIOConsoleMenu` y `Enable-AIOConsoleVT` en `Modulo-UI.ps1`. Los menús del orquestador y de los módulos de Actualizaciones, Idiomas, Entornos y Montaje, además del selector de idioma, se navegan con **↑/↓** (**←/→** en los menús de varias columnas), **Inicio/Fin**, **Enter** para elegir y **Retroceso** para volver. La opción activa se resalta con `»` y en mayúsculas (en negrita si la consola admite secuencias ANSI), la lista de ediciones usa dos columnas en consolas de al menos 64 caracteres y el pie de ayuda con las teclas se traduce al idioma activo. Con la entrada o salida redirigida se muestra una lista simple.
+* **Mensajes de error y avisos traducidos**: Se traducen 668 textos más (2656 por idioma): los mensajes de error y los avisos de Actualizaciones, Idiomas, Setup (`boot.wim`), Entornos, Montaje, Despliegue, Conversión, ISO, Integrar índices y el orquestador. Los registros (logs) y el análisis de la salida de DISM siguen en su idioma técnico por diseño, y quedan unos pocos mensajes internos en español.
+* **Módulos Actualizaciones e Idiomas**: Su guía se actualiza al nuevo menú: el plan de ejecución se inicia seleccionando **Iniciar integración** con Enter (Retroceso cancela), en lugar de escribir `I`.
 
 ## Características Principales
 

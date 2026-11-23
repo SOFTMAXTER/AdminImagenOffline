@@ -138,7 +138,7 @@ function Save-Changes {
             $sourceIdentity = Get-AIOFileIdentity $Script:WIM_FILE_PATH
             $previous = Get-AIOOutputSnapshot $DEST_WIM_PATH
             if ((Test-AIOPathWithin $parentIdentity.Path $mountIdentity.Path) -or ($previous -and $previous.Id -eq $sourceIdentity.Id)) {
-                throw 'La copia debe guardarse fuera del montaje y en un archivo distinto del WIM de origen.'
+                throw (Get-AIOString 'errors.e316')
             }
         } catch { Write-Warning $_.Exception.Message; Pause; return }
 
@@ -219,12 +219,12 @@ function Save-Changes {
                 "/Description:$IMAGE_DESC", '/Compress:max', '/CheckIntegrity', "/ScratchDir:$Script:Scratch_DIR")
             if ($bootable) { $arguments += '/Bootable' }
             $result = Invoke-AIOConsoleSystemTool -Tool dism.exe -Arguments $arguments
-            if ($result.ExitCode -ne 0) { throw "DISM no completo la captura (codigo $($result.ExitCode))." }
+            if ($result.ExitCode -ne 0) { throw (Get-AIOString 'errors.e039' -FormatArgs @(($result.ExitCode))) }
             $indexes = @(Get-WindowsImage -ImagePath $pending -ErrorAction Stop)
             $outputInfo = Get-AIOWimContainerInfo -Path $pending
             if ($indexes.Count -ne 1 -or $indexes[0].ImageIndex -ne 1 -or $indexes[0].ImageName -cne $IMAGE_NAME -or
-                $outputInfo.BootIndex -ne [int]$bootable) { throw 'No se pudo verificar el indice de la copia capturada.' }
-            if ((Get-AIOFileIdentity $destParent).Id -ne $parentIdentity.Id) { throw 'Cambio el directorio de destino.' }
+                $outputInfo.BootIndex -ne [int]$bootable) { throw (Get-AIOString 'errors.e513') }
+            if ((Get-AIOFileIdentity $destParent).Id -ne $parentIdentity.Id) { throw (Get-AIOString 'errors.e014') }
             Publish-AIOVerifiedFile $pending $DEST_WIM_PATH $previous
             Write-Host (Get-AIOString 'save.capture_ok' $DEST_WIM_PATH) -ForegroundColor Green
             Write-Log -LogLevel INFO -Message "SaveManager: Nueva copia verificada en '$DEST_WIM_PATH'."

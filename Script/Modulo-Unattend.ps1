@@ -831,7 +831,7 @@ $wpeSetupBlock
                     $lblValid.Text        = Get-AIOString 'unattend.xml_valid'
                     $lblValid.ForeColor   = [System.Drawing.Color]::LightGreen
                     $btnInjectImp.Enabled = $true
-                } else { throw "Nodo <unattend> no encontrado" }
+                } else { throw (Get-AIOString 'errors.e530') }
             } catch {
                 $lblValid.Text        = Get-AIOString 'unattend.xml_invalid'
                 $lblValid.ForeColor   = [System.Drawing.Color]::Salmon

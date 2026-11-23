@@ -83,16 +83,16 @@ public static class AIODeployWimContainerV1 {
 function Get-AIODeploySwmSet {
     param([string]$FirstPart)
     $first = Get-Item -LiteralPath $FirstPart -Force -ErrorAction Stop
-    if ($first.Extension -ine '.swm') { throw 'Selecciona un archivo .swm.' }
+    if ($first.Extension -ine '.swm') { throw (Get-AIOString 'errors.e583') }
     $info = Get-AIODeployWimContainerInfo -Path $first.FullName
-    if ($info.PartNumber -ne 1) { throw 'Selecciona la primera parte del conjunto (por ejemplo, install.swm, no install2.swm).' }
-    if ($info.TotalParts -lt 1 -or $info.ImageCount -lt 1) { throw 'La primera parte SWM no contiene una cabecera valida.' }
+    if ($info.PartNumber -ne 1) { throw (Get-AIOString 'errors.e581') }
+    if ($info.TotalParts -lt 1 -or $info.ImageCount -lt 1) { throw (Get-AIOString 'errors.e347') }
     # El patron que se pasara a DISM debe contener exclusivamente este conjunto.
     $files = @(Get-ChildItem -LiteralPath $first.DirectoryName -File -Force -ErrorAction Stop | Where-Object {
         $_.Extension -ieq '.swm' -and $_.BaseName.StartsWith($first.BaseName, [StringComparison]::OrdinalIgnoreCase)
     })
     if ($files.Count -ne $info.TotalParts) {
-        throw "Conjunto incompleto o ambiguo: se esperaban $($info.TotalParts) partes y se encontraron $($files.Count). Coloca todas sus partes en una carpeta separada."
+        throw (Get-AIOString 'errors.e024' -FormatArgs @(($info.TotalParts), ($files.Count)))
     }
     $parts = @{}
     foreach ($file in $files) {
@@ -100,10 +100,10 @@ function Get-AIODeploySwmSet {
         $number = [int]$part.PartNumber
         if ($part.Guid -ne $info.Guid -or $part.TotalParts -ne $info.TotalParts -or
             $number -lt 1 -or $number -gt $info.TotalParts -or $parts.ContainsKey($number)) {
-            throw "Parte de otro conjunto, duplicada o invalida: $($file.Name)"
+            throw (Get-AIOString 'errors.e537' -FormatArgs @(($file.Name)))
         }
         $expectedName = $first.BaseName + $(if ($number -eq 1) { '' } else { [string]$number }) + '.swm'
-        if ($file.Name -ine $expectedName) { throw "Nombre de parte inesperado: $($file.Name). Se esperaba $expectedName." }
+        if ($file.Name -ine $expectedName) { throw (Get-AIOString 'errors.e532' -FormatArgs @(($file.Name), $expectedName)) }
         $parts[$number] = $file
     }
     [pscustomobject]@{
@@ -114,16 +114,16 @@ function Get-AIODeploySwmSet {
 
 function Get-AIOSelectedExternalDisk {
     param($Selected)
-    if (-not $Selected.UniqueId) { throw 'Disco sin identificador estable.' }
+    if (-not $Selected.UniqueId) { throw (Get-AIOString 'errors.e059') }
     $matchesById = @(Get-Disk -UniqueId $Selected.UniqueId -ErrorAction Stop)
     $hostPart = Get-Partition -DriveLetter $env:SystemDrive[0] -ErrorAction Stop
-    if ($null -eq $hostPart.DiskNumber -or $matchesById.Count -ne 1) { throw 'El disco seleccionado ya no se identifica de forma unica.' }
+    if ($null -eq $hostPart.DiskNumber -or $matchesById.Count -ne 1) { throw (Get-AIOString 'errors.e122') }
     $disk = $matchesById[0]
     if ($disk.Number -ne $Selected.Number -or $disk.UniqueId -ne $Selected.UniqueId -or
         $disk.Size -ne $Selected.Size -or $disk.BusType -ne $Selected.BusType -or
         $disk.IsBoot -ne $false -or $disk.IsSystem -ne $false -or $disk.IsOffline -ne $false -or
         $disk.Number -eq $hostPart.DiskNumber -or $disk.BusType -notin @('USB','SD','1394')) {
-        throw 'Cambio el disco seleccionado o su estado de proteccion. Actualiza la lista.'
+        throw (Get-AIOString 'errors.e015')
     }
     return $disk
 }
@@ -132,39 +132,39 @@ function Assert-AIODeployFileOutsideDisk {
     param([string]$File,$Target,[hashtable]$Seen)
     $identity = Get-AIOFileIdentity $File
     if ($Seen[$identity.Path] -eq 'Verified') { return }
-    if ($Seen[$identity.Path] -eq 'Checking') { throw 'Dependencia circular de almacenamiento.' }
+    if ($Seen[$identity.Path] -eq 'Checking') { throw (Get-AIOString 'errors.e056') }
     $Seen[$identity.Path] = 'Checking'
     if ($identity.Path -notmatch '^(\\\\\?\\Volume\{[0-9a-f-]+\}\\)') {
-        throw "No se puede determinar el disco que aloja '$File'. Copia la fuente a otro volumen local identificable."
+        throw (Get-AIOString 'errors.e519' -FormatArgs @($File))
     }
     $volume = @(Get-Volume -Path $Matches[1] -ErrorAction Stop)
-    if ($volume.Count -ne 1) { throw "Volumen de origen ambiguo: $File" }
+    if ($volume.Count -ne 1) { throw (Get-AIOString 'errors.e611' -FormatArgs @($File)) }
     if ($volume[0].DriveType -eq 'CD-ROM') {
         $image = @(Get-DiskImage -Volume $volume[0] -ErrorAction Stop)
-        if ($image.Count -ne 1 -or -not $image[0].ImagePath) { throw "No se pudo identificar el soporte de $File." }
+        if ($image.Count -ne 1 -or -not $image[0].ImagePath) { throw (Get-AIOString 'errors.e495' -FormatArgs @($File)) }
         Assert-AIODeployFileOutsideDisk $image[0].ImagePath $Target $Seen
         $Seen[$identity.Path] = 'Verified'
         return
     }
     $parts = @(Get-Partition -Volume $volume[0] -ErrorAction Stop)
-    if ($parts.Count -ne 1) { throw "No se puede asociar la fuente a una sola particion: $File" }
+    if ($parts.Count -ne 1) { throw (Get-AIOString 'errors.e518' -FormatArgs @($File)) }
     $disk = Get-Disk -Number $parts[0].DiskNumber -ErrorAction Stop
     if ($disk.Number -eq $Target.Number -or $disk.UniqueId -eq $Target.UniqueId) {
-        throw "La fuente '$File' reside en el disco que se va a borrar."
+        throw (Get-AIOString 'errors.e331' -FormatArgs @($File))
     }
     if ($disk.BusType -eq 'File Backed Virtual' -or $disk.BusType -eq 'FileBackedVirtual') {
         $vhd = Get-VHD -DiskNumber $disk.Number -ErrorAction Stop
-        if (-not $vhd.Path) { throw "Contenedor del disco virtual de origen no identificado." }
+        if (-not $vhd.Path) { throw (Get-AIOString 'errors.e025') }
         $parents = @{}
         while ($vhd) {
-            if (-not $vhd.Path -or $parents.ContainsKey($vhd.Path)) { throw 'Cadena VHD de origen invalida.' }
+            if (-not $vhd.Path -or $parents.ContainsKey($vhd.Path)) { throw (Get-AIOString 'errors.e013') }
             $parents[$vhd.Path] = $true
             Assert-AIODeployFileOutsideDisk $vhd.Path $Target $Seen
             if (-not $vhd.ParentPath) { break }
             $vhd = Get-VHD -Path $vhd.ParentPath -ErrorAction Stop
         }
     } elseif ($disk.BusType -notin @('ATA','SATA','NVMe','USB','SD','1394','SCSI','SAS','MMC','iSCSI','ATAPI','Fibre Channel')) {
-        throw "No se pudo verificar el almacenamiento subyacente de '$File' ($($disk.BusType))."
+        throw (Get-AIOString 'errors.e512' -FormatArgs @($File, ($disk.BusType)))
     }
     $Seen[$identity.Path] = 'Verified'
 }
@@ -174,13 +174,13 @@ function Assert-AIODeployPartitionLetter {
     $partition = Get-Partition -DriveLetter $Letter[0] -ErrorAction Stop
     $disk = Get-Disk -Number $partition.DiskNumber -ErrorAction Stop
     if (-not $DiskId -or $disk.UniqueId -ne $DiskId -or $partition.PartitionNumber -ne $PartitionNumber -or
-        $disk.IsBoot -ne $false -or $disk.IsSystem -ne $false) { throw "Ha cambiado el volumen de destino $Letter." }
+        $disk.IsBoot -ne $false -or $disk.IsSystem -ne $false) { throw (Get-AIOString 'errors.e274' -FormatArgs @($Letter)) }
 }
 
 function Assert-AIODeploySource {
     param([string]$Path,[int]$Index,$Target)
     $image = Get-WindowsImage -ImagePath $Path -Index $Index -ErrorAction Stop
-    if ($image.ImageIndex -ne $Index) { throw 'El indice seleccionado ya no esta disponible.' }
+    if ($image.ImageIndex -ne $Index) { throw (Get-AIOString 'errors.e133') }
     $files = @($Path)
     if ([IO.Path]::GetExtension($Path) -ieq '.swm') {
         $set = Get-AIODeploySwmSet -FirstPart $Path
@@ -201,7 +201,7 @@ function Format-AIODeployElapsedTime {
 function Assert-AIODeployNotCancelled {
     param([hashtable]$State)
     if ($State -and $State.CancelRequested) {
-        throw [OperationCanceledException]::new('Despliegue cancelado por el usuario.')
+        throw [OperationCanceledException]::new((Get-AIOString 'errors.e058'))
     }
 }
 
@@ -213,7 +213,7 @@ function Remove-AIODeployPartialVhd {
         Dismount-VHD -Path $Path -ErrorAction Stop
         $vhd = Get-VHD -Path $Path -ErrorAction Stop
     }
-    if ($vhd.Attached) { throw "El VHD sigue montado; se conserva el archivo: $Path" }
+    if ($vhd.Attached) { throw (Get-AIOString 'errors.e085' -FormatArgs @($Path)) }
     Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
 }
 
@@ -653,7 +653,7 @@ public sealed class AIODeployNativeReader : IDisposable {
         # Solo se llama despues de terminar la etapa. El numero explicito impide
         # contabilizar dos veces una etapa o saltar una que no se haya completado.
         if ($Stage -ne ($deployProgress.Completed + 1) -or $Stage -gt $deployProgress.Total) {
-            throw "Cierre de etapa fuera de orden: $Stage. Completadas: $($deployProgress.Completed)."
+            throw (Get-AIOString 'errors.e021' -FormatArgs @($Stage, ($deployProgress.Completed)))
         }
         $deployProgress.Completed = $Stage
         & $RefreshDeployProgress
@@ -771,7 +771,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                     $swmSet = Get-AIODeploySwmSet -FirstPart $ofd.FileName
                 }
                 $info = @(Get-WindowsImage -ImagePath $ofd.FileName -ErrorAction Stop)
-                if ($info.Count -eq 0) { throw 'No se encontraron indices en la imagen.' }
+                if ($info.Count -eq 0) { throw (Get-AIOString 'errors.e426') }
                 foreach ($img in $info) {
                     [void]$cmbIndex.Items.Add("[$($img.ImageIndex)] $($img.ImageName)")
                 }
@@ -852,7 +852,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $swmPattern = $swmSet.Pattern
                 $swmImage = Get-WindowsImage -ImagePath $wimPath -Index $idx -ErrorAction Stop
                 if (-not $swmImage -or $swmImage.ImageIndex -ne $idx) {
-                    throw 'El indice seleccionado ya no esta disponible en el conjunto SWM.'
+                    throw (Get-AIOString 'errors.e132')
                 }
                 Write-Log -LogLevel INFO -Message "DEPLOY: SWM validado; $($swmSet.Files.Count) partes; indice $idx; origen=$wimPath"
             } catch {
@@ -872,7 +872,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $compactVersion = [version]$compactImage.Version
                 if ($null -eq $compactVersion -or $compactVersion.Major -lt 10 -or
                     ([string]$compactImage.InstallationType).Trim() -ne 'Client') {
-                    throw 'Compact OS requiere una imagen cliente de Windows 10/11. Desmarca la opcion para desplegar otra imagen.'
+                    throw (Get-AIOString 'errors.e022')
                 }
             } catch {
                 Write-Log -LogLevel ERROR -Message "DEPLOY: No se pudo validar Compact OS: $($_.Exception.Message)"
@@ -902,7 +902,7 @@ public sealed class AIODeployNativeReader : IDisposable {
             try {
                 $finalVhd = [IO.Path]::GetFullPath($vhdPath)
                 $extension = [IO.Path]::GetExtension($finalVhd)
-                if ($extension -notin @('.vhd','.vhdx')) { throw 'El destino debe tener extension .vhd o .vhdx.' }
+                if ($extension -notin @('.vhd','.vhdx')) { throw (Get-AIOString 'errors.e113') }
                 $previousVhd = Get-AIOOutputSnapshot $finalVhd
                 if ($previousVhd) {
                     if ([System.Windows.Forms.MessageBox]::Show((Get-AIOString 'deployvhd.confirm_replace_vhd' $finalVhd),
@@ -991,7 +991,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 }
 
                 if ($null -eq $diskNum -or $diskNum -lt 0) {
-                    throw "Timeout: El VDS tardó demasiado en exponer el número de disco del VHD. Abortando para evitar daños en el host."
+                    throw (Get-AIOString 'errors.e597')
                 }
                 $targetDisk = Get-AIOVerifiedVhdDisk $vhdPath
             } else {
@@ -1138,7 +1138,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 if ($useCompactOS) {
                     $targetVolume = Get-Volume -DriveLetter $freeLetSys[0] -ErrorAction Stop
                     if ($targetVolume.FileSystem -ne 'NTFS') {
-                        throw 'El destino de Compact OS debe estar formateado en NTFS.'
+                        throw (Get-AIOString 'errors.e110')
                     }
                     # Scratch en el volumen NTFS de Windows; nunca en la particion EFI FAT32.
                     $compactScratch = Join-Path "$driveLetterSystem\" ("AIODeployScratch_" + [guid]::NewGuid().ToString('N'))
@@ -1157,7 +1157,7 @@ public sealed class AIODeployNativeReader : IDisposable {
             if ($dismExitCode -ne 0) {
                 $lblImageProgress.Text = Get-AIOString 'deployvhd.img_progress_err' $dismExitCode
                 $lblImageProgress.ForeColor = [System.Drawing.Color]::Red
-                throw "Fallo DISM al aplicar la imagen. Codigo: $dismExitCode"
+                throw (Get-AIOString 'errors.e229' -FormatArgs @($dismExitCode))
             }
             $progressImage.Value = $progressImage.Maximum
             $lblImageProgress.Text = Get-AIOString 'deployvhd.img_progress_100'
@@ -1177,7 +1177,7 @@ public sealed class AIODeployNativeReader : IDisposable {
             $bcdExitCode = Invoke-AIODeployNativeProcess -FileName "bcdboot.exe" `
                 -Arguments "$driveLetterSystem\Windows /s $driveLetterBoot /f $fw"
             if ($bcdExitCode -ne 0) {
-                throw "Fallo la creacion de archivos de arranque (BCDBOOT)."
+                throw (Get-AIOString 'errors.e243')
             }
             & $CompleteDeployStage -Stage 4
 
@@ -1209,7 +1209,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                             ) -join "`r`n"
                             [IO.File]::WriteAllText($dpScript, $dpContent, [Text.Encoding]::ASCII)
                             $dpExit = Invoke-AIODeployNativeProcess -FileName "diskpart.exe" -Arguments "/s `"$dpScript`""
-                            if ($dpExit -ne 0) { throw "diskpart devolvio codigo $dpExit." }
+                            if ($dpExit -ne 0) { throw (Get-AIOString 'errors.e625' -FormatArgs @($dpExit)) }
                         } else {
                             Write-Log -LogLevel WARN -Message "DEPLOY: No se encontro la particion Recovery (numero $($pRec.PartitionNumber)) para aplicar atributos GPT."
                         }
@@ -1242,7 +1242,7 @@ public sealed class AIODeployNativeReader : IDisposable {
                 $lblStatus.Text = Get-AIOString 'deployvhd.status_dismount_vhd'
                 $form.Refresh()
                 Dismount-VHD -Path $vhdPath -ErrorAction Stop
-                if (-not (Test-VHD -Path $vhdPath -ErrorAction Stop)) { throw 'El nuevo disco virtual no supero la verificacion.' }
+                if (-not (Test-VHD -Path $vhdPath -ErrorAction Stop)) { throw (Get-AIOString 'errors.e173') }
                 & $CheckDeployCancellation
                 Publish-AIOVerifiedFile $vhdPath $finalVhd $previousVhd
                 $vhdCreationStarted = $false
