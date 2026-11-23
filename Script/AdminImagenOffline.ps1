@@ -81,10 +81,6 @@ if (-not (Get-Command -Name Get-AIOString -ErrorAction SilentlyContinue)) {
     function Test-AIONoResponse { param([string]$InputText) return ([string]$InputText).Trim().ToUpperInvariant() -in @('N','NO') }
     function Get-AIOLanguageDisplaySummary { return 'es (fallback)' }
     function Show-AIOLanguageSelector { return $false }
-}
-
-# Respaldo si I18n.ps1 es una version anterior sin Invoke-AIOWithBaseLanguage.
-if (-not (Get-Command -Name Invoke-AIOWithBaseLanguage -ErrorAction SilentlyContinue)) {
     function Invoke-AIOWithBaseLanguage { param([Parameter(Mandatory = $true)][scriptblock]$ScriptBlock) return (& $ScriptBlock) }
 }
 
