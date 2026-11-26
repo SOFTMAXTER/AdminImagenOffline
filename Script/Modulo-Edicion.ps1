@@ -1488,6 +1488,7 @@ function Show-CambioEdicion-GUI {
                 }
             }
 
+            $publishedSummaryLine = $null
             if ($saveMode -eq 'NewWim' -and $savedEditions.Count -gt 0 -and (Test-Path -LiteralPath $pendingWim -PathType Leaf)) {
                 $state.ProgressBusy = $false
                 $state.ProgressValue = 92
@@ -1498,7 +1499,13 @@ function Show-CambioEdicion-GUI {
                 if ($idxCount -ne $savedEditions.Count) { throw (Get-AIOString 'errors.e513') }
                 if ((Get-AIOFileIdentity $destParent).Id -ne $parentIdentity.Id) { throw (Get-AIOString 'errors.e014') }
                 Publish-AIOVerifiedFile $pendingWim $destWimPath $previousSnapshot
-                Write-Log -LogLevel INFO -Message "CAMBIO_EDICION (GUI): Publicado WIM en '$destWimPath' ($($savedEditions.Count) indices)."
+                if ($hadFatalError -or $state.CancelPending) {
+                    $publishedSummaryLine = Get-AIOString 'edition.publish_partial' -FormatArgs @($savedEditions.Count, $destWimPath)
+                    Write-Log -LogLevel WARN -Message "CAMBIO_EDICION (GUI): Publicado WIM parcial en '$destWimPath' ($($savedEditions.Count) indices)."
+                } else {
+                    $publishedSummaryLine = Get-AIOString 'edition.publish_ok' -FormatArgs @($destWimPath)
+                    Write-Log -LogLevel INFO -Message "CAMBIO_EDICION (GUI): Publicado WIM en '$destWimPath' ($($savedEditions.Count) indices)."
+                }
             }
 
             $state.ProgressBusy = $false
@@ -1564,6 +1571,14 @@ function Show-CambioEdicion-GUI {
         }
         if ($skippedEditions.Count -gt 0) {
             $summaryLines += (Get-AIOString 'edition.summary_skipped_list' -FormatArgs @(($skippedEditions -join ', ')))
+        }
+        if ($state.CancelPending) {
+            $summaryLines += ''
+            $summaryLines += (Get-AIOString 'edition.escalate_cancelled')
+        }
+        if ($publishedSummaryLine) {
+            $summaryLines += ''
+            $summaryLines += $publishedSummaryLine
         }
         if ($Script:IMAGE_MOUNTED -eq 1 -and (-not [string]::Equals($activeEdition, $startEdition, [StringComparison]::OrdinalIgnoreCase))) {
             $hint = if ($saveMode -eq 'NewWim') {
