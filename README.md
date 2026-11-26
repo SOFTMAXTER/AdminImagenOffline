@@ -1,5 +1,5 @@
 
-# AdminImagenOffline V1.5.17 by SOFTMAXTER
+# AdminImagenOffline V1.5.18 by SOFTMAXTER
 
 <p align="center">
   <img width="320" height="250" alt="AdminImagenOffline Logo" src="https://github.com/user-attachments/assets/806cdf93-5a4d-41f1-9d0d-372882c4afcc" />
@@ -9,11 +9,11 @@
 
 Fue creado para administradores de TI, técnicos de soporte y entusiastas de la personalización de Windows que necesitan modificar, limpiar, reparar, optimizar o convertir imágenes del sistema operativo de manera eficiente, segura y sin conexión.
 
-## 🆕 Novedades en la Versión 1.5.17 (Changelog)
+## 🆕 Novedades en la Versión 1.5.18 (Changelog)
 
-* **Menús de consola interactivos**: Nuevas funciones `Show-AIOConsoleMenu` y `Enable-AIOConsoleVT` en `Modulo-UI.ps1`. Los menús del orquestador y de los módulos de Actualizaciones, Idiomas, Entornos y Montaje, además del selector de idioma, se navegan con **↑/↓** (**←/→** en los menús de varias columnas), **Inicio/Fin**, **Enter** para elegir y **Retroceso** para volver. La opción activa se resalta con `»` y en mayúsculas (en negrita si la consola admite secuencias ANSI), la lista de ediciones usa dos columnas en consolas de al menos 64 caracteres y el pie de ayuda con las teclas se traduce al idioma activo. Con la entrada o salida redirigida se muestra una lista simple.
-* **Mensajes de error y avisos traducidos**: Se traducen 668 textos más (2656 por idioma): los mensajes de error y los avisos de Actualizaciones, Idiomas, Setup (`boot.wim`), Entornos, Montaje, Despliegue, Conversión, ISO, Integrar índices y el orquestador. Los registros (logs) y el análisis de la salida de DISM siguen en su idioma técnico por diseño, y quedan unos pocos mensajes internos en español.
-* **Módulos Actualizaciones e Idiomas**: Su guía se actualiza al nuevo menú: el plan de ejecución se inicia seleccionando **Iniciar integración** con Enter (Retroceso cancela), en lugar de escribir `I`.
+* **Ventana para Cambiar / Escalar Edición**: Nuevo módulo `Modulo-Edicion.ps1` (`Show-CambioEdicion-GUI`) que reemplaza el menú de consola de *Cambiar Edición*. Tiene tres pestañas: **Cambio único** (elige una edición destino y aplica `/Set-Edition`), **Escalado automático** (sube SKU por SKU en orden consecutivo hasta la última edición posible, guardando cada una) y **Selección personalizada** (marca las SKU deseadas y las escala en orden). Muestra el sistema, la edición actual, el origen y el montaje, y una tabla con Edición, EditionID, Disponibilidad (*Directa* o *Vía paso previo*) y Descripción.
+* **Guardado del escalado**: Las ediciones pueden guardarse en un **nuevo WIM multi-edición con `wimlib`** (recomendado: no modifica el WIM de origen, verifica la integridad y publica el archivo ya verificado) o **anexarse al WIM montado** (`/Commit-Image /Append`), con la opción de aplicar después los metadatos con `wimlib` al desmontar. Se puede incluir la edición inicial como índice #1 y hacer un *Commit* previo del índice base antes de escalar.
+* **Pasos intermedios, progreso y cancelación**: Si una SKU no es alcanzable de forma directa, el escalado cambia temporalmente a una edición de rango inferior como paso puente. Muestra el avance general y el porcentaje en tiempo real del motor (DISM o `wimlib`), permite **Cancelar tras paso actual** sin dañar la imagen y termina con un resumen de ediciones guardadas, orden, pasos intermedios y SKU omitidas.
 
 ## Características Principales
 
@@ -70,6 +70,7 @@ Fue creado para administradores de TI, técnicos de soporte y entusiastas de la 
         ├── Modulo-Dashboard.ps1
         ├── Modulo-DeployVHD.ps1
         ├── Modulo-Drivers.ps1
+        ├── Modulo-Edicion.ps1
         ├── Modulo-EditIndex.ps1
         ├── Modulo-Environments.ps1
         ├── Modulo-Features.ps1
@@ -181,6 +182,8 @@ Mantenimiento de la integridad de la imagen.
 
 ### [ 10 ] Cambiar Edición
 Permite actualizar la versión de Windows (ej. de `Home` a `Professional` o `Enterprise LTSC`).
+
+Se abre una ventana con tres modos: **Cambio único** (una edición destino), **Escalado automático** (todas las SKU en orden consecutivo) y **Selección personalizada** (solo las SKU marcadas). El resultado puede guardarse en un nuevo WIM multi-edición o anexarse al WIM montado.
 
 * **Nota Técnica:** El script consulta las ediciones de destino viables (`Get-TargetEditions`). Esta operación en archivos WIM es reversible si no se guardan los cambios, pero en un **VHD** es un proceso destructivo e irreversible en tiempo real. El script mostrará una advertencia de seguridad roja si intentas hacer esto sobre un disco virtual.
 

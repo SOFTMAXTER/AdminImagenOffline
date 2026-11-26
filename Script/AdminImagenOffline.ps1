@@ -8,7 +8,7 @@
 .AUTHOR
     SOFTMAXTER
 .VERSION
-    1.5.17
+    1.5.18
 
 # ==============================================================================
 # Copyright (C) 2026 SOFTMAXTER
@@ -41,7 +41,7 @@
 # =================================================================
 #  Version del Script
 # =================================================================
-$script:Version = "1.5.17"
+$script:Version = "1.5.18"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1475,27 +1475,13 @@ function Cambio-Edicion-Menu {
         return
     }
 
-    # --- CARGAR CATÁLOGO DE EDICIONES ---
-    $editionsFile = Join-Path $PSScriptRoot "Catalogos\Ediciones.ps1"
-    if (-not (Test-Path $editionsFile)) { $editionsFile = Join-Path $PSScriptRoot "Modulo-Ediciones.ps1" }
-    if (-not (Test-Path $editionsFile)) { $editionsFile = Join-Path $PSScriptRoot "Ediciones.ps1" }
-    
-    if (Test-Path $editionsFile) { 
-        . $editionsFile 
-    } else { 
-        Write-Warning (Get-AIOString 'edition.catalog_missing_warn')
-        Start-Sleep -Seconds 2
+    if (-not (Get-Command Show-CambioEdicion-GUI -ErrorAction SilentlyContinue)) {
+        Write-Warning (Get-AIOString 'edition.gui_module_missing')
+        Write-Log -LogLevel ERROR -Message "CAMBIO_EDICION: Modulo-Edicion.ps1 no cargado (Show-CambioEdicion-GUI no disponible)."
+        Pause
+        return
     }
 
-    # Helper interno para traducir usando el catálogo y quitar la palabra "Windows " para ahorrar espacio en consola
-    function Get-FriendlyEditionName($EditionID) {
-        if (Get-Command Get-WindowsEditionMetadata -ErrorAction SilentlyContinue) {
-            $meta = Get-WindowsEditionMetadata -QueryString $EditionID
-            return ($meta.Name -replace "(?i)^Windows ", "")
-        }
-        return $EditionID
-    }
-    
     # --- BLOQUE DE SEGURIDAD PARA VHD ---
     if ($Script:IMAGE_MOUNTED -eq 2) {
         Clear-Host
@@ -1512,7 +1498,7 @@ function Cambio-Edicion-Menu {
         Write-Host (Get-AIOString 'edition.vhd_risk3')
         Write-Host ""
         Write-Host "-------------------------------------------------------"
-        
+
         $confirmVHD = Read-Host (Get-AIOString 'edition.vhd_confirm_prompt')
         if ($confirmVHD.ToUpper() -ne 'CONFIRMAR') {
             Write-Warning (Get-AIOString 'edition.vhd_cancelled_sec')
@@ -1521,16 +1507,13 @@ function Cambio-Edicion-Menu {
         }
         Clear-Host
     }
-    
+
     Write-Host (Get-AIOString 'edition.reading_info') -ForegroundColor Yellow
     Write-Log -LogLevel INFO -Message "CAMBIO_EDICION: Obteniendo info..."
 
-    $WIN_PRODUCT_NAME = $null
-    $WIN_CURRENT_BUILD = $null
     $WIN_VERSION_FRIENDLY = "Desconocida"
     $CURRENT_EDITION_DETECTED = "Desconocida"
 
-    # Reutilizar los metadatos ya verificados por el Dashboard para evitar otro reg load + DISM /Get-CurrentEdition
     $dashMeta = if ($null -ne $Script:AIODashboardCache -and $null -ne $Script:AIODashboardCache.Data) {
         $Script:AIODashboardCache.Data
     } elseif (Get-Command Get-AIOCachedDashboardMetadata -ErrorAction SilentlyContinue) {
@@ -1550,43 +1533,12 @@ function Cambio-Edicion-Menu {
     }
 
     if ($CURRENT_EDITION_DETECTED -eq "Desconocida") {
-        try {
-            $dismEdition = dism /Image:$Script:MOUNT_DIR /Get-CurrentEdition /English 2>$null
-            $currentEditionLine = $dismEdition | Select-String -Pattern "(Current Edition|Edici.n actual)\s*:"
-            if ($currentEditionLine) { $CURRENT_EDITION_DETECTED = ($currentEditionLine.Line -split ':', 2)[1].Trim() }
-        } catch { Write-Warning (Get-AIOString 'edition.current_err') }
+        $detectedFromDism = Get-AIOCurrentEditionFromMount
+        if ($detectedFromDism) { $CURRENT_EDITION_DETECTED = $detectedFromDism }
+        else { Write-Warning (Get-AIOString 'edition.current_err') }
     }
 
-    # Traducir nombre de la edición actual usando el catálogo
-    $DISPLAY_EDITION = $CURRENT_EDITION_DETECTED
-    if ($CURRENT_EDITION_DETECTED -ne "Desconocida") {
-        $DISPLAY_EDITION = Get-FriendlyEditionName $CURRENT_EDITION_DETECTED
-    }
-
-    Clear-Host
-    Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host (Get-AIOString 'edition.menu_title') -ForegroundColor Cyan
-    Write-Host "=======================================================" -ForegroundColor Cyan
-    Write-Host (Get-AIOString 'edition.lbl_image' $Script:MOUNT_DIR) -ForegroundColor Gray
-    Write-Host (Get-AIOString 'edition.lbl_os' $WIN_VERSION_FRIENDLY) -ForegroundColor Gray
-    Write-Host (Get-AIOString 'edition.lbl_edition' $DISPLAY_EDITION) -ForegroundColor Gray
-    Write-Host ""
-    Write-Host (Get-AIOString 'edition.targets_hdr') -ForegroundColor Yellow
-    Write-Host ""
-
-    $targetEditions = @()
-    try {
-        $dismTargets = dism /Image:$Script:MOUNT_DIR /Get-TargetEditions /English 2>$null
-        $dismTargets | Select-String "Target Edition :" | ForEach-Object {
-            $line = ($_.Line -split ':', 2)[1].Trim()
-            if ($line) { $targetEditions += $line }
-        }
-    } catch { 
-        Write-Host ""
-        Write-Warning (Get-AIOString 'edition.targets_err')
-    }
-
-    # Validacion: Si es null o tiene 0 elementos
+    $targetEditions = Get-AIOTargetEditionsFromMount
     if ($null -eq $targetEditions -or $targetEditions.Count -eq 0) {
         Write-Host ""
         Write-Warning (Get-AIOString 'edition.no_targets')
@@ -1598,34 +1550,7 @@ function Cambio-Edicion-Menu {
         return
     }
 
-    $editionItems = @()
-    foreach ($editionRaw in $targetEditions) {
-        $editionName = Get-FriendlyEditionName $editionRaw
-        $editionItems += @{
-            Value = $editionRaw
-            Label = $editionName
-            Color = 'White'
-        }
-    }
-
-    $selectedEdition = [string](Show-AIOConsoleMenu -Items $editionItems -AllowBack -BackValue 'V' -Columns 2)
-    if ([string]::IsNullOrWhiteSpace($selectedEdition) -or $selectedEdition -eq 'V') { return }
-
-    Write-Host (Get-AIOString 'edition.changing_to' $DISPLAY_EDITION $selectedEdition) -ForegroundColor Yellow
-    Write-Host (Get-AIOString 'edition.wait_minutes') -ForegroundColor Gray
-    Write-Log -LogLevel ACTION -Message "CAMBIO_EDICION: Cambiando edicion de '$DISPLAY_EDITION' a '$selectedEdition'."
-
-    dism /Image:$Script:MOUNT_DIR /Set-Edition:$selectedEdition
-    if ($LASTEXITCODE -in @(0, 3010)) {
-        if (-not [string]::Equals([string]$selectedEdition, [string]$CURRENT_EDITION_DETECTED, [StringComparison]::OrdinalIgnoreCase)) {
-            $Script:ForceMenuRefresh = $true
-        }
-        Write-Host (Get-AIOString 'edition.done_ok') -ForegroundColor Green
-    } else {
-        Write-Host (Get-AIOString 'edition.failed' $LASTEXITCODE)
-        Write-Log -LogLevel ERROR -Message "Fallo cambio edicion. Codigo: $LASTEXITCODE"
-    }
-    Pause
+    Show-CambioEdicion-GUI -CurrentEdition $CURRENT_EDITION_DETECTED -OsVersionFriendly $WIN_VERSION_FRIENDLY -InitialTargets $targetEditions
 }
 
 function Drivers-Menu {
