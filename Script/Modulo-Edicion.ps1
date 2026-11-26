@@ -1283,6 +1283,8 @@ function Show-CambioEdicion-GUI {
         [void]$visited.Add($startEdition)
 
         $hadFatalError = $false
+        $fatalErrorMessage = $null
+        $publishedSummaryLine = $null
         $stepNum = 0
         $maxSteps = 25
         $pendingWim = if ($saveMode -eq 'NewWim') { Join-Path $destParent ('.escalado-' + [Guid]::NewGuid().ToString('N') + '.wim') } else { $null }
@@ -1488,7 +1490,6 @@ function Show-CambioEdicion-GUI {
                 }
             }
 
-            $publishedSummaryLine = $null
             if ($saveMode -eq 'NewWim' -and $savedEditions.Count -gt 0 -and (Test-Path -LiteralPath $pendingWim -PathType Leaf)) {
                 $state.ProgressBusy = $false
                 $state.ProgressValue = 92
@@ -1511,9 +1512,11 @@ function Show-CambioEdicion-GUI {
             $state.ProgressBusy = $false
             $state.ProgressValue = if ($hadFatalError) { $state.ProgressValue } else { 100 }
         } catch {
+            $hadFatalError = $true
+            $fatalErrorMessage = $_.Exception.Message
             $state.ProgressBusy = $false
-            & $setStatus $_.Exception.Message ([System.Drawing.Color]::Salmon)
-            Write-Log -LogLevel ERROR -Message "CAMBIO_EDICION (GUI): $($_.Exception.Message)"
+            & $setStatus $fatalErrorMessage ([System.Drawing.Color]::Salmon)
+            Write-Log -LogLevel ERROR -Message "CAMBIO_EDICION (GUI): $fatalErrorMessage"
         } finally {
             if ($pendingWim -and [IO.File]::Exists($pendingWim)) {
                 Remove-Item -LiteralPath $pendingWim -Force -ErrorAction Continue
@@ -1536,6 +1539,7 @@ function Show-CambioEdicion-GUI {
                 if ($uRes.ExitCode -eq 0) {
                     $Script:IMAGE_MOUNTED = 0
                     $Script:MOUNTED_INDEX = $null
+                    $Script:AIODashboardCache = $null
                     $Script:ForceMenuRefresh = $true
                     $patchedOk = 0
                     foreach ($am in $appendedMetaList) {
@@ -1579,6 +1583,10 @@ function Show-CambioEdicion-GUI {
         if ($publishedSummaryLine) {
             $summaryLines += ''
             $summaryLines += $publishedSummaryLine
+        }
+        if ($fatalErrorMessage) {
+            $summaryLines += ''
+            $summaryLines += $fatalErrorMessage
         }
         if ($Script:IMAGE_MOUNTED -eq 1 -and (-not [string]::Equals($activeEdition, $startEdition, [StringComparison]::OrdinalIgnoreCase))) {
             $hint = if ($saveMode -eq 'NewWim') {

@@ -152,15 +152,6 @@ function Show-AIOConsoleMenu {
         [int]$Columns = 1
     )
 
-    $getStr = {
-        param([string]$Key, [string]$Fallback)
-        if (Get-Command -Name Get-AIOString -ErrorAction SilentlyContinue) {
-            $val = Get-AIOString $Key
-            if (-not [string]::IsNullOrWhiteSpace($val) -and $val -ne $Key) { return $val }
-        }
-        return $Fallback
-    }
-
     $winWidth = 80
     try {
         $w = [Console]::WindowWidth
@@ -261,15 +252,15 @@ function Show-AIOConsoleMenu {
     if ([string]::IsNullOrWhiteSpace($FooterText)) {
         if ($useGrid) {
             if ($AllowBack) {
-                $FooterText = & $getStr 'common.nav_hint_grid_back' '   [Flechas] Navegar  |  [Enter] Seleccionar  |  [Retroceso] Volver'
+                $FooterText = Get-AIOString 'common.nav_hint_grid_back'
             } else {
-                $FooterText = & $getStr 'common.nav_hint_grid_noback' '   [Flechas] Navegar  |  [Enter] Seleccionar'
+                $FooterText = Get-AIOString 'common.nav_hint_grid_noback'
             }
         } else {
             if ($AllowBack) {
-                $FooterText = & $getStr 'common.nav_hint_back' '   [Arriba/Abajo] Navegar  |  [Enter] Seleccionar  |  [Retroceso] Volver'
+                $FooterText = Get-AIOString 'common.nav_hint_back'
             } else {
-                $FooterText = & $getStr 'common.nav_hint_noback' '   [Arriba/Abajo] Navegar  |  [Enter] Seleccionar'
+                $FooterText = Get-AIOString 'common.nav_hint_noback'
             }
         }
     }
